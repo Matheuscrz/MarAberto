@@ -1,0 +1,33 @@
+name: "Tarefa / Implementação Técnica"
+description: "Planejamento e especificação de tarefas de arquitetura, backend, frontend ou infraestrutura."
+title: "[Tipo]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Utilize este formulário para estruturar tarefas de implementação técnica do MarAberto.
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto e Motivação
+      description: Resumo breve do objetivo desta issue e referências (ADRs, requisitos).
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Critérios de Aceite
+      description: Lista em Markdown (- [ ]) com os requisitos para conclusão.
+      placeholder: |
+        - [ ] Configuração X implementada
+        - [ ] Testes unitários cobrindo o fluxo Y
+    validations:
+      required: true
+  - type: textarea
+    id: technical-notes
+    attributes:
+      label: Notas Técnicas e Dependências (Opcional)
+      description: Pacotes, tabelas afetadas ou decisões específicas de arquitetura.
+    validations:
+      required: false
