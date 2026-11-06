@@ -18,7 +18,7 @@
 O **MarAberto** é uma iniciativa *open source* desenvolvida para aproximar a população dos serviços de salvamento aquático (Corpo de Bombeiros e guarda-vidas). Diferente de plataformas informativas estáticas, o MarAberto atua em três frentes complementares:
 
 1. **Prevenção Ativa & Conscientização:** Mapeamento visual de zonas de risco permanente (ex.: desembocaduras perigosas de rios, fossas submarinas e rebojos como na Praia dos Artistas), sincronização automática da tábua de marés oficial e vídeos educativos curados (YouTube) sobre como escapar de correntes de retorno (*rip currents*).
-2. **Colaboração Cidadã Confiável:** Estimativa passiva e anônima de ocupação da praia (estilo Waze), envio de reportes comunitários de perigo com validação por quórum geográfico e canal de **SOS Cidadão** para socorro rápido com autenticação via CPF.
+2. **Colaboração Cidadã Confiável:** Estimativa passiva e anônima de ocupação da praia (estilo Waze), envio de reportes comunitários de perigo com validação por quórum geográfico e canal de **SOS Cidadão** para socorro rápido, sem exigir cadastro ou conta prévia do banhista.
 3. **Console Tático Operacional:** Aplicação de campo para guarda-vidas atualizarem bandeiramento em tempo real, registrarem postos móveis com fotos, receberem despachos de emergência por proximidade e monitorarem a cobertura da orla.
 
 ---
@@ -49,7 +49,7 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 |  - Estimativa Lotação     - Upload Fotos (Presigned)  - Quórum Comunitário    - Marés de Sizígia|
 |                                                                                                 |
 |  [ education ]            [ shared / kernel ]                                                   |
-|  - Vídeos YouTube         - Auth JWT, Validador CPF, Operações Geoespaciais                     |
+|  - Vídeos YouTube         - Auth JWT, CPF operacional, Operações Geoespaciais                  |
 +------------------------------------------------+------------------------------------------------+
                                                  |
          +---------------------------------------+---------------------------------------+
@@ -82,7 +82,7 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 | **Banhista** | Zonas Críticas Permanentes | Demarcação explícita de áreas de alto perigo estático (ex.: desembocadura do rio com o mar, pedrais submersos, rebojos profundos). |
 | **Banhista** | Tábua de Marés em Tempo Real | Indicador visual de preamar/baixa-mar, coeficientes de maré, horários de pico e avisos de maré de sizígia (maré viva). |
 | **Banhista** | Hub Educativo (YouTube) | Vídeos informativos embutidos (*lazy-loaded*) com instruções de auto-resgate, fuga de correntes de retorno e primeiros socorros. |
-| **Banhista** | SOS Cidadão (Botão de Pânico) | Disparo georreferenciado de socorro imediato para guarda-vidas da circunscrição, com validação de CPF. |
+| **Banhista** | SOS Cidadão (Botão de Pânico) | Disparo georreferenciado de socorro imediato para guarda-vidas da circunscrição, sem cadastro ou CPF prévio. |
 | **Banhista** | Nível de Lotação "Waze" | Estimativa anônima de ocupação da praia através de geocheck no dispositivo sem persistência de rastro do usuário. |
 | **Guarda-Vidas**| Gestão de Postos e Bases Móveis | Abertura de ponto de atendimento em campo com foto da viatura/posto e coordenadas em tempo real. |
 | **Guarda-Vidas**| Bandeiramento & Correntes | Atualização da sinalização diária (verde, amarela, vermelha) com fotos comprobatórias das bandeiras fincadas. |
