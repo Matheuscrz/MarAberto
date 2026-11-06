@@ -90,7 +90,7 @@ docker compose up -d
 
 # 2) Backend
 cd backend
-./mvnw spring-boot:run
+./gradlew bootRun
 
 # 3) Frontend
 cd frontend
@@ -101,7 +101,7 @@ npm run dev
 Rodar os testes e as verificações:
 
 ```bash
-cd backend && ./mvnw clean verify   # build + testes
+cd backend && ./gradlew clean check   # build + testes
 ```
 
 > As credenciais do `docker-compose` são **apenas para desenvolvimento local**.
@@ -127,7 +127,7 @@ cd backend && ./mvnw clean verify   # build + testes
    ```
 
 4. Mantenha sua branch atualizada com a `main` (`rebase` ou `merge`, o que preferir).
-5. Rode `./mvnw clean verify` (e o lint do frontend) antes de enviar.
+5. Rode `./gradlew clean check` (e o lint do frontend) antes de enviar.
 6. Abra um **Pull Request** explicando **o que** mudou e **por quê**, vinculando a issue (`Closes #123`).
 
 Prefira PRs pequenos. Um PR que faz uma coisa bem feita é revisado mais rápido do que um PR gigante.
@@ -201,7 +201,7 @@ Antes de pedir revisão, confirme:
 
 - [ ] O PR faz **uma coisa** e a descrição explica o **porquê**.
 - [ ] Há issue vinculada (ou justificativa para não haver).
-- [ ] Testes novos ou atualizados; `./mvnw clean verify` passa.
+- [ ] Testes novos ou atualizados; `./gradlew clean check` passa.
 - [ ] Nenhum segredo, credencial real ou dado pessoal no código, nos testes ou nos logs.
 - [ ] Migrações de banco novas (não alterei migrações antigas).
 - [ ] Documentação atualizada (README, `docs/`) quando o comportamento mudou.

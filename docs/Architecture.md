@@ -857,7 +857,7 @@ Pipeline (GitHub Actions ou Jenkins): build → testes unitários → testes de 
 
 ```
 MarAberto/
-├── backend/                 # Maven, Spring Boot, Spring Modulith
+├── backend/                 # Gradle, Spring Boot, Spring Modulith
 ├── frontend/                # pnpm workspace
 │   ├── apps/public/         # PWA do banhista (bundle leve)
 │   ├── apps/ops/            # PWA operacional
