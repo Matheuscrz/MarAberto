@@ -10,33 +10,34 @@ mapa de zonas de risco, bandeiramento em tempo real, tábua de marés, reportes 
 com quórum, estimativa anônima de ocupação e **SOS cidadão** para guarda-vidas.
 Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 
+## Panorama geral (2026-11-06)
+
+- **Semana de início do projeto; 2 issues conclusiondas** (esqueleto do backend, ambiente local)
+- **Backend esqueleto funcional:** Spring Boot 3.3.4 (docs visam Boot 4.1.x — atualizar em issue futura), Java 21, Gradle 9.8.2, Virtual Threads, H2 em dev, Swagger, `/actuator/health` UP
+- **Domínios em `com.maraberto`** (padrão `api/ application/ domain/ infra/` por módulo): `beaches`, `safety`, `emergency`, `oceanography`, `education`, `shared` — ainda vazios (só `package-info.java`); lógica de negócio zero até agora
+- **Módulos potenciais do Architecture.md ainda não criados:** `identity`, `region`, `operations`, `tides` (≈ `oceanography`), `content` (≈ `education`), `occupancy`, `media`, `realtime`, `audit`, `analytics`
+- **Stack de infra local (docker compose) validada:** Postgres 16 + PostGIS, Redis 7, RabbitMQ 3, Garage S3 (bucket `media-public`) — aplicação ainda não conecta a nenhum deles
+- **Sem frontend, sem CI, sem CI na pasta `.github/` (só templates); sem Flyway, sem Spring Modulith, sem Spring Security**
+
 ## Documentação principal (ler antes de trabalhar)
 
 - `docs/Architecture.md` — arquitetura (monólito modular, DDD, Spring Modulith, Postgres+PostGIS, Redis, S3-compatível)
 - `docs/Requirements.md` — requisitos funcionais e não funcionais (SOS: p95 < 3 s)
 - `docs/Implementation.md` — stack e etapas de implementação
-- `docs/adr/` — decisões arquiteturais (ADRs 001–009)
+- `docs/adr/` — decisões arquiteturais (ADRs 001–009). ADRs mais relevantes: 001 (monólito), 003 (sem broker obrigatório), 006 (Garage, não MinIO)
 
-## Estado atual (2026-11-06 — Issue: esqueleto do monólito)
+## Estado do backend
 
-- Backend em `backend/` — Gradle 9.8.2, Java 21, Spring Boot 3.3.4
-- Virtual Threads ativadas: `spring.threads.virtual.enabled=true`
-- Configuração em `backend/src/main/resources/application.yml` (properties removido)
-- Dependências: Spring Web, Data JPA, Bean Validation, Actuator, Lombok, springdoc-openapi (Swagger em `/swagger-ui/index.html`)
-- H2 em memória para desenvolvimento; PostgreSQL/PostGIS em produção
-- Estrutura DDD por domínio em `com.maraberto` (classe raiz `MarAbertoApplication`):
-  - `beaches`, `safety`, `emergency`, `oceanography`, `education`, `shared`
-  - Cada módulo segue o padrão: `api/`, `application/`, `domain/`, `infra/`
-- `/actuator/health` respondendo UP
+- `backend/src/main/java/com/maraberto/MarAbertoApplication.java` — classe raiz (component scan cobre todos os módulos)
+- `application.yml` único em `backend/src/main/resources` (properties removido); datasource H2 jdbc:h2:mem:maraberto
+- Teste de contexto: `MarAbertoApplicationTests.contextLoads`
 
-## Ambiente local (2026-11-06 — Issue: docker compose)
+## Ambiente local (docker compose)
 
-- `docker-compose.yml` na raiz com: PostgreSQL 16 + PostGIS (`postgis/postgis:16-3.4`), Redis 7, RabbitMQ 3 (portal de gestão em `15672`) e Garage S3-compatível
-- **Garage no lugar de MinIO** (ADR-006): a imagem `minio/minio` não é mais pública no Docker Hub; S3 do Garage fica em `localhost:9000` (container 3900), admin em `localhost:9001` (container 3903)
-- Credenciais/ports padrão documentados em `.env.example` (copiar para `.env`); usuários/senhas padrão = `maraberto` (Garage: senha `maraberto-secret-key`)
-- Config do Garage em `deploy/garage/garage.toml` (nó único, bucket `media-public` criado automaticamente via `--default-bucket`)
+- `docker-compose.yml` na raiz; `cp .env.example .env` para credenciais (padrão de usuários/senhas: `maraberto`)
+- **Garage no lugar de MinIO** (ADR-006): imagem MinIO não é mais pública; S3 em `localhost:9000`, admin em `localhost:9001`; config em `deploy/garage/garage.toml`
 - Volumes nomeados: `maraberto_postgres_data`, `maraberto_redis_data`, `maraberto_garage_data`, `maraberto_rabbitmq_data`
-- Backend ainda roda com H2; trocar datasource para o Postgres do Compose virá junto do Flyway
+- Swagger: `backend` em `/swagger-ui/index.html` (com a app rodando)
 
 ## Convenções
 
@@ -44,9 +45,14 @@ Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 - Não comentar código desnecessariamente; seguir estilo do código existente.
 - Idioma do código/commits: pt-BR quando for texto exibido ao usuário; nomes de classes em inglês.
 
-## Próximos passos conhecidos
+## Roadmap conhecido (próximas entregas plausíveis)
 
-- Spring Modulith + verificação `ApplicationModules.verify()`
-- Migrações com Flyway (trocar H2 por PostgreSQL/PostGIS)
-- Docker Compose (Nginx, Postgres/PostGIS, Redis, Garage)
-- Pipeline CI (build, testes, Testcontainers, SAST/SCA)
+- Spring Modulith + teste `ApplicationModules.verify()`
+- Flyway + conectar backend ao Postgres do Compose (matar H2)
+- `identity`: autenticação Jwt + refresh rotation + TOTP (seção 13.1 do Architecture.md)
+- `emergency` (SOS): Outbox, ack com compare-and-set, escalonamento
+- Frontends: PWA banhista + console operacional (pnpm workspace em `frontend/`)
+- Pipeline CI: build, testes, Testcontainers (PostGIS/Redis/Garage), SAST/SCA
+
+---
+Última atualização: 2026-11-06, após execução das 2 primeiras issues.
