@@ -1,0 +1,81 @@
+# Stack local de desenvolvimento do MarAberto (perfil de desenvolvimento).
+# CR11: use `cp .env.example .env` para ajustar credenciais sem versionar segredos.
+name: maraberto
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: maraberto-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-maraberto}
+      POSTGRES_USER: ${POSTGRES_USER:-maraberto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-maraberto}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - maraberto_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-maraberto} -d ${POSTGRES_DB:-maraberto}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    container_name: maraberto-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - maraberto_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Armazenamento de objetos S3-compatível (ADR-006: Garage, pois o MinIO CE foi
+  # arquivado em 04/2026 e sua imagem não é mais pública no Docker Hub).
+  # S3 em localhost:9000 (mapeado da 3900) e admin em localhost:9001 (mapeado da 3903).
+  # Sem healthcheck: a imagem é FROM scratch (sem shell/curl); valide com
+  # `docker exec maraberto-garage /garage status`.
+  garage:
+    image: dxflrs/garage:v2.4.1
+    container_name: maraberto-garage
+    command: /garage server --single-node --default-bucket
+    environment:
+      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_ACCESS_KEY:-maraberto-access-key}
+      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_SECRET_KEY:-maraberto-secret-key}
+      GARAGE_DEFAULT_BUCKET: ${GARAGE_BUCKET:-media-public}
+    ports:
+      - "${GARAGE_S3_PORT:-9000}:3900"
+      - "${GARAGE_ADMIN_PORT:-9001}:3903"
+    volumes:
+      - ./deploy/garage/garage.toml:/etc/garage.toml:ro
+      - maraberto_garage_data:/var/lib/garage
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: maraberto-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-maraberto}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-maraberto}
+    ports:
+      - "${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - maraberto_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  maraberto_postgres_data:
+  maraberto_redis_data:
+  maraberto_garage_data:
+  maraberto_rabbitmq_data:

@@ -29,6 +29,15 @@ Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
   - Cada módulo segue o padrão: `api/`, `application/`, `domain/`, `infra/`
 - `/actuator/health` respondendo UP
 
+## Ambiente local (2026-11-06 — Issue: docker compose)
+
+- `docker-compose.yml` na raiz com: PostgreSQL 16 + PostGIS (`postgis/postgis:16-3.4`), Redis 7, RabbitMQ 3 (portal de gestão em `15672`) e Garage S3-compatível
+- **Garage no lugar de MinIO** (ADR-006): a imagem `minio/minio` não é mais pública no Docker Hub; S3 do Garage fica em `localhost:9000` (container 3900), admin em `localhost:9001` (container 3903)
+- Credenciais/ports padrão documentados em `.env.example` (copiar para `.env`); usuários/senhas padrão = `maraberto` (Garage: senha `maraberto-secret-key`)
+- Config do Garage em `deploy/garage/garage.toml` (nó único, bucket `media-public` criado automaticamente via `--default-bucket`)
+- Volumes nomeados: `maraberto_postgres_data`, `maraberto_redis_data`, `maraberto_garage_data`, `maraberto_rabbitmq_data`
+- Backend ainda roda com H2; trocar datasource para o Postgres do Compose virá junto do Flyway
+
 ## Convenções
 
 - Commits em português (pt-BR) com Conventional Commits (`feat:`, `chore:`, `fix:`, `docs:`).
