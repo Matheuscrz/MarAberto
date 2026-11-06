@@ -1,0 +1,25 @@
+# Personal planning notes
+docs/Implementation.md
+docs/implementation.md
+
+# Local development
+.env
+.env.*
+!.env.example
+*.local
+
+# IDE and OS files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+.DS_Store
+
+# Build artifacts
+target/
+node_modules/
+dist/
+build/
+coverage/
+
