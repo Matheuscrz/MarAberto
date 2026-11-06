@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: maraberto-backend
+
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    url: jdbc:h2:mem:maraberto;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
