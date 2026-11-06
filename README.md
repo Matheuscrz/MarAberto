@@ -133,7 +133,7 @@ docker compose up -d
 
 ```bash
 cd backend
-./mvnw spring-boot:run
+./gradlew bootRun
 ```
 
 * API REST disponível em: `http://localhost:8080/api/v1`
@@ -153,7 +153,7 @@ npm run dev
 
 ```bash
 cd backend
-./mvnw clean verify
+./gradlew clean check
 ```
 
 ---
@@ -165,7 +165,7 @@ O projeto é aberto a toda a comunidade técnica, membros de corporações de bo
 1. Faça um **Fork** do repositório.
 2. Crie uma branch para sua funcionalidade (`git checkout -b feature/sua-feature`).
 3. Adicione testes de unidade e integração para novos fluxos de domínio.
-4. Garanta que o linter e o build passem sem avisos (`./mvnw clean verify`).
+4. Garanta que o linter e o build passem sem avisos (`./gradlew clean check`).
 5. Abra um **Pull Request** detalhando as alterações e motivações técnicas.
 
 Ao participar, você concorda em seguir o [Código de Conduta](CODE_OF_CONDUCT.md).
