@@ -1,0 +1,25 @@
+name: Melhoria ou funcionalidade
+description: Propor uma mudança que resolva um problema real.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema
+      description: Quem enfrenta o problema e por que ele é importante?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposta
+      description: Como você sugere resolver o problema?
+    validations:
+      required: true
+  - type: input
+    id: requirement
+    attributes:
+      label: Requisito relacionado
+      description: Se aplicável, informe o ID em docs/Requirements.md.
