@@ -27,8 +27,11 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
-    // Banco em memória para desenvolvimento (PostgreSQL/PostGIS em produção)
-    runtimeOnly 'com.h2database:h2'
+    // Geoespacial (PostGIS) e migrações de esquema
+    implementation 'org.hibernate.orm:hibernate-spatial'
+    implementation 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+    runtimeOnly 'org.postgresql:postgresql'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok'
@@ -45,6 +48,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation platform('org.testcontainers:testcontainers-bom:2.0.5')
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
 
     testImplementation 'org.apache.commons:commons-compress:1.26.1'
     testImplementation 'org.apache.commons:commons-lang3:3.14.0'

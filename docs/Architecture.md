@@ -460,6 +460,24 @@ ORDER BY distance_m
 LIMIT 3;
 ```
 
+### 7.6 Otimização de consultas, cache e idempotência (usar quando justificado)
+
+- **Views** para projeções de leitura recorrentes (ex.: praia + zona crítica + posto), evitando repetir joins complexos na aplicação. Views comuns não materializam dados e não resolvem consultas caras.
+- **Views materializadas** para agregações/relatórios caros e snapshots (ex.: ocupação por grade, resumos para o GeoJSON). Criar **índice único** para permitir `REFRESH MATERIALIZED VIEW CONCURRENTLY`; definir a estratégia de atualização (evento ou job) e aceitar a defasagem. **Não** usar para dados que exigem frescor forte, como SOS, bandeira vigente ou disponibilidade de postos.
+- **`SELECT ... FOR UPDATE SKIP LOCKED`** para consumo concorrente de filas no banco (Outbox, escalonamento de SOS, notificações), com transações curtas e índice parcial no status. Não usar em leituras de usuário nem quando a ordenação/justiça da fila for crítica sem critério explícito.
+- **Cache com Redis** para leituras quentes (GeoJSON, contexto da praia, bandeira vigente), em *cache-aside* com chaves versionadas (`geo:beaches:v{n}`), TTL e invalidação por eventos (`BeachChanged`, `RiskZoneChanged`, `FlagChanged`). Proteger contra *stampede* (single-flight/lock curto) e prever *fallback* local se o Redis cair. **Nunca** tornar o cache fonte da verdade para SOS, ack ou escrita; o banco decide.
+- **Idempotência** em toda escrita sujeita a retry/duplo toque: `client_request_id` único no SOS, `Idempotency-Key` nos endpoints de escrita, constraints únicas + `INSERT ... ON CONFLICT`, consumidores de evento idempotentes e deduplicação no Outbox. A operação repetida deve devolver o mesmo resultado, não duplicar efeitos.
+- Medir antes e depois com `EXPLAIN (ANALYZE, BUFFERS)`; índices GiST/B-tree, views, cache e materializações só entram com consulta real e ganho que justifique.
+
+### 7.7 Ingestão de delimitações de praias (QGIS, KML e GeoJSON)
+
+- **Fonte operacional:** QGIS em EPSG:4326, com a geometria validada antes de exportar. KML/KMZ serve para interoperabilidade; **GeoJSON (RFC 7946)** é o formato preferido do Region Pack e do importador.
+- **KML não precisa ser lido pelo backend em produção.** Converter KML/KMZ para GeoJSON com `ogr2ogr` (GDAL) ou exportar direto do QGIS no pipeline de importação; evita acoplar o runtime a GeoTools/parsers XML pesados.
+- **Pipeline:** QGIS → KML/GeoJSON → validação → importador → PostGIS. Reprojetar para 4326, forçar 2D, garantir `Polygon`/`MultiPolygon`, aplicar `ST_IsValid`/`ST_MakeValid`, rejeitar geometria vazia ou auto-intersectada e conferir sobreposição entre praias.
+- **Precisão:** guardar a geometria completa no banco; simplificar apenas a cópia enviada ao cliente (`ST_SimplifyPreserveTopology`) e nunca alterar o dado de origem por causa do payload.
+- **Importação idempotente** por `external_id`/slug (upsert), versionada e auditada, com dados em `region-packs/<uf>/`. Não usar SQL manual em produção.
+- **Proveniência:** registrar fonte, versão/data e responsável; validar contra a delimitação oficial (Marinha/DHN ou município). Quando o importador for implementado, avaliar colunas `external_id` e `source` em `beaches`.
+
 ---
 
 ## 8. Fluxos críticos
