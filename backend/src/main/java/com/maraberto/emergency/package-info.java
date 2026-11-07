@@ -5,4 +5,5 @@
  * <p>Eventos publicados: {@code EmergencyCallCreated}, {@code …Acknowledged},
  * {@code …Escalated}, {@code …Resolved}.
  */
+@org.springframework.modulith.ApplicationModule(displayName = "Emergency")
 package com.maraberto.emergency;

@@ -12,20 +12,20 @@ Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 
 ## Panorama geral (2026-11-07)
 
-- **Semana de início do projeto; 4 issues concluídas** (esqueleto do backend, ambiente local, CI, modelagem espacial)
-- **Backend esqueleto funcional:** Spring Boot 3.3.4 (docs visam Boot 4.1.x — atualizar em issue futura), Java 21, Gradle 9.8.2, Virtual Threads, Swagger, `/actuator/health` UP
+- **Semana de início do projeto; 5 issues concluídas** (esqueleto do backend, ambiente local, CI, modelagem espacial, Etapa 1 arquitetural)
+- **Backend esqueleto funcional:** Spring Boot 3.3.4 + Spring Modulith 1.2.13 (ADR-011; docs visam Boot 4.1.x — migrar em issue futura), Java 21, Gradle 9.8.2, Virtual Threads, Swagger, `/actuator/health` UP
 - **Persistência:** PostgreSQL 16 + PostGIS (H2 removido), Flyway com `V1__init_postgis.sql` + `V2__risk_zone_persistence.sql`, Hibernate Spatial 6.5.3 e `ddl-auto: validate`
-- **Domínios em `com.maraberto`** (padrão `api/ application/ domain/ infra/` por módulo): `beaches` (entidades `Beach`, `LifeguardPost`, `MobileBase`, `CriticalZone`), `safety`, `emergency`, `oceanography`, `education`, `shared` — os demais ainda só têm `package-info.java`; sem lógica de negócio/CRUD até agora
-- **Módulos potenciais do Architecture.md ainda não criados:** `identity`, `region`, `operations`, `tides` (≈ `oceanography`), `content` (≈ `education`), `occupancy`, `media`, `realtime`, `audit`, `analytics`
-- **Stack de infra local (docker compose) validada:** Postgres 16 + PostGIS, Redis 7, RabbitMQ 3, Garage S3 (bucket `media-public`) — a aplicação já conecta ao Postgres; Redis/Garage/RabbitMQ ainda não são usados
-- **CI no GitHub Actions** (`.github/workflows/ci.yml`: JDK 21 Temurin + cache Gradle, compilação e testes com Testcontainers PostGIS); **sem frontend**; sem Spring Modulith, sem Spring Security
+- **Domínios em `com.maraberto`** (padrão `api/ application/ domain/ infra/` por módulo): todos os módulos da Architecture.md §6 existem como pacote — `identity`, `region`, `beaches`, `operations`, `emergency`, `safety`, `tides`, `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`. `oceanography` foi renomeado para `tides` e `education` para `content`. Só `beaches` tem entidades de domínio; os demais ainda são `package-info.java` (exceto `media` e `realtime`)
+- **Etapa 1 concluída:** `ApplicationModules.verify()` protege as fronteiras; `media.api.ObjectStoragePort` + `StubObjectStorage`; `realtime.WebSocketConfig` (STOMP em `/ws`); Redis integrado via Spring Data Redis e testado com Testcontainers
+- **Stack de infra local (docker compose) validada:** Postgres 16 + PostGIS, Redis 7, RabbitMQ 3, Garage S3 (bucket `media-public`) — a aplicação conecta ao Postgres; Redis é usado no teste de integração; Garage/RabbitMQ ainda não são usados pela aplicação
+- **CI no GitHub Actions** (`.github/workflows/ci.yml`: JDK 21 Temurin + cache Gradle, `./gradlew clean check` com Testcontainers PostGIS + Redis); **sem frontend**; sem Spring Security
 
 ## Documentação principal (ler antes de trabalhar)
 
 - `docs/Architecture.md` — arquitetura (monólito modular, DDD, Spring Modulith, Postgres+PostGIS, Redis, S3-compatível)
 - `docs/Requirements.md` — requisitos funcionais e não funcionais (SOS: p95 < 3 s)
 - `docs/Implementation.md` — stack e etapas de implementação
-- `docs/adr/` — decisões arquiteturais (ADRs 001–010; mais relevantes: 001 — SOS sem conta, 003 — uma instalação por estado/órgão, 006 — licença MIT, 009 — autenticação embutida, 010 — persistência temporal das zonas de risco)
+- `docs/adr/` — decisões arquiteturais (ADRs 001–011; mais relevantes: 001 — SOS sem conta, 003 — uma instalação por estado/órgão, 006 — licença MIT, 009 — autenticação embutida, 010 — persistência temporal das zonas de risco, 011 — Modulith 1.2.x com Boot 3.3.x)
 
 ## Estado do backend
 
@@ -34,14 +34,17 @@ Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 - Migrações `backend/src/main/resources/db/migration/`: `V1__init_postgis.sql` (PostGIS, `beaches`, `lifeguard_posts`, `mobile_bases`, `critical_zones` e índices GiST) e `V2__risk_zone_persistence.sql` (persistência temporal das zonas)
 - `critical_zones` tem persistência temporal: `PERMANENT` (estrutural, sem validade) e `SEMI_PERMANENT` (topográfica, com `valid_from`/`valid_until`/`last_confirmed_at`); `EPHEMERAL` fica em `rip_current_markings` (`operations`). Ver ADR-010 e `docs/Architecture.md` §7.8
 - Entidades em `com.maraberto.beaches.domain` (JTS `Polygon` para `geometry(Polygon,4326)` e `Point` para `geography(Point,4326)`); `RiskType` cobre todos os riscos, `RiskPersistence` classifica a duração da zona e `FlagColor` fixa as cores de bandeira (tabela de bandeiramento virá na issue de operações)
-- Testes: `MarAbertoApplicationTests.contextLoads` e `BeachesSpatialMappingTests` (ambos sobem PostGIS via Testcontainers; base em `com.maraberto.support.PostgisIntegrationTest`)
+- `media.api.ObjectStoragePort` (`presignPut`, `presignGet`, `delete`, `head`) com `media.infra.StubObjectStorage` como bean padrão (`maraberto.storage.provider=stub`); implementação S3 real fica para a Etapa 11
+- `realtime.WebSocketConfig` habilita STOMP/WebSocket em `/ws` (broker simples `/topic` e `/queue`, prefixo `/app`); fan-out entre instâncias via Redis e Web Push virão na etapa de tempo real
+- `application.yml` configura `spring.data.redis.*` (`REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`, timeouts curtos) e `maraberto.realtime.allowed-origins`; Redis é opcional no boot e não é fonte da verdade
+- Testes: `ModularityTests` (`ApplicationModules.verify()` + módulos esperados), `MarAbertoApplicationTests` (contexto + bean do storage + broker STOMP), `BeachesSpatialMappingTests`, `RedisIntegrationTests` (Redis via Testcontainers) e `ObjectStorageStubTests`; bases em `com.maraberto.support.PostgisIntegrationTest` e `RedisIntegrationTest`
 
 ## CI (GitHub Actions)
 
-- `.github/workflows/ci.yml`, job `build` em `ubuntu-latest`: checkout, JDK 21 (Temurin), `gradle/actions/setup-gradle@v6` com `cache-provider: basic`, `./gradlew compileJava compileTestJava`, `./gradlew test` e upload dos relatórios de teste em caso de falha
+- `.github/workflows/ci.yml`, job `build` em `ubuntu-latest`: checkout, JDK 21 (Temurin), `gradle/actions/setup-gradle@v6` com `cache-provider: basic`, `./gradlew compileJava compileTestJava`, `./gradlew clean check` e upload dos relatórios de teste em caso de falha
 - Gatilhos: `pull_request` e `push` para `main`; `defaults.run.working-directory: backend`
 - Status check a exigir no ruleset de proteção da `main`: **`CI / build`**
-- Ainda não cobre: Testcontainers para Redis/Garage, SAST/SCA, cobertura, lint
+- Ainda não cobre: Testcontainers para Garage, SAST/SCA, cobertura, lint
 
 ## Ambiente local (docker compose)
 
@@ -68,16 +71,18 @@ Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 
 ## Roadmap conhecido (próximas entregas plausíveis)
 
-- Spring Modulith + teste `ApplicationModules.verify()`
+- `identity`: Spring Security, JWT + refresh rotation + TOTP (seção 13.1 do Architecture.md)
+- `emergency` (SOS): walking skeleton (Etapa 2) e depois Outbox, ack com compare-and-set, escalonamento
 - `beaches`: repositórios/CRUD, validação `ST_IsValid`, fichas e GeoJSON público
 - `beaches`: CRUD de zonas `PERMANENT`/`SEMI_PERMANENT`, revalidação de zonas vencidas e filtro temporal no GeoJSON — ver `docs/Architecture.md` §7.8
 - `operations`: `rip_current_markings` para correntes efêmeras/migratórias (RF13), com `valid_until` curto e evento `RipCurrentMarked`
 - `beaches`: importador de delimitações via QGIS/KML/GeoJSON (reprojetar para 4326, validar e fazer upsert idempotente) — ver `docs/Architecture.md` §7.7
 - `region`: `installation_settings` e Region Pack
-- `identity`: autenticação Jwt + refresh rotation + TOTP (seção 13.1 do Architecture.md)
-- `emergency` (SOS): Outbox, ack com compare-and-set, escalonamento
 - Frontends: PWA banhista + console operacional (pnpm workspace em `frontend/`)
-- Pipeline CI: base pronta (build + testes com PostGIS); evoluir com Testcontainers Redis/Garage, SAST/SCA e cobertura
+- Migração para Spring Boot 4.1.x + linha compatível do Spring Modulith (ADR-011)
+- Pipeline CI: base pronta (build + testes com PostGIS e Redis); evoluir com Testcontainers Garage, SAST/SCA e cobertura
+
+Validação local mais recente: `cd backend && ./gradlew clean check` concluído com sucesso em 2026-11-07.
 
 ---
-Última atualização: 2026-11-07, após execução das 4 primeiras issues.
+Última atualização: 2026-11-07, após execução da Etapa 1 (Spring Modulith, Redis, WebSocket e `ObjectStoragePort`).

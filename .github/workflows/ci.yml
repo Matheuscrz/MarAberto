@@ -40,8 +40,8 @@ jobs:
       - name: Compilar código de produção e de testes
         run: ./gradlew compileJava compileTestJava
 
-      - name: Executar testes unitários
-        run: ./gradlew test
+      - name: Executar testes unitários, de modularidade e de integração
+        run: ./gradlew clean check
 
       - name: Publicar relatórios de teste
         if: failure()

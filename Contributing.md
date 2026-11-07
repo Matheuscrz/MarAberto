@@ -138,7 +138,7 @@ Prefira PRs pequenos. Um PR que faz uma coisa bem feita é revisado mais rápido
 
 ### Backend (Java / Spring Boot)
 
-- Respeite as **fronteiras dos módulos/contextos** (`beaches`, `safety`, `emergency`, `oceanography`, `education`, `shared`). Um módulo não deve acessar o interior de outro; use a API pública do módulo ou eventos de domínio.
+- Respeite as **fronteiras dos módulos/contextos** (`identity`, `region`, `beaches`, `operations`, `emergency`, `safety`, `tides`, `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`). Um módulo não deve acessar o interior de outro; use a API pública do módulo ou eventos de domínio. O teste `ApplicationModules.verify()` falha o build em caso de violação.
 - Regras de negócio ficam no **domínio**, não em controllers. Controllers apenas traduzem HTTP para casos de uso.
 - **Migrações de banco** (Flyway) são imutáveis depois de integradas: para corrigir, crie uma nova migração.
 - Consultas geoespaciais: use `geography` para distâncias em metros e `geometry` para polígonos; cuide dos índices GiST e valide a geometria.

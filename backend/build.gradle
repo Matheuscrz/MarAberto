@@ -27,6 +27,15 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
+    // Arquitetura modular
+    implementation platform('org.springframework.modulith:spring-modulith-bom:1.2.13')
+    implementation 'org.springframework.modulith:spring-modulith-starter-core'
+    testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
+
+    // Cache distribuído e tempo real
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
     // Geoespacial (PostGIS) e migrações de esquema
     implementation 'org.hibernate.orm:hibernate-spatial'
     implementation 'org.flywaydb:flyway-core'

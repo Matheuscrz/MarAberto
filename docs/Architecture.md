@@ -149,6 +149,8 @@ flowchart TB
 
 Implementados com **Spring Modulith**: cada módulo é um pacote de topo; só a API pública (`api/`) é visível aos demais; as regras são verificadas por teste (`ApplicationModules.verify()`).
 
+> **Implementação atual (Etapa 1, 2026-11-07):** Spring Boot 3.3.4 + Spring Modulith 1.2.13 (ADR-011). A migração para Boot 4.1.x fica em issue própria. Os pacotes `oceanography` e `education` foram renomeados para `tides` e `content`, alinhando o código a esta tabela.
+
 | Módulo | Responsabilidade | Publica eventos | Consome |
 |--------|------------------|-----------------|---------|
 | `identity` | Cadastro, OTP, CPF (cifrado), login, tokens, MFA (TOTP), papéis, convite de operacionais. | `UserRegistered`, `OperatorInvited` | — |
@@ -922,7 +924,7 @@ MarAberto/
 | Camada | Escolha | Observação |
 |--------|---------|------------|
 | Linguagem | Java 21 (ou 25 LTS) | Virtual Threads disponíveis; escolher a LTS conforme o parque do órgão. |
-| Framework | Spring Boot **4.1.x** + Spring Modulith (linha compatível) | Verificar a matriz de compatibilidade no momento da criação; o Boot 3.5 saiu de suporte OSS em 30/06/2026. |
+| Framework | Spring Boot **4.1.x** + Spring Modulith (linha compatível) | Alvo após a migração planejada. A Etapa 1 usa Boot 3.3.4 + Modulith 1.2.13 (ADR-011); o Boot 3.5 saiu de suporte OSS em 30/06/2026. |
 | Banco | PostgreSQL 16+ com PostGIS | Flyway para migrações. |
 | Cache | Redis | Cache, rate limit, Pub/Sub, ZSET de ocupação. |
 | Objetos | S3-compatível (Garage no Compose) | Porta `ObjectStoragePort`. |
