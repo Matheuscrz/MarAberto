@@ -10,14 +10,14 @@ mapa de zonas de risco, bandeiramento em tempo real, tábua de marés, reportes 
 com quórum, estimativa anônima de ocupação e **SOS cidadão** para guarda-vidas.
 Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 
-## Panorama geral (2026-11-06)
+## Panorama geral (2026-11-07)
 
-- **Semana de início do projeto; 2 issues conclusiondas** (esqueleto do backend, ambiente local)
+- **Semana de início do projeto; 3 issues concluídas** (esqueleto do backend, ambiente local, CI)
 - **Backend esqueleto funcional:** Spring Boot 3.3.4 (docs visam Boot 4.1.x — atualizar em issue futura), Java 21, Gradle 9.8.2, Virtual Threads, H2 em dev, Swagger, `/actuator/health` UP
 - **Domínios em `com.maraberto`** (padrão `api/ application/ domain/ infra/` por módulo): `beaches`, `safety`, `emergency`, `oceanography`, `education`, `shared` — ainda vazios (só `package-info.java`); lógica de negócio zero até agora
 - **Módulos potenciais do Architecture.md ainda não criados:** `identity`, `region`, `operations`, `tides` (≈ `oceanography`), `content` (≈ `education`), `occupancy`, `media`, `realtime`, `audit`, `analytics`
 - **Stack de infra local (docker compose) validada:** Postgres 16 + PostGIS, Redis 7, RabbitMQ 3, Garage S3 (bucket `media-public`) — aplicação ainda não conecta a nenhum deles
-- **Sem frontend, sem CI, sem CI na pasta `.github/` (só templates); sem Flyway, sem Spring Modulith, sem Spring Security**
+- **CI no GitHub Actions** (`.github/workflows/ci.yml`: JDK 21 Temurin + cache Gradle, compilação e testes unitários); **sem frontend**; sem Flyway, sem Spring Modulith, sem Spring Security
 
 ## Documentação principal (ler antes de trabalhar)
 
@@ -31,6 +31,13 @@ Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 - `backend/src/main/java/com/maraberto/MarAbertoApplication.java` — classe raiz (component scan cobre todos os módulos)
 - `application.yml` único em `backend/src/main/resources` (properties removido); datasource H2 jdbc:h2:mem:maraberto
 - Teste de contexto: `MarAbertoApplicationTests.contextLoads`
+
+## CI (GitHub Actions)
+
+- `.github/workflows/ci.yml`, job `build` em `ubuntu-latest`: checkout, JDK 21 (Temurin), `gradle/actions/setup-gradle@v6` com `cache-provider: basic`, `./gradlew compileJava compileTestJava`, `./gradlew test` e upload dos relatórios de teste em caso de falha
+- Gatilhos: `pull_request` e `push` para `main`; `defaults.run.working-directory: backend`
+- Status check a exigir no ruleset de proteção da `main`: **`CI / build`**
+- Ainda não cobre: Testcontainers (PostGIS/Redis/Garage), SAST/SCA, cobertura, lint
 
 ## Ambiente local (docker compose)
 
@@ -52,7 +59,7 @@ Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 - `identity`: autenticação Jwt + refresh rotation + TOTP (seção 13.1 do Architecture.md)
 - `emergency` (SOS): Outbox, ack com compare-and-set, escalonamento
 - Frontends: PWA banhista + console operacional (pnpm workspace em `frontend/`)
-- Pipeline CI: build, testes, Testcontainers (PostGIS/Redis/Garage), SAST/SCA
+- Pipeline CI: base pronta (build + testes unitários); evoluir com Testcontainers (PostGIS/Redis/Garage), SAST/SCA e cobertura
 
 ---
-Última atualização: 2026-11-06, após execução das 2 primeiras issues.
+Última atualização: 2026-11-07, após execução das 3 primeiras issues.

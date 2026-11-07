@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Configurar JDK 21 (Temurin)
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Configurar Gradle com cache
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          # Provider MIT baseado em actions/cache, sem dependência de serviço proprietário
+          cache-provider: basic
+
+      - name: Compilar código de produção e de testes
+        run: ./gradlew compileJava compileTestJava
+
+      - name: Executar testes unitários
+        run: ./gradlew test
+
+      - name: Publicar relatórios de teste
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: relatorios-de-teste
+          path: backend/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 7
