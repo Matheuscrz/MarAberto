@@ -7,18 +7,22 @@ spring:
       enabled: true
 
   datasource:
-    url: jdbc:h2:mem:maraberto;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    username: sa
-    password: ""
-    driver-class-name: org.h2.Driver
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/maraberto}
+    username: ${DB_USER:maraberto}
+    password: ${DB_PASSWORD:maraberto}
+    driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     open-in-view: false
     properties:
       hibernate:
         format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
 
 server:
   port: 8080

@@ -82,7 +82,7 @@ Ela entrega três valores:
 | ID | Requisito | Rel. | Critérios de aceite (resumo) |
 |----|-----------|:----:|------------------------------|
 | RF11 | **Gestão de postos e bases móveis**: início/fim de plantão, localização da base móvel, fotos da estrutura e do mar. | R1 | Plantão ativo torna o posto elegível a receber SOS. Fim de plantão remove da elegibilidade. |
-| RF12 | **Lançamento de bandeiramento**: Verde, Amarela, Vermelha, Dupla Vermelha, com foto da sinalização. | R1 | Bandeira tem validade (RN01). Mapa do banhista reflete a mudança em até 60 s. |
+| RF12 | **Lançamento de bandeiramento**: Verde, Amarela, Vermelha, Roxa e Preta, com foto da sinalização. | R1 | Bandeira tem validade (RN01). Mapa do banhista reflete a mudança em até 60 s. |
 | RF13 | **Demarcação dinâmica de correntes de retorno**: desenhar polígonos temporários no mapa. | R2 | Desenho com poucos toques; expira automaticamente (validade configurável). |
 | RF14 | **Moderação e triagem de reportes**: aprovar, rejeitar, encerrar. | R2 | Toda decisão grava auditoria (RNF06) e notifica o autor do reporte. |
 | RF15 | **Receptor de SOS com telemetria**: alerta visual **e sonoro**, coordenadas exatas, distância ao posto, botão "Assumir". | R1 | Alerta toca até ser reconhecido. Console funciona em tela bloqueada via push (RF23). |
@@ -93,7 +93,7 @@ Ela entrega três valores:
 |----|-----------|:----:|------------------------------|
 | RF16 | **Painel tático e histórico**: mapa de calor de afogamentos, resgates e ações preventivas. | R3 | Filtros por período, praia, tipo. Dados agregados em grade, nunca coordenadas individuais de cidadãos. |
 | RF17 | **Administração de conteúdo educativo** (CMS simples de vídeos, títulos, tags, ordem). | R2 | Valida o ID do YouTube; publica/despublica; invalida cache. |
-| RF18 | **Gestão de praias e zonas críticas**: polígonos, relevo, riscos estáticos, referência a pontos da Marinha/DHN. | R1 | Edição de polígono com validação geométrica (`ST_IsValid`). Mudança invalida cache do GeoJSON. |
+| RF18 | **Gestão de praias e zonas críticas**: polígonos, relevo, riscos permanentes e semipermanentes, referência a pontos da Marinha/DHN. | R1 | Persistência explícita (`PERMANENT`/`SEMI_PERMANENT`), validade e revalidação de zonas topográficas; edição de polígono com `ST_IsValid`. Correntes efêmeras usam a demarcação dinâmica (RF13). Mudança invalida cache do GeoJSON. |
 
 ### 4.4 Novos requisitos (adicionados nesta revisão)
 
