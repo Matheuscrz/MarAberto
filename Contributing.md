@@ -98,6 +98,14 @@ npm install
 npm run dev
 ```
 
+Para testar tudo em containers, incluindo backend e frontend:
+
+```bash
+docker compose up -d --build
+```
+
+O frontend fica em `http://localhost:3000` e o backend em `http://localhost:8080`.
+
 Rodar os testes e as verificações:
 
 ```bash

@@ -118,6 +118,22 @@ Suba os serviços de banco de dados PostGIS, cache Redis e armazenamento de arqu
 docker compose up -d
 ```
 
+O Compose também pode construir e subir o backend e o frontend localmente:
+
+```bash
+docker compose up -d --build
+```
+
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8080
+- Swagger: http://localhost:8080/swagger-ui/index.html
+
+Para parar os serviços sem remover os dados persistidos:
+
+```bash
+docker compose down
+```
+
 | Serviço | Porta do Host | Credenciais / Notas |
 | :--- | :--- | :--- |
 | **PostgreSQL + PostGIS** | `5432` | user: `maraberto` / pass: `maraberto_pwd` |

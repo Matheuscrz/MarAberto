@@ -3,6 +3,39 @@
 name: maraberto
 
 services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: maraberto-backend
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-maraberto}
+      DB_USER: ${POSTGRES_USER:-maraberto}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-maraberto}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      STORAGE_PROVIDER: stub
+      REALTIME_ALLOWED_ORIGINS: ${REALTIME_ALLOWED_ORIGINS:-http://localhost:3000}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: maraberto-web
+    ports:
+      - "${WEB_PORT:-3000}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
   postgres:
     image: postgis/postgis:16-3.4
     container_name: maraberto-postgres

@@ -1,0 +1,90 @@
+package com.maraberto.emergency.application;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.maraberto.emergency.api.EmergencyCallCreated;
+import com.maraberto.emergency.domain.EmergencyCall;
+import com.maraberto.emergency.domain.EmergencyCallStatus;
+import com.maraberto.emergency.domain.EmergencyDispatch;
+import com.maraberto.emergency.domain.EmergencyDispatchStatus;
+import com.maraberto.emergency.domain.EmergencyOutboxEvent;
+import com.maraberto.emergency.infra.EmergencyCallRepository;
+import com.maraberto.emergency.infra.EmergencyDispatchRepository;
+import com.maraberto.emergency.infra.EmergencyOutboxEventRepository;
+import java.time.Instant;
+import java.util.UUID;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class CreateEmergencyCallService {
+
+    private final EmergencyCallRepository callRepository;
+    private final EmergencyDispatchRepository dispatchRepository;
+    private final EmergencyOutboxEventRepository outboxRepository;
+    private final ObjectMapper objectMapper;
+
+    public CreateEmergencyCallService(
+            EmergencyCallRepository callRepository,
+            EmergencyDispatchRepository dispatchRepository,
+            EmergencyOutboxEventRepository outboxRepository,
+            ObjectMapper objectMapper) {
+        this.callRepository = callRepository;
+        this.dispatchRepository = dispatchRepository;
+        this.outboxRepository = outboxRepository;
+        this.objectMapper = objectMapper;
+    }
+
+    @Transactional
+    public EmergencyCall create(CreateEmergencyCallCommand command) {
+        return callRepository.findByClientRequestId(command.clientRequestId())
+                .orElseGet(() -> createNew(command));
+    }
+
+    private EmergencyCall createNew(CreateEmergencyCallCommand command) {
+        EmergencyCall call = new EmergencyCall();
+        call.setClientRequestId(command.clientRequestId());
+        call.setLatitude(command.latitude());
+        call.setLongitude(command.longitude());
+        call.setAccuracyMeters(command.accuracyMeters());
+        call.setStatus(EmergencyCallStatus.DISPATCHED);
+        call = callRepository.save(call);
+
+        EmergencyDispatch dispatch = new EmergencyDispatch();
+        dispatch.setEmergencyCallId(call.getId());
+        dispatch.setStatus(EmergencyDispatchStatus.PENDING);
+        dispatchRepository.save(dispatch);
+
+        Instant occurredAt = Instant.now();
+        EmergencyCallCreated event = new EmergencyCallCreated(
+                call.getId(),
+                call.getClientRequestId(),
+                call.getLatitude(),
+                call.getLongitude(),
+                call.getAccuracyMeters(),
+                occurredAt);
+        EmergencyOutboxEvent outboxEvent = new EmergencyOutboxEvent();
+        outboxEvent.setAggregateId(call.getId());
+        outboxEvent.setEventType(EmergencyCallCreated.class.getName());
+        outboxEvent.setPayload(toJson(event));
+        outboxEvent.setStatus(EmergencyOutboxEvent.OutboxStatus.PENDING);
+        outboxRepository.save(outboxEvent);
+
+        return call;
+    }
+
+    private String toJson(EmergencyCallCreated event) {
+        try {
+            return objectMapper.writeValueAsString(event);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Não foi possível serializar o evento de criação do SOS", exception);
+        }
+    }
+
+    public record CreateEmergencyCallCommand(
+            String clientRequestId,
+            double latitude,
+            double longitude,
+            Double accuracyMeters) {
+    }
+}
