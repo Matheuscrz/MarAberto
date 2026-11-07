@@ -153,7 +153,7 @@ Implementados com **Spring Modulith**: cada módulo é um pacote de topo; só a 
 |--------|------------------|-----------------|---------|
 | `identity` | Cadastro, OTP, CPF (cifrado), login, tokens, MFA (TOTP), papéis, convite de operacionais. | `UserRegistered`, `OperatorInvited` | — |
 | `region` | Configuração da instalação, importação de *Region Pack*. | `RegionConfigChanged` | — |
-| `beaches` | Praias, zonas críticas permanentes, fichas, GeoJSON público. | `BeachChanged`, `RiskZoneChanged` | `RegionConfigChanged` |
+| `beaches` | Praias, zonas de risco permanentes e semipermanentes, fichas, GeoJSON público. | `BeachChanged`, `RiskZoneChanged` | `RegionConfigChanged` |
 | `operations` | Postos, plantões, bandeiramento, demarcação de correntes. | `ShiftStarted`, `ShiftEnded`, `FlagChanged`, `RipCurrentMarked` | — |
 | `emergency` | SOS: criação, despacho, ack, escalonamento, ciclo de vida, desfecho. | `EmergencyCallCreated`, `…Acknowledged`, `…Escalated`, `…Resolved` | — |
 | `safety` | Reportes comunitários, quórum, moderação. | `ReportSubmitted`, `AlertActivated`, `AlertClosed` | `FlagChanged` |
@@ -190,7 +190,7 @@ Pacote-base é sugestão; ajuste ao domínio da organização do projeto.
 
 ```mermaid
 erDiagram
-    beaches ||--o{ permanent_risk_zones : possui
+    beaches ||--o{ critical_zones : possui
     beaches ||--o{ lifeguard_posts : possui
     beaches ||--o{ flag_updates : recebe
     beaches ||--o{ rip_current_markings : recebe
@@ -425,7 +425,7 @@ CREATE TABLE occupancy_snapshots (
 );
 ```
 
-> As tabelas `beaches`, `permanent_risk_zones`, `educational_videos`, `lifeguard_posts` e `safety_alerts` seguem o documento inicial, com os ajustes da seção 7.2. A tabela `event_publication` é criada pelo Spring Modulith (Outbox).
+> As tabelas `beaches`, `critical_zones`, `educational_videos`, `lifeguard_posts` e `safety_alerts` seguem o documento inicial, com os ajustes da seção 7.2. A tabela `event_publication` é criada pelo Spring Modulith (Outbox).
 
 ### 7.4 Consulta de contexto do banhista (com *fallback*)
 
@@ -440,10 +440,13 @@ nearest AS (
 ),
 chosen AS (SELECT * FROM inside UNION ALL SELECT * FROM nearest WHERE NOT EXISTS (SELECT 1 FROM inside) LIMIT 1)
 SELECT c.id, c.name, c.beach_type,
-       z.name AS risk_zone_name, z.danger_level, z.guidelines
+       z.name AS risk_zone_name, z.description, z.persistence
 FROM chosen c
-LEFT JOIN permanent_risk_zones z
+LEFT JOIN critical_zones z
        ON z.beach_id = c.id
+      AND z.active
+      AND z.valid_from <= now()
+      AND (z.valid_until IS NULL OR z.valid_until > now())
       AND ST_Contains(z.geometry, (SELECT p FROM me));
 ```
 
@@ -477,6 +480,22 @@ LIMIT 3;
 - **Precisão:** guardar a geometria completa no banco; simplificar apenas a cópia enviada ao cliente (`ST_SimplifyPreserveTopology`) e nunca alterar o dado de origem por causa do payload.
 - **Importação idempotente** por `external_id`/slug (upsert), versionada e auditada, com dados em `region-packs/<uf>/`. Não usar SQL manual em produção.
 - **Proveniência:** registrar fonte, versão/data e responsável; validar contra a delimitação oficial (Marinha/DHN ou município). Quando o importador for implementado, avaliar colunas `external_id` e `source` em `beaches`.
+
+### 7.8 Persistência temporal das zonas de risco
+
+Uma zona de risco não é necessariamente permanente. O mesmo risco (ex.: corrente de retorno) pode se manifestar de três formas, e o modelo precisa representar a diferença:
+
+| Padrão | Onde ocorre | Como modelar |
+|--------|-------------|--------------|
+| **Fixa/permanente** | Píeres, molhes, quebra-mares, costões, foz de rio/canal. A estrutura física canaliza a água sempre pelo mesmo caminho. | `critical_zones` com `persistence = 'PERMANENT'`, `valid_until` nulo. |
+| **Semipermanente/topográfica** | Canais entre bancos de areia; dura dias, semanas ou meses até o relevo mudar. | `critical_zones` com `persistence = 'SEMI_PERMANENT'`, `valid_from`/`valid_until` e `last_confirmed_at`; revalidar após ressacas. |
+| **Migratória/efêmera** | Praias abertas e retas; surge, se desloca e desaparece em horas ou minutos. | `rip_current_markings` (módulo `operations`), com `valid_until` curto e autoria do guarda-vidas. **Não** cadastrar como zona permanente. |
+
+- **Visibilidade:** uma zona aparece no mapa somente quando `active`, `valid_from <= now()` e (`valid_until IS NULL OR valid_until > now()`). O predicado está em `CriticalZone.isVisibleAt` e deve ser replicado no GeoJSON e no cache.
+- **Correntes efêmeras não viram polígono permanente.** Elas entram pela demarcação dinâmica (`RipCurrentMarked`) ou por reporte comunitário com quórum (`safety`), expiram sozinhas e podem ser renovadas enquanto o risco persistir.
+- **Expiração:** zonas semipermanentes vencidas não são apagadas automaticamente; ficam invisíveis e entram na fila de revalidação/expurgo. Um job pode usar o índice parcial `idx_critical_zones_valid_until`.
+- **Cache/GeoJSON:** a chave de cache deve considerar a janela de validade; zonas efêmeras exigem TTL curto e invalidação por `RipCurrentMarked`, enquanto permanentes só mudam com `RiskZoneChanged`.
+- **Fonte da verdade:** o banco decide a janela de validade; o cache nunca mantém uma zona efêmera viva depois de `valid_until`.
 
 ---
 

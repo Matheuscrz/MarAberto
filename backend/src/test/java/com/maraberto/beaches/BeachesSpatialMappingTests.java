@@ -6,9 +6,12 @@ import com.maraberto.beaches.domain.Beach;
 import com.maraberto.beaches.domain.CriticalZone;
 import com.maraberto.beaches.domain.LifeguardPost;
 import com.maraberto.beaches.domain.MobileBase;
+import com.maraberto.beaches.domain.RiskPersistence;
 import com.maraberto.beaches.domain.RiskType;
 import com.maraberto.support.PostgisIntegrationTest;
 import jakarta.persistence.EntityManager;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.locationtech.jts.geom.Coordinate;
@@ -53,6 +56,18 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
                         "idx_lifeguard_posts_location",
                         "idx_mobile_bases_location",
                         "idx_critical_zones_geometry");
+
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT conname
+                  FROM pg_constraint
+                 WHERE conrelid = 'critical_zones'::regclass
+                   AND contype = 'c'
+                """, String.class))
+                .containsExactlyInAnyOrder(
+                        "ck_critical_zones_persistence",
+                        "ck_critical_zones_validity",
+                        "ck_critical_zones_permanent_no_expiry",
+                        "ck_critical_zones_semi_permanent_expiry");
     }
 
     @Test
@@ -77,11 +92,25 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
 
         CriticalZone zone = new CriticalZone();
         zone.setBeach(beach);
-        zone.setName("Corrente de retorno");
+        zone.setName("Corrente de retorno junto ao molhe");
         zone.setRiskType(RiskType.RIP_CURRENT);
+        zone.setPersistence(RiskPersistence.PERMANENT);
         zone.setDescription("Aviso permanente de perigo estrutural");
         zone.setGeometry(polygon(-35.699, -10.004, 0.002));
         entityManager.persist(zone);
+
+        Instant now = Instant.now();
+        CriticalZone topographicZone = new CriticalZone();
+        topographicZone.setBeach(beach);
+        topographicZone.setName("Canal entre bancos de areia");
+        topographicZone.setRiskType(RiskType.RIP_CURRENT);
+        topographicZone.setPersistence(RiskPersistence.SEMI_PERMANENT);
+        topographicZone.setDescription("Corrente topográfica, revalidar após ressaca");
+        topographicZone.setGeometry(polygon(-35.696, -10.006, 0.002));
+        topographicZone.setValidFrom(now.minus(1, ChronoUnit.DAYS));
+        topographicZone.setValidUntil(now.plus(30, ChronoUnit.DAYS));
+        topographicZone.setLastConfirmedAt(now);
+        entityManager.persist(topographicZone);
 
         entityManager.flush();
         entityManager.clear();
@@ -100,8 +129,19 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
 
         CriticalZone loadedZone = entityManager.find(CriticalZone.class, zone.getId());
         assertThat(loadedZone.getRiskType()).isEqualTo(RiskType.RIP_CURRENT);
+        assertThat(loadedZone.getPersistence()).isEqualTo(RiskPersistence.PERMANENT);
+        assertThat(loadedZone.getValidUntil()).isNull();
         assertThat(loadedZone.getGeometry().getSRID()).isEqualTo(4326);
 
+        CriticalZone loadedTopographicZone =
+                entityManager.find(CriticalZone.class, topographicZone.getId());
+        assertThat(loadedTopographicZone.getPersistence()).isEqualTo(RiskPersistence.SEMI_PERMANENT);
+        assertThat(loadedTopographicZone.getValidUntil()).isAfter(loadedTopographicZone.getValidFrom());
+        assertThat(loadedTopographicZone.getLastConfirmedAt()).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT persistence FROM critical_zones WHERE id = ?",
+                String.class, topographicZone.getId()))
+                .isEqualTo("SEMI_PERMANENT");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT ST_SRID(boundary) FROM beaches WHERE id = ?", Integer.class, beach.getId()))
                 .isEqualTo(4326);
@@ -116,6 +156,34 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
                 "SELECT ST_SRID(location::geometry) FROM mobile_bases WHERE id = ?",
                 Integer.class, mobileBase.getId()))
                 .isEqualTo(4326);
+    }
+
+    @Test
+    void evaluatesTemporalVisibility() {
+        Instant now = Instant.now();
+
+        CriticalZone permanent = new CriticalZone();
+        permanent.setPersistence(RiskPersistence.PERMANENT);
+        permanent.setValidFrom(now.minus(1, ChronoUnit.DAYS));
+        assertThat(permanent.isVisibleAt(now)).isTrue();
+
+        CriticalZone expired = new CriticalZone();
+        expired.setPersistence(RiskPersistence.SEMI_PERMANENT);
+        expired.setValidFrom(now.minus(10, ChronoUnit.DAYS));
+        expired.setValidUntil(now.minus(1, ChronoUnit.DAYS));
+        assertThat(expired.isVisibleAt(now)).isFalse();
+
+        CriticalZone future = new CriticalZone();
+        future.setPersistence(RiskPersistence.SEMI_PERMANENT);
+        future.setValidFrom(now.plus(1, ChronoUnit.DAYS));
+        future.setValidUntil(now.plus(10, ChronoUnit.DAYS));
+        assertThat(future.isVisibleAt(now)).isFalse();
+
+        CriticalZone deactivated = new CriticalZone();
+        deactivated.setPersistence(RiskPersistence.PERMANENT);
+        deactivated.setValidFrom(now.minus(1, ChronoUnit.DAYS));
+        deactivated.setActive(false);
+        assertThat(deactivated.isVisibleAt(now)).isFalse();
     }
 
     private List<String> tables() {
