@@ -24,6 +24,23 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+  # Redis é opcional para os fluxos que ainda não dependem dele. A conexão é
+  # criada de forma preguiçosa pelo Lettuce; sem Redis, a aplicação sobe e
+  # apenas os recursos que usam cache/rate limit ficam degradados.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+      connect-timeout: 2s
+
+maraberto:
+  storage:
+    provider: ${STORAGE_PROVIDER:stub}
+  realtime:
+    allowed-origins: ${REALTIME_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+
 server:
   port: 8080
 

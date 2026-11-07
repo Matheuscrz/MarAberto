@@ -43,12 +43,12 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 +-------------------------------------------------------------------------------------------------+
 |                                SPRING BOOT 3 (MONÓLITO MODULAR)                                 |
 |                                                                                                 |
-|  [ beaches ]              [ safety ]                  [ emergency ]           [ oceanography ]  |
+|  [ beaches ]              [ safety ]                  [ emergency ]           [ tides ]         |
 |  - Polígonos de praia     - Postos Fixos e Móveis     - Despacho SOS          - Tábua de Marés  |
 |  - Riscos Permanentes     - Bandeiramento do Dia      - STOMP WebSockets      - Ingestão DHN    |
 |  - Estimativa Lotação     - Upload Fotos (Presigned)  - Quórum Comunitário    - Marés de Sizígia|
 |                                                                                                 |
-|  [ education ]            [ shared / kernel ]                                                   |
+|  [ content ]              [ shared / kernel ]                                                   |
 |  - Vídeos YouTube         - Auth JWT, CPF operacional, Operações Geoespaciais                  |
 +------------------------------------------------+------------------------------------------------+
                                                  |
@@ -56,7 +56,7 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
          |                                       |                                       |
          v                                       v                                       v
 +------------------+                   +--------------------+                  +------------------+
-|    PostgreSQL    |                   |       Redis        |                  |      MinIO       |
+|    PostgreSQL    |                   |       Redis        |                  |    Garage/S3     |
 |    + PostGIS     |                   | (Cache de Mapas,   |                  | (Object Storage  |
 | (SRID 4326/GiST) |                   |  Marés e Limiter)  |                  |   Fotos/Mídias)  |
 +------------------+                   +--------------------+                  +------------------+
