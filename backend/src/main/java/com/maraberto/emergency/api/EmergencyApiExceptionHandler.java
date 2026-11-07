@@ -8,10 +8,9 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 @RestControllerAdvice(basePackageClasses = EmergencyCallController.class)
@@ -33,12 +32,9 @@ public class EmergencyApiExceptionHandler extends ResponseEntityExceptionHandler
                 "Um ou mais campos não atendem às regras de validação.",
                 requestUri(request));
         problem.setProperty("errors", exception.getBindingResult().getFieldErrors().stream()
-                .map(this::fieldError)
+                .map(error -> new FieldValidationError(error.getField(), error.getDefaultMessage()))
                 .toList());
-        return ResponseEntity.status(problem.getStatus())
-                .headers(headers)
-                .contentType(PROBLEM_JSON_UTF8)
-                .body(problem);
+        return response(problem, headers);
     }
 
     @Override
@@ -53,14 +49,12 @@ public class EmergencyApiExceptionHandler extends ResponseEntityExceptionHandler
                 "JSON inválido",
                 "O corpo da requisição não pôde ser interpretado.",
                 requestUri(request));
-        return ResponseEntity.status(problem.getStatus())
-                .headers(headers)
-                .contentType(PROBLEM_JSON_UTF8)
-                .body(problem);
+        return response(problem, headers);
     }
 
-    private ResponseEntity<ProblemDetail> response(ProblemDetail problem) {
+    private ResponseEntity<Object> response(ProblemDetail problem, HttpHeaders headers) {
         return ResponseEntity.status(problem.getStatus())
+                .headers(headers)
                 .contentType(PROBLEM_JSON_UTF8)
                 .body(problem);
     }
@@ -82,10 +76,4 @@ public class EmergencyApiExceptionHandler extends ResponseEntityExceptionHandler
         return problem;
     }
 
-    private FieldValidationError fieldError(FieldError error) {
-        return new FieldValidationError(error.getField(), error.getDefaultMessage());
-    }
-
-    private record FieldValidationError(String field, String message) {
-    }
 }

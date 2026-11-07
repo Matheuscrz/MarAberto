@@ -11,6 +11,7 @@ import com.maraberto.emergency.domain.EmergencyOutboxEvent;
 import com.maraberto.emergency.infra.EmergencyCallRepository;
 import com.maraberto.emergency.infra.EmergencyDispatchRepository;
 import com.maraberto.emergency.infra.EmergencyOutboxEventRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -81,6 +82,7 @@ public class CreateEmergencyCallService {
         }
     }
 
+    @Schema(name = "CreateEmergencyCallCommand", description = "Comando interno para criação idempotente de um SOS")
     public record CreateEmergencyCallCommand(
             String clientRequestId,
             double latitude,

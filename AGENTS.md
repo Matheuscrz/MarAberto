@@ -64,6 +64,8 @@ Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 - Idioma do código/commits: pt-BR quando for texto exibido ao usuário; nomes de classes em inglês.
 - APIs HTTP devem documentar no Swagger/OpenAPI as respostas de sucesso e os erros esperados, incluindo o schema do corpo quando aplicável.
 - Erros HTTP devem seguir RFC 9457 com `Content-Type: application/problem+json` e os campos `type`, `title`, `status`, `detail` e `instance`. O `type` é uma URI estável para identificar/documentar o problema, não um redirecionamento; `instance` identifica a ocorrência da requisição. Não expor stack trace, credenciais ou dados pessoais.
+- O contrato OpenAPI de erros deve usar `ApiProblem`, com `errors` como lista de `FieldValidationError` quando houver falhas de validação. Os tipos RFC estáveis do módulo de emergência são `https://maraberto.org/problems/invalid-request` e `https://maraberto.org/problems/malformed-json`; o frontend deve tratar essas URIs como identificadores de erro, sem assumir redirecionamento HTTP.
+- Ao construir `ProblemDetail`, sempre definir explicitamente `setTitle`, `setType` e `setInstance`, além de um `detail` seguro e acionável. Records de request/response/evento e contratos de infraestrutura devem receber `@Schema` com descrições e exemplos quando forem parte do contrato documentado.
 
 ## Diretrizes de banco, cache e idempotência
 
@@ -91,4 +93,4 @@ Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
 Validação local mais recente: `cd backend && ./gradlew clean check` concluído com sucesso em 2026-11-07.
 
 ---
-Última atualização: 2026-11-07, após execução da Etapa 1 (Spring Modulith, Redis, WebSocket e `ObjectStoragePort`).
+Última atualização: 2026-11-07, após padronização RFC 9457, documentação OpenAPI dos records e contratos de erro.

@@ -1,5 +1,6 @@
 package com.maraberto.media.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -37,7 +38,12 @@ public interface ObjectStoragePort {
     /**
      * URL pré-assinada e o instante em que ela expira.
      */
-    record PresignedUrl(String url, Instant expiresAt) {
+    @Schema(name = "PresignedUrl", description = "URL temporária para acesso a um objeto")
+    record PresignedUrl(
+            @Schema(description = "URL pré-assinada")
+            String url,
+            @Schema(description = "Instante de expiração em UTC")
+            Instant expiresAt) {
 
         public PresignedUrl {
             if (url == null || url.isBlank()) {
@@ -52,7 +58,16 @@ public interface ObjectStoragePort {
     /**
      * Metadados mínimos de um objeto armazenado.
      */
-    record ObjectMetadata(String bucket, String key, long sizeBytes, String contentType) {
+    @Schema(name = "ObjectMetadata", description = "Metadados mínimos de um objeto armazenado")
+    record ObjectMetadata(
+            @Schema(description = "Nome do bucket")
+            String bucket,
+            @Schema(description = "Chave do objeto")
+            String key,
+            @Schema(description = "Tamanho do objeto em bytes", minimum = "0")
+            long sizeBytes,
+            @Schema(description = "Tipo MIME do objeto", example = "image/jpeg")
+            String contentType) {
 
         public ObjectMetadata {
             if (bucket == null || bucket.isBlank()) {

@@ -46,11 +46,13 @@ public class EmergencyCallController {
             @ApiResponse(
                     responseCode = "400",
                     description = "Requisição inválida; resposta no formato RFC 9457",
-                    content = @Content(mediaType = "application/problem+json")),
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class))),
             @ApiResponse(
                     responseCode = "500",
                     description = "Erro inesperado; resposta no formato RFC 9457",
-                    content = @Content(mediaType = "application/problem+json"))
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class)))
     })
     public EmergencyCallResponse create(@Valid @RequestBody CreateEmergencyCallRequest request) {
         EmergencyCall call = createEmergencyCallService
@@ -62,17 +64,30 @@ public class EmergencyCallController {
         return EmergencyCallResponse.from(call);
     }
 
+    @Schema(name = "CreateEmergencyCallRequest", description = "Dados mínimos para registrar um SOS")
     public record CreateEmergencyCallRequest(
+            @Schema(description = "Identificador idempotente gerado pelo cliente", example = "8d6a5a87-1c43-4af4-9b7f-9f2d5a5a4f5c",
+                    requiredMode = Schema.RequiredMode.REQUIRED)
             @NotBlank String clientRequestId,
+            @Schema(description = "Latitude WGS84 do pedido de socorro", example = "-10.9472",
+                    minimum = "-90", maximum = "90", requiredMode = Schema.RequiredMode.REQUIRED)
             @DecimalMin("-90.0") @DecimalMax("90.0") double latitude,
+            @Schema(description = "Longitude WGS84 do pedido de socorro", example = "-37.0731",
+                    minimum = "-180", maximum = "180", requiredMode = Schema.RequiredMode.REQUIRED)
             @DecimalMin("-180.0") @DecimalMax("180.0") double longitude,
+            @Schema(description = "Precisão estimada da localização, em metros", example = "12.5", minimum = "0")
             @Positive Double accuracyMeters) {
     }
 
+    @Schema(name = "EmergencyCallResponse", description = "Resultado do registro do SOS")
     public record EmergencyCallResponse(
+            @Schema(description = "Identificador da chamada de emergência")
             UUID callId,
+            @Schema(description = "Estado atual do SOS", example = "DISPATCHED")
             String status,
+            @Schema(description = "Identificador idempotente recebido do cliente")
             String clientRequestId,
+            @Schema(description = "Data e hora de criação em UTC")
             Instant createdAt) {
 
         private static EmergencyCallResponse from(EmergencyCall call) {
