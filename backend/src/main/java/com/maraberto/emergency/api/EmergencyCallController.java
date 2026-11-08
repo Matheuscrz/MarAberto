@@ -2,6 +2,8 @@ package com.maraberto.emergency.api;
 
 import com.maraberto.emergency.application.CreateEmergencyCallService;
 import com.maraberto.emergency.domain.EmergencyCall;
+import com.maraberto.shared.security.sanitization.SanitizationPolicy;
+import com.maraberto.shared.security.sanitization.Sanitized;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -12,6 +14,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import java.time.Instant;
 import java.util.UUID;
@@ -66,9 +69,13 @@ public class EmergencyCallController {
 
     @Schema(name = "CreateEmergencyCallRequest", description = "Dados mínimos para registrar um SOS")
     public record CreateEmergencyCallRequest(
-            @Schema(description = "Identificador idempotente gerado pelo cliente", example = "8d6a5a87-1c43-4af4-9b7f-9f2d5a5a4f5c",
+            @Schema(description = "Identificador idempotente gerado pelo cliente (UUID)", example = "8d6a5a87-1c43-4af4-9b7f-9f2d5a5a4f5c",
                     requiredMode = Schema.RequiredMode.REQUIRED)
-            @NotBlank String clientRequestId,
+            @NotBlank
+            @Pattern(regexp = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                    message = "deve ser um UUID")
+            @Sanitized(value = SanitizationPolicy.IDENTIFIER, maxLength = 64)
+            String clientRequestId,
             @Schema(description = "Latitude WGS84 do pedido de socorro", example = "-10.9472",
                     minimum = "-90", maximum = "90", requiredMode = Schema.RequiredMode.REQUIRED)
             @DecimalMin("-90.0") @DecimalMax("90.0") double latitude,
@@ -76,7 +83,8 @@ public class EmergencyCallController {
                     minimum = "-180", maximum = "180", requiredMode = Schema.RequiredMode.REQUIRED)
             @DecimalMin("-180.0") @DecimalMax("180.0") double longitude,
             @Schema(description = "Precisão estimada da localização, em metros", example = "12.5", minimum = "0")
-            @Positive Double accuracyMeters) {
+            @Positive @DecimalMax(value = "100000.0", message = "deve ser menor ou igual a 100000")
+            Double accuracyMeters) {
     }
 
     @Schema(name = "EmergencyCallResponse", description = "Resultado do registro do SOS")

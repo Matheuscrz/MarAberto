@@ -99,7 +99,8 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 | [`docs/Requirements.md`](docs/Requirements.md) | Visão, personas, requisitos funcionais e não funcionais, regras de negócio, escala e decisões registradas. |
 | [`docs/Architecture.md`](docs/Architecture.md) | Arquitetura, módulos, modelo de dados, fluxos críticos (SOS), cache, segurança, observabilidade, implantação e riscos. |
 | [`Contributing.md`](Contributing.md) | Como contribuir, padrões de código e checklist de Pull Request. |
-| [`Security.md`](Security.md) | Como reportar vulnerabilidades de forma responsável. |
+| [`Security.md`](Security.md) | Como reportar vulnerabilidades, modelo de sanitização/criptografia e recomendações de implantação. |
+| [`docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md`](docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md) | Decisão sobre sanitização de entrada e criptografia de dados sensíveis em repouso. |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Regras de convivência da comunidade. |
 
 ---
@@ -136,14 +137,15 @@ docker compose down
 
 | Serviço | Porta do Host | Credenciais / Notas |
 | :--- | :--- | :--- |
-| **PostgreSQL + PostGIS** | `5432` | user: `maraberto` / pass: `maraberto_pwd` |
+| **PostgreSQL + PostGIS** | `5432` | user: `maraberto` / pass: `maraberto` |
 | **Redis** | `6379` | Cache de dados e rate limiting |
-| **MinIO API** | `9000` | S3-compatible API |
-| **MinIO Console** | `9001` | Dashboard web (login: `minioadmin` / `minioadmin`) |
+| **Garage S3 API** | `9000` | S3-compatível; bucket `media-public` |
+| **Garage Admin** | `9001` | API administrativa |
+| **RabbitMQ** | `5672` / `15672` | AMQP / console de gestão |
 
 > 🔒 **Estas credenciais são exclusivamente para desenvolvimento local.** Nunca as utilize em produção. Veja as recomendações de implantação em [`Security.md`](Security.md).
 >
-> ℹ️ O armazenamento é acessado pela API S3. A avaliação sobre manter o MinIO ou adotar outra alternativa S3-compatível está registrada em [`docs/Architecture.md`](docs/Architecture.md).
+> ℹ️ O armazenamento usa **Garage** no lugar do MinIO (ADR-006), porque a imagem CE do MinIO deixou de ser pública. A configuração fica em `deploy/garage/garage.toml`.
 
 ### 2. Rodar o Backend Spring Boot
 
@@ -153,24 +155,40 @@ cd backend
 ```
 
 * API REST disponível em: `http://localhost:8080/api/v1`
-* Documentação interativa Swagger/OpenAPI: `http://localhost:8080/swagger-ui.html`
+* Documentação interativa Swagger/OpenAPI: `http://localhost:8080/swagger-ui/index.html`
 
 ### 3. Rodar o Frontend PWA
 
 ```bash
-cd frontend
+cd web
 npm install
 npm run dev
 ```
 
-* Aplicação Web acessível em: `http://localhost:5173`
+* Aplicação Web acessível em: `http://localhost:3000`
+* O Vite encaminha `/api` para `http://localhost:8080` (`VITE_PROXY_TARGET` para sobrescrever).
+* `npm run build` gera o PWA; `npm run lint` verifica o código; `npm run icons` regenera os ícones PNG.
 
 ### 4. Rodar os testes
 
 ```bash
 cd backend
 ./gradlew clean check
+cd ../web && npm run lint && npm run build
 ```
+
+### 5. Criptografia de dados sensíveis
+
+O backend cifra dados sensíveis em repouso com AES-256-GCM e exige uma chave mestra de 32 bytes:
+
+```bash
+# Gere uma chave e exporte no ambiente (nunca versione o valor)
+openssl rand -base64 32
+export CRYPTO_MASTER_KEY="<valor-gerado>"
+export CRYPTO_KEY_ID="k1"
+```
+
+Sem `CRYPTO_MASTER_KEY`, o ambiente local usa a chave de desenvolvimento — que é **recusada no perfil `prod`**. Detalhes em [`docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md`](docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md).
 
 ---
 

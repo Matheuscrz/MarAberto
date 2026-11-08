@@ -110,12 +110,57 @@ class EmergencyCallIntegrationTests extends PostgisIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "clientRequestId": "invalid-coordinate",
+                                  "clientRequestId": "%s",
                                   "latitude": 91,
                                   "longitude": -37
                                 }
-                                """))
+                                """.formatted(UUID.randomUUID())))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void rejectsMaliciousClientRequestIdWithoutEchoingIt() throws Exception {
+        mockMvc.perform(post("/api/v1/emergency-calls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "clientRequestId": "<script>alert(1)</script>",
+                                  "latitude": -10.9472,
+                                  "longitude": -37.0731
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString())
+                        .doesNotContain("<script>"));
+    }
+
+    @Test
+    void storesOutboxPayloadEncryptedAtRest() throws Exception {
+        String body = """
+                {
+                  "clientRequestId": "%s",
+                  "latitude": -10.9472,
+                  "longitude": -37.0731,
+                  "accuracyMeters": 12.5
+                }
+                """.formatted(UUID.randomUUID());
+
+        String response = mockMvc.perform(post("/api/v1/emergency-calls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        UUID callId = UUID.fromString(objectMapper.readTree(response).get("callId").asText());
+
+        String payload = jdbcTemplate.queryForObject(
+                "SELECT payload FROM emergency_outbox_events WHERE aggregate_id = ?",
+                String.class,
+                callId);
+
+        assertThat(payload).startsWith("enc:v1:");
+        assertThat(payload).doesNotContain("-10.9472").doesNotContain("-37.0731");
     }
 
     @Test

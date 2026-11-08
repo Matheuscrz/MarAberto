@@ -744,6 +744,25 @@ Autorização por **papel + escopo** (posto/praia) validada no servidor, nunca s
 
 Minimização (sem trilha de localização), retenção por tabela, direitos do titular (exportação/exclusão), cifragem em trânsito e repouso, `youtube-nocookie.com`, RIPD versionado em `docs/`. Veja a seção 8 de Requirements.md. Validar bases legais com o jurídico do órgão.
 
+### 13.5 Sanitização e criptografia de dados (implementado)
+
+Decisão completa em [ADR-012](adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md). Vale para dados atuais e futuros.
+
+| Camada | Implementação |
+|--------|---------------|
+| Entrada de texto | OWASP Java HTML Sanitizer com allowlists (`PLAIN_TEXT`, `RICH_TEXT`), normalização NFKC e limite de tamanho. |
+| Tipos estruturados | Políticas `IDENTIFIER`, `EMAIL`, `PHONE`, `CPF`, `URL`, `YOUTUBE_ID`; falha fechada vira erro de campo em RFC 9457. |
+| DTOs | `@Sanitized(policy, maxLength)` + `SanitizedStringDeserializer` antes do caso de uso. |
+| Repouso | AES-256-GCM, IV aleatório de 12 bytes, tag de 128 bits, AAD por contexto, formato `enc:v1:<keyId>:<base64url>`. |
+| Rotação | `CRYPTO_KEY_ID` + `previous-keys`; a aplicação recusa a chave de desenvolvimento no perfil `prod`. |
+| Busca em campo cifrado | Índice cego HMAC-SHA256 com chave derivada e domínio separado; nunca SHA-256 simples. |
+| Colunas JPA | `EncryptedStringConverter` (`@Convert`), com leitura de legado em claro durante a migração. |
+| SOS | Localização precisa em `double precision` (despacho/geofence), protegida por acesso restrito, backup cifrado, minimização e proibição de log; payload da outbox cifrado. |
+| Logs/telemetria | `SensitiveDataProtector` mascara CPF, e-mail, telefone, IP e reduz a precisão de coordenadas. |
+| Borda | CSP restritiva, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP/CORP; service worker sem cache de API. |
+
+**Limitações explícitas:** campos cifrados não aceitam `LIKE`, ordenação ou filtro por range — igualdade exige índice cego. Perder a chave mestra significa perder os dados cifrados; o procedimento de backup e rotação é obrigatório para qualquer instância.
+
 ---
 
 ## 14. Observabilidade
@@ -897,8 +916,8 @@ Pipeline (GitHub Actions ou Jenkins): build → testes unitários → testes de 
 ```
 MarAberto/
 ├── backend/                 # Gradle, Spring Boot, Spring Modulith
-├── frontend/                # pnpm workspace
-│   ├── apps/public/         # PWA do banhista (bundle leve)
+├── web/                     # PWA do banhista (Vite + React + Tailwind)
+├── frontend/                # (futuro) pnpm workspace do console operacional
 │   ├── apps/ops/            # PWA operacional
 │   └── packages/            # ui, api-client, geo, i18n
 ├── region-packs/            # se/, ba/, ... (GeoJSON + YAML)

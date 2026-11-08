@@ -13,8 +13,6 @@ import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "emergency_outbox_events")
@@ -32,8 +30,12 @@ public class EmergencyOutboxEvent {
     @Column(name = "event_type", nullable = false, length = 120)
     private String eventType;
 
-    @Column(nullable = false, columnDefinition = "jsonb")
-    @JdbcTypeCode(SqlTypes.JSON)
+    /**
+     * Payload JSON cifrado em repouso (AES-256-GCM). O publicador da outbox
+     * deve decifrar com {@code SensitiveDataProtector.AAD_EMERGENCY_OUTBOX}
+     * antes de desserializar o evento.
+     */
+    @Column(nullable = false, columnDefinition = "text")
     private String payload;
 
     @Enumerated(EnumType.STRING)

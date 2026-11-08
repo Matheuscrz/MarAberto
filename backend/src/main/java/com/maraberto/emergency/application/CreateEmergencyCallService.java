@@ -11,6 +11,7 @@ import com.maraberto.emergency.domain.EmergencyOutboxEvent;
 import com.maraberto.emergency.infra.EmergencyCallRepository;
 import com.maraberto.emergency.infra.EmergencyDispatchRepository;
 import com.maraberto.emergency.infra.EmergencyOutboxEventRepository;
+import com.maraberto.shared.security.crypto.SensitiveDataProtector;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.UUID;
@@ -24,16 +25,19 @@ public class CreateEmergencyCallService {
     private final EmergencyDispatchRepository dispatchRepository;
     private final EmergencyOutboxEventRepository outboxRepository;
     private final ObjectMapper objectMapper;
+    private final SensitiveDataProtector sensitiveDataProtector;
 
     public CreateEmergencyCallService(
             EmergencyCallRepository callRepository,
             EmergencyDispatchRepository dispatchRepository,
             EmergencyOutboxEventRepository outboxRepository,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            SensitiveDataProtector sensitiveDataProtector) {
         this.callRepository = callRepository;
         this.dispatchRepository = dispatchRepository;
         this.outboxRepository = outboxRepository;
         this.objectMapper = objectMapper;
+        this.sensitiveDataProtector = sensitiveDataProtector;
     }
 
     @Transactional
@@ -67,7 +71,8 @@ public class CreateEmergencyCallService {
         EmergencyOutboxEvent outboxEvent = new EmergencyOutboxEvent();
         outboxEvent.setAggregateId(call.getId());
         outboxEvent.setEventType(EmergencyCallCreated.class.getName());
-        outboxEvent.setPayload(toJson(event));
+        outboxEvent.setPayload(sensitiveDataProtector.encrypt(
+                toJson(event), SensitiveDataProtector.AAD_EMERGENCY_OUTBOX));
         outboxEvent.setStatus(EmergencyOutboxEvent.OutboxStatus.PENDING);
         outboxRepository.save(outboxEvent);
 

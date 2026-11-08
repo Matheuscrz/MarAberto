@@ -1,121 +1,103 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { Layout } from './components/Layout';
 
-function App() {
-  const [count, setCount] = useState(0)
+const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
+const BeachesPage = lazy(() =>
+  import('./pages/BeachesPage').then((m) => ({ default: m.BeachesPage })),
+);
+const BeachDetailPage = lazy(() =>
+  import('./pages/BeachDetailPage').then((m) => ({ default: m.BeachDetailPage })),
+);
+const SosPage = lazy(() => import('./pages/SosPage').then((m) => ({ default: m.SosPage })));
+const TidesPage = lazy(() => import('./pages/TidesPage').then((m) => ({ default: m.TidesPage })));
+const LearnPage = lazy(() => import('./pages/LearnPage').then((m) => ({ default: m.LearnPage })));
+const AboutPage = lazy(() => import('./pages/AboutPage').then((m) => ({ default: m.AboutPage })));
+const NotFoundPage = lazy(() =>
+  import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })),
+);
 
+function PageFallback() {
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+    <p role="status" className="py-10 text-center font-semibold text-ocean-600">
+      Carregando…
+    </p>
+  );
 }
 
-export default App
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route
+            index
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <HomePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="praias"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <BeachesPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="praias/:beachId"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <BeachDetailPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="sos"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <SosPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="mares"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <TidesPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="aprender"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <LearnPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="sobre"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AboutPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="*"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <NotFoundPage />
+              </Suspense>
+            }
+          />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;
