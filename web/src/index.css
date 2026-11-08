@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+/*
+ * Tema do MarAberto.
+ *
+ * Paleta: oceano (identidade e superfícies), areia (fundo quente) e coral
+ * (somente emergência/erro — nunca para decoração, para o SOS manter
+ * destaque visual). Cores de bandeira seguem o padrão brasileiro e estão
+ * documentadas em Badges.tsx.
+ */
+@theme {
+  --color-ocean-50: #eef8fb;
+  --color-ocean-100: #d6eff6;
+  --color-ocean-200: #b0dfec;
+  --color-ocean-300: #7ac7dd;
+  --color-ocean-400: #3da6c4;
+  --color-ocean-500: #228aa8;
+  --color-ocean-600: #1c6f8d;
+  --color-ocean-700: #1c5b73;
+  --color-ocean-800: #1d4b5e;
+  --color-ocean-900: #1c3f50;
+  --color-ocean-950: #0d2836;
+
+  --color-sand-50: #fdf9f1;
+  --color-sand-100: #f9f0dd;
+  --color-sand-200: #f2dfba;
+  --color-sand-300: #e9c88e;
+  --color-sand-400: #dfab5e;
+  --color-sand-500: #d6923f;
+  --color-sand-600: #c07934;
+  --color-sand-700: #9f5d2d;
+  --color-sand-800: #804b2b;
+  --color-sand-900: #693f26;
+  --color-sand-950: #3a1f12;
+
+  --color-coral-50: #fff1f0;
+  --color-coral-100: #ffdfdd;
+  --color-coral-200: #ffc5c1;
+  --color-coral-300: #ff9d96;
+  --color-coral-400: #ff655a;
+  --color-coral-500: #f83a2c;
+  --color-coral-600: #e51f11;
+  --color-coral-700: #c11409;
+  --color-coral-800: #9f140c;
+  --color-coral-900: #83170f;
+  --color-coral-950: #480603;
+
+  --font-sans: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background-color: var(--color-sand-50);
+    color: var(--color-ocean-950);
+    font-family: var(--font-sans);
+  }
+
+  /* Foco sempre visível: requisito de acessibilidade e de operação na praia. */
+  :focus-visible {
+    outline: 3px solid var(--color-ocean-600);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--color-ocean-200);
+  }
+}

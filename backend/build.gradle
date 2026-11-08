@@ -49,6 +49,9 @@ dependencies {
     // Documentação da API (Swagger/OpenAPI)
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
 
+    // Segurança: sanitização de HTML/entrada vinda da web
+    implementation 'com.googlecode.owasp-java-html-sanitizer:owasp-java-html-sanitizer:20261107.1'
+
     // Testes Unitários e Testes de Arquitetura
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'com.tngtech.archunit:archunit-junit5:1.3.0'

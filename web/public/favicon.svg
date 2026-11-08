@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MarAberto">
+  <rect width="64" height="64" rx="14" fill="#0d2836" />
+  <path
+    d="M8 40c5 0 5-4 10-4s5 4 10 4 5-4 10-4 5 4 10 4 5-4 8-4"
+    fill="none"
+    stroke="#eef8fb"
+    stroke-width="4"
+    stroke-linecap="round"
+  />
+  <path
+    d="M8 50c5 0 5-4 10-4s5 4 10 4 5-4 10-4 5 4 10 4 5-4 8-4"
+    fill="none"
+    stroke="#7ac7dd"
+    stroke-width="4"
+    stroke-linecap="round"
+  />
+  <circle cx="46" cy="18" r="6" fill="#e51f11" />
+</svg>

@@ -98,6 +98,14 @@ npm install
 npm run dev
 ```
 
+Para testar tudo em containers, incluindo backend e frontend:
+
+```bash
+docker compose up -d --build
+```
+
+O frontend fica em `http://localhost:3000` e o backend em `http://localhost:8080`.
+
 Rodar os testes e as verificações:
 
 ```bash
@@ -147,9 +155,21 @@ Prefira PRs pequenos. Um PR que faz uma coisa bem feita é revisado mais rápido
 
 ### Frontend (PWA)
 
+- O app fica em `web/` (Vite + React + TypeScript + Tailwind). Rode `npm run lint` e `npm run build` antes de abrir o PR.
 - Priorize **desempenho em rede ruim** (3G/4G) e legibilidade sob sol forte: alto contraste, alvos de toque grandes.
-- Vídeos do YouTube usam carregamento sob demanda (*facade*); não carregue iframes antes do clique.
-- Acessibilidade conta: rótulos, contraste e navegação por teclado.
+- Vídeos do YouTube usam carregamento sob demanda (*facade*) em `youtube-nocookie.com`; não carregue iframes antes do clique.
+- Acessibilidade conta: rótulos, contraste, foco visível e navegação por teclado.
+- **Nunca** use `dangerouslySetInnerHTML` com dado não confiável. Texto vindo do servidor passa por `sanitizeText`/`sanitizeHtml`.
+- Estado global (Zustand) guarda apenas preferências não sensíveis; nunca persista coordenadas, `clientRequestId`, CPF, e-mail ou telefone.
+- O service worker **não** pode cachear `/api/**`, requisições não-GET ou respostas com `Range`.
+- O SOS não pode prometer envio offline: a confirmação só aparece após a resposta do servidor e “Ligar 193” fica sempre visível.
+
+### Sanitização e criptografia (backend)
+
+- Todo DTO de request com texto usa `@Sanitized` com a política correta (`PLAIN_TEXT`, `RICH_TEXT`, `IDENTIFIER`, `EMAIL`, `PHONE`, `CPF`, `URL`, `YOUTUBE_ID`).
+- Todo campo String sensível novo usa `EncryptedStringConverter` ou `SensitiveDataProtector`; não implemente criptografia caseira.
+- Busca de igualdade em campo cifrado usa índice cego; nunca SHA-256 simples em CPF/e-mail.
+- Não grave PII em claro em outbox, fila, cache, log ou métrica. Detalhes em [`docs/adr/012`](docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md).
 
 ### Geral
 
@@ -203,6 +223,8 @@ Antes de pedir revisão, confirme:
 - [ ] Há issue vinculada (ou justificativa para não haver).
 - [ ] Testes novos ou atualizados; `./gradlew clean check` passa.
 - [ ] Nenhum segredo, credencial real ou dado pessoal no código, nos testes ou nos logs.
+- [ ] Campos de texto novos em DTOs de request usam `@Sanitized`; campos sensíveis novos usam `EncryptedStringConverter`/`SensitiveDataProtector`.
+- [ ] Frontend: `npm run lint` e `npm run build` passam; nenhum dado sensível no armazenamento local.
 - [ ] Migrações de banco novas (não alterei migrações antigas).
 - [ ] Documentação atualizada (README, `docs/`) quando o comportamento mudou.
 - [ ] Novas dependências: **licença compatível com a MIT**, mantida ativamente, versão fixada e justificativa na descrição.
