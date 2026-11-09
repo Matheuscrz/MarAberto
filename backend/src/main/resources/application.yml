@@ -50,6 +50,15 @@ maraberto:
     provider: ${STORAGE_PROVIDER:stub}
   realtime:
     allowed-origins: ${REALTIME_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+  emergency:
+    outbox:
+      # Sweep de recuperação da outbox: intervalo curto porque o SOS tem
+      # p95 < 3 s e o evento pode ter ficado pendente após uma queda.
+      # @Scheduled aceita apenas ISO-8601 (PT5S), não "5s".
+      sweep-interval: ${EMERGENCY_OUTBOX_SWEEP_INTERVAL:PT5S}
+      sweep-initial-delay: ${EMERGENCY_OUTBOX_SWEEP_INITIAL_DELAY:PT10S}
+      batch-size: ${EMERGENCY_OUTBOX_BATCH_SIZE:50}
+      max-attempts: ${EMERGENCY_OUTBOX_MAX_ATTEMPTS:10}
   security:
     crypto:
       # Chave de desenvolvimento (32 bytes em base64). NUNCA use em produção:

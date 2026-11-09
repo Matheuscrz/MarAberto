@@ -31,7 +31,7 @@ class EmergencyCallIntegrationTests extends PostgisIntegrationTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void createsCallDispatchAndPendingOutboxInOneRequest() throws Exception {
+    void createsCallDispatchAndOutboxInOneRequest() throws Exception {
         String clientRequestId = UUID.randomUUID().toString();
         String body = """
                 {
@@ -60,7 +60,7 @@ class EmergencyCallIntegrationTests extends PostgisIntegrationTest {
                 "SELECT count(*) FROM emergency_dispatches WHERE emergency_call_id = ?", Integer.class, callId))
                 .isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM emergency_outbox_events WHERE aggregate_id = ? AND status = 'PENDING'",
+                "SELECT count(*) FROM emergency_outbox_events WHERE aggregate_id = ?",
                 Integer.class, callId))
                 .isEqualTo(1);
     }

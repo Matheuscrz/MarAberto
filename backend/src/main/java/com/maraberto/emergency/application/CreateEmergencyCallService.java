@@ -15,6 +15,7 @@ import com.maraberto.shared.security.crypto.SensitiveDataProtector;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,18 +27,21 @@ public class CreateEmergencyCallService {
     private final EmergencyOutboxEventRepository outboxRepository;
     private final ObjectMapper objectMapper;
     private final SensitiveDataProtector sensitiveDataProtector;
+    private final ApplicationEventPublisher eventPublisher;
 
     public CreateEmergencyCallService(
             EmergencyCallRepository callRepository,
             EmergencyDispatchRepository dispatchRepository,
             EmergencyOutboxEventRepository outboxRepository,
             ObjectMapper objectMapper,
-            SensitiveDataProtector sensitiveDataProtector) {
+            SensitiveDataProtector sensitiveDataProtector,
+            ApplicationEventPublisher eventPublisher) {
         this.callRepository = callRepository;
         this.dispatchRepository = dispatchRepository;
         this.outboxRepository = outboxRepository;
         this.objectMapper = objectMapper;
         this.sensitiveDataProtector = sensitiveDataProtector;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -75,6 +79,10 @@ public class CreateEmergencyCallService {
                 toJson(event), SensitiveDataProtector.AAD_EMERGENCY_OUTBOX));
         outboxEvent.setStatus(EmergencyOutboxEvent.OutboxStatus.PENDING);
         outboxRepository.save(outboxEvent);
+
+        // Acorda o publicador depois do commit. Se a publicação falhar, o sweep
+        // periódico reenvia — a chamada do SOS já está garantida no banco.
+        eventPublisher.publishEvent(new EmergencyOutboxEventQueued(outboxEvent.getId()));
 
         return call;
     }

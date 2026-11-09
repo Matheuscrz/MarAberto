@@ -49,6 +49,21 @@ public class EmergencyOutboxEvent {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    /**
+     * Quantidade de tentativas de publicação já realizadas. Ao atingir o
+     * limite configurado, o evento vira {@code FAILED} e para de ser
+     * reivindicado.
+     */
+    @Column(nullable = false)
+    private int attempts;
+
+    /**
+     * Apenas o tipo da falha (por exemplo, {@code IllegalStateException}).
+     * Nunca grave payload, coordenadas ou dados pessoais aqui.
+     */
+    @Column(name = "last_error", length = 200)
+    private String lastError;
+
     public enum OutboxStatus {
         PENDING,
         PUBLISHED,
