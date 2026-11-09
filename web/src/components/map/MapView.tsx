@@ -14,7 +14,8 @@ import {
 // parado no fundo (só o background do estilo aparece).
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import {
-  BRAZIL_BOUNDS,
+  DEFAULT_MAP_CENTER,
+  DEFAULT_MAP_BOUNDS,
   FLAG_COLORS,
   accuracyRing,
   buildMapStyle,
@@ -25,12 +26,12 @@ import type { Beach } from "../../types";
 import type { FeatureCollection, Polygon } from "geojson";
 
 export interface MapViewProps {
-  beaches: Beach[];
-  showRisks: boolean;
-  showMarkers: boolean;
-  showGraticule: boolean;
-  selectedBeachId: string | null;
-  onSelectBeach: (beachId: string | null) => void;
+  readonly beaches: readonly Beach[];
+  readonly showRisks: boolean;
+  readonly showMarkers: boolean;
+  readonly showGraticule: boolean;
+  readonly selectedBeachId: string | null;
+  readonly onSelectBeach: (beachId: string | null) => void;
 }
 
 interface Located {
@@ -110,12 +111,15 @@ export function MapView({
       map = new MlMap({
         container,
         style: buildMapStyle(pmtilesUrl),
-        bounds: BRAZIL_BOUNDS,
-        zoom: 14,
-        fitBoundsOptions: {
-          padding: { top: 48, bottom: 48, left: 48, right: 48 },
-          animate: false,
-        },
+        ...(DEFAULT_MAP_BOUNDS
+          ? {
+              bounds: DEFAULT_MAP_BOUNDS,
+              fitBoundsOptions: { padding: 48, animate: false },
+            }
+          : {
+              center: DEFAULT_MAP_CENTER,
+              zoom: Number(import.meta.env.VITE_MAP_DEFAULT_ZOOM ?? 4),
+            }),
         attributionControl: false,
       });
       if (cancelled) {
@@ -447,7 +451,9 @@ export function MapView({
           onClick={locate}
           disabled={locating || !ready}
           aria-label={
-            locating ? "Obtendo localização" : "Centralizar na minha localização"
+            locating
+              ? "Obtendo localização"
+              : "Centralizar na minha localização"
           }
           className="grid size-10 place-items-center rounded-xl border border-ocean-900/10 bg-white text-ocean-700 shadow-md transition hover:bg-ocean-50 disabled:opacity-60"
         >

@@ -35,9 +35,9 @@ const MapView = lazy(() =>
 function MapFallback() {
   return (
     <div className="grid h-full w-full place-items-center bg-ocean-100">
-      <p role="status" className="font-semibold text-ocean-700">
-        Carregando o mapa…
-      </p>
+      <output className="block font-semibold text-ocean-700">
+        Carregando o mapa
+      </output>
     </div>
   );
 }
@@ -361,15 +361,13 @@ export function Layout() {
   );
 }
 
-function ChipToggle({
-  label,
-  on,
-  onToggle,
-}: {
-  label: string;
-  on: boolean;
-  onToggle: () => void;
-}) {
+interface ChipToggleProps {
+  readonly label: string;
+  readonly on: boolean;
+  readonly onToggle: () => void;
+}
+
+function ChipToggle({ label, on, onToggle }: ChipToggleProps) {
   return (
     <button
       type="button"

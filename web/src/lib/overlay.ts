@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect, type RefObject } from "react";
 
 /**
  * Utilitários de acessibilidade para overlays (menu gaveta, diálogos, ficha
@@ -10,7 +10,7 @@ const FOCUSABLE =
 
 /** Move o foco para o elemento marcado com `data-autofocus` ou, na falta dele, para o primeiro elemento focalizável. */
 export function focusFirstInside(container: HTMLElement | null): void {
-  const preferred = container?.querySelector<HTMLElement>('[data-autofocus]');
+  const preferred = container?.querySelector<HTMLElement>("[data-autofocus]");
   const target = preferred ?? container?.querySelector<HTMLElement>(FOCUSABLE);
   target?.focus();
 }
@@ -21,11 +21,11 @@ export function handleOverlayKeyboard(
   container: HTMLElement | null,
   onClose: () => void,
 ): void {
-  if (event.key === 'Escape') {
+  if (event.key === "Escape") {
     onClose();
     return;
   }
-  if (event.key !== 'Tab' || !container) {
+  if (event.key !== "Tab" || !container) {
     return;
   }
 
@@ -38,7 +38,11 @@ export function handleOverlayKeyboard(
   }
 
   const first = focusable[0];
-  const last = focusable[focusable.length - 1];
+  const last = focusable.at(-1);
+  if (!first || !last) {
+    event.preventDefault();
+    return;
+  }
   const active = container.ownerDocument.activeElement;
 
   if (event.shiftKey && (active === first || !container.contains(active))) {
@@ -66,16 +70,18 @@ export function useOverlay(
     }
 
     const previous =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     focusFirstInside(panelRef.current);
 
     const handler = (event: KeyboardEvent) => {
       handleOverlayKeyboard(event, panelRef.current, onClose);
     };
-    document.addEventListener('keydown', handler);
+    document.addEventListener("keydown", handler);
 
     return () => {
-      document.removeEventListener('keydown', handler);
+      document.removeEventListener("keydown", handler);
       previous?.focus();
     };
     // onClose muda a cada render do dono; o efeito pode rerodar sem efeito.

@@ -22,12 +22,19 @@ export const RISK_ZONE_COLORS: Record<RiskLevel, string> = {
   EXTREME: "#0f172a",
 };
 
-export const DEMO_CENTER: [number, number] = [-37.05, -10.95];
+export const DEFAULT_MAP_CENTER: [number, number] = import.meta.env
+  .VITE_MAP_DEFAULT_CENTER
+  ? (JSON.parse(import.meta.env.VITE_MAP_DEFAULT_CENTER) as [number, number])
+  : [-51.9253, -14.235]; // Centro do Brasil como fallback neutro
 
-export const BRAZIL_BOUNDS: [[number, number], [number, number]] = [
-  [-37.45, -11.45],
-  [-36.38, -10.45],
-];
+export const DEFAULT_MAP_BOUNDS:
+  | [[number, number], [number, number]]
+  | undefined = import.meta.env.VITE_MAP_BOUNDS
+  ? (JSON.parse(import.meta.env.VITE_MAP_BOUNDS) as [
+      [number, number],
+      [number, number],
+    ])
+  : undefined;
 
 export function buildMapStyle(pmtilesUrl?: string | null): StyleSpecification {
   if (pmtilesUrl) {
@@ -160,7 +167,9 @@ export function accuracyRing(
 }
 
 /** Retorna GeoJSON vazio até que os polígonos reais do KML sejam importados. */
-export function riskZonesOf(beaches: Beach[]): FeatureCollection<Polygon> {
+export function riskZonesOf(
+  beaches: readonly Beach[],
+): FeatureCollection<Polygon> {
   void beaches;
   return { type: "FeatureCollection", features: [] };
 }

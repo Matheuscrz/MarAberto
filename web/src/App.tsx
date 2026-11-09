@@ -28,12 +28,9 @@ const NotFoundPage = lazy(() =>
 
 function PageFallback() {
   return (
-    <p
-      role="status"
-      className="py-8 text-center text-sm font-semibold text-ocean-600"
-    >
-      Carregando…
-    </p>
+    <output className="block py-8 text-center text-sm font-semibold text-ocean-600">
+      Carregando
+    </output>
   );
 }
 
