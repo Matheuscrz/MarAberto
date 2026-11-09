@@ -4,6 +4,7 @@
  * Regras de segurança e de produto:
  * - NUNCA cachear `/api/**` (SOS, autenticação e dados operacionais precisam
  *   ser sempre frescos) nem qualquer requisição não-GET.
+ * - NUNCA cachear `/tiles/**` (PMTiles do ADR-005) nem tráfego de WebSocket.
  * - NUNCA cachear requisições com `Range` (vídeo/stream).
  * - Navegação: network-first com fallback para o shell em cache e, por fim,
  *   para `/offline.html`, que orienta a ligar 193.
@@ -12,7 +13,7 @@
  *
  * Ao mudar o shell, incremente CACHE_VERSION para descartar caches antigos.
  */
-const CACHE_VERSION = 'maraberto-shell-v1';
+const CACHE_VERSION = 'maraberto-shell-v2-map';
 const OFFLINE_URL = '/offline.html';
 const PRECACHE_URLS = [
   '/',
@@ -61,7 +62,12 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) {
     return;
   }
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/actuator/')) {
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/actuator/') ||
+    url.pathname.startsWith('/tiles/') ||
+    url.pathname === '/ws'
+  ) {
     return;
   }
 
