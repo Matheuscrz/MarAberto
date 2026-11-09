@@ -24,7 +24,7 @@ export const RISK_ZONE_COLORS: Record<RiskLevel, string> = {
 
 export const DEMO_CENTER: [number, number] = [-37.05, -10.95];
 
-export const DEMO_BOUNDS: [[number, number], [number, number]] = [
+export const BRAZIL_BOUNDS: [[number, number], [number, number]] = [
   [-37.45, -11.45],
   [-36.38, -10.45],
 ];

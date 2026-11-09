@@ -14,7 +14,7 @@ import {
 // parado no fundo (só o background do estilo aparece).
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import {
-  DEMO_BOUNDS,
+  BRAZIL_BOUNDS,
   FLAG_COLORS,
   accuracyRing,
   buildMapStyle,
@@ -110,7 +110,7 @@ export function MapView({
       map = new MlMap({
         container,
         style: buildMapStyle(pmtilesUrl),
-        bounds: DEMO_BOUNDS,
+        bounds: BRAZIL_BOUNDS,
         zoom: 14,
         fitBoundsOptions: {
           padding: { top: 48, bottom: 48, left: 48, right: 48 },
@@ -465,7 +465,7 @@ export function MapView({
       {locateError ? (
         <p
           role="alert"
-          className="absolute bottom-28 right-14 z-20 max-w-[14rem] rounded-xl border border-coral-300 bg-white px-3 py-2 text-xs font-semibold text-coral-800 shadow-md"
+          className="absolute bottom-28 right-14 z-20 max-w-56 rounded-xl border border-coral-300 bg-white px-3 py-2 text-xs font-semibold text-coral-800 shadow-md"
         >
           {locateError}
         </p>
