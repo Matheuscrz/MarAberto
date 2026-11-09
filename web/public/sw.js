@@ -13,7 +13,7 @@
  *
  * Ao mudar o shell, incremente CACHE_VERSION para descartar caches antigos.
  */
-const CACHE_VERSION = 'maraberto-shell-v2-map';
+const CACHE_VERSION = 'maraberto-shell-v3-map-worker';
 const OFFLINE_URL = '/offline.html';
 const PRECACHE_URLS = [
   '/',

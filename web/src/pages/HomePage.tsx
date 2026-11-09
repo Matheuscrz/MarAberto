@@ -45,8 +45,8 @@ export function HomePage() {
         />
       </Suspense>
 
-      <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex flex-wrap items-start gap-2">
-        <div className="pointer-events-auto flex flex-wrap gap-2 rounded-2xl border border-ocean-900/10 bg-white/90 p-1.5 shadow-md backdrop-blur">
+      <div className="pointer-events-none absolute inset-x-3 top-20 z-20 flex items-start gap-2">
+        <div className="pointer-events-auto flex max-w-[calc(100%-4.5rem)] flex-wrap gap-2 rounded-2xl border border-ocean-900/10 bg-white/90 p-1.5 shadow-md backdrop-blur">
           <ChipToggle label="Zonas de risco" on={showRisks} onToggle={() => setShowRisks((v) => !v)} />
           <ChipToggle label="Marcadores" on={showMarkers} onToggle={() => setShowMarkers((v) => !v)} />
           <ChipToggle label="Retícula" on={showGraticule} onToggle={() => setShowGraticule((v) => !v)} />

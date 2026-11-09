@@ -44,20 +44,26 @@ export const DEMO_CENTER: [number, number] = [-37.0371, -10.9515];
  */
 const COAST_POLYGON: Position[] = [
   [-37.6, -11.1],
-  [-37.08, -11.1],
-  [-37.06, -11.08],
-  [-37.055, -11.04],
-  [-37.05, -11.02],
-  [-37.047, -10.98],
-  [-37.042, -10.96],
-  [-37.04, -10.94],
+  [-37.09, -11.1],
+  [-37.07, -11.06],
+  [-37.055, -11.03],
+  [-37.043, -11.01],
+  [-37.035, -10.995],
+  [-37.036, -10.985],
+  [-37.038, -10.96],
+  [-37.034, -10.94],
   [-37.037, -10.92],
-  [-37.039, -10.9],
-  [-37.044, -10.88],
-  [-37.05, -10.85],
-  [-37.06, -10.82],
+  [-37.033, -10.905],
+  [-37.03, -10.9],
+  [-37.034, -10.885],
+  [-37.045, -10.86],
+  [-37.057, -10.83],
+  [-37.07, -10.82],
   [-37.6, -10.82],
 ];
+
+/** Anel linear fechado (primeiro = último ponto), como exige o GeoJSON. */
+const COAST_RING: Position[] = [...COAST_POLYGON, COAST_POLYGON[0]];
 
 /** Limites usados para enquadrar as praias de demonstração. */
 export const DEMO_BOUNDS: [[number, number], [number, number]] = [
@@ -130,17 +136,20 @@ export function buildMapStyle(pmtilesUrl?: string | null): StyleSpecification {
   };
 }
 
+/** Coastline pré-computada (dados constantes). */
+const COASTLINE_GEOJSON: FeatureCollection<Polygon> = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Polygon', coordinates: [COAST_RING] },
+    },
+  ],
+};
+
 function coastlineGeoJson(): FeatureCollection<Polygon> {
-  return {
-    type: 'FeatureCollection',
-    features: [
-      {
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'Polygon', coordinates: [COAST_POLYGON] },
-      },
-    ],
-  };
+  return COASTLINE_GEOJSON;
 }
 
 /** Retícula de 0,1 grau ao redor da área de demonstração. */
@@ -212,15 +221,15 @@ export function riskZonesOf(beaches: Beach[]): FeatureCollection<Polygon> {
   return { type: 'FeatureCollection', features };
 }
 
-/** Polígono determinístico deslocado da praia, só para demonstração. */
+/** Polígono determinístico deslocado para a água ao sul da praia (demo). */
 function zonePolygon(
   beach: { latitude: number; longitude: number },
   index: number,
 ): Polygon {
-  const dLat = 0.0022;
-  const dLon = 0.0035;
-  const centerLat = beach.latitude + (index % 2 === 0 ? -0.0045 : 0.0045);
-  const centerLon = beach.longitude + 0.005;
+  const dLat = 0.0028;
+  const dLon = 0.0042;
+  const centerLat = beach.latitude + (index % 2 === 0 ? -0.002 : 0.0055);
+  const centerLon = beach.longitude + 0.007;
 
   return {
     type: 'Polygon',

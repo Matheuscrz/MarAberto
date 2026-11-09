@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Crosshair, Loader2, LocateOff } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -8,7 +8,12 @@ import {
   Marker,
   NavigationControl,
   addProtocol,
+  setWorkerUrl,
 } from 'maplibre-gl';
+// O bundler não acompanha a URL do worker que o MapLibre deduz de
+// `import.meta.url`; sem este import o worker não carrega e o mapa fica
+// parado no fundo (só o background do estilo aparece).
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import {
   DEMO_BOUNDS,
   FLAG_COLORS,
@@ -46,6 +51,8 @@ function supportsWebGL(): boolean {
 
 type MapLibreMap = MlMap;
 
+setWorkerUrl(maplibreWorkerUrl);
+
 /**
  * Mapa principal do banhista (RF01): abre na região da instalação, com
  * marcadores de praia por bandeira e camadas de zonas de risco. MapLibre é um
@@ -71,6 +78,9 @@ export function MapView({
   const [locating, setLocating] = useState(false);
   const [location, setLocation] = useState<Located | null>(null);
   const [locateError, setLocateError] = useState<string | null>(null);
+
+  // `beaches` é constante do módulo de dados; memo evita recriar o GeoJSON.
+  const riskZones = useMemo(() => riskZonesOf(beaches), [beaches]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -102,7 +112,8 @@ export function MapView({
         container,
         style: buildMapStyle(pmtilesUrl),
         bounds: DEMO_BOUNDS,
-        fitBoundsOptions: { padding: 48, animate: false },
+        // Reserva espaço para o cabeçalho flutuante e a barra inferior (mobile).
+        fitBoundsOptions: { padding: { top: 96, bottom: 160, left: 48, right: 48 }, animate: false },
         attributionControl: false,
       });
       if (cancelled) {
@@ -128,7 +139,7 @@ export function MapView({
         if (cancelled || !map) {
           return;
         }
-        map.addSource('risks', { type: 'geojson', data: riskZonesOf(beaches) });
+        map.addSource('risks', { type: 'geojson', data: riskZones });
         map.addLayer({
           id: 'risks-fill',
           type: 'fill',
@@ -223,8 +234,8 @@ export function MapView({
       return;
     }
     (map.getSource('risks') as { setData: (data: FeatureCollection<Polygon>) => void } | undefined)
-      ?.setData(riskZonesOf(beaches));
-  }, [beaches, ready]);
+      ?.setData(riskZones);
+  }, [riskZones, ready]);
 
   // Marcadores de praia com bandeira atual, recriados por render simples.
   useEffect(() => {
@@ -372,7 +383,7 @@ export function MapView({
         onClick={locate}
         disabled={locating || !ready}
         aria-label={locating ? 'Obtendo localização…' : 'Centralizar na minha localização'}
-        className="absolute right-3 top-28 z-20 grid size-11 place-items-center rounded-xl border border-ocean-900/10 bg-white shadow-md transition hover:bg-ocean-50 disabled:opacity-60 md:top-24"
+        className="absolute right-3 top-20 z-20 grid size-11 place-items-center rounded-xl border border-ocean-900/10 bg-white shadow-md transition hover:bg-ocean-50 disabled:opacity-60 md:top-24"
       >
         {locating ? (
           <Loader2 aria-hidden="true" className="size-5 animate-spin text-ocean-700" />

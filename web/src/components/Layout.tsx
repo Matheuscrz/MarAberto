@@ -53,7 +53,14 @@ export function Layout() {
 
       <OfflineBanner />
 
-      <header className="sticky top-0 z-40 border-b border-ocean-900/10 bg-white/90 backdrop-blur">
+      <header
+        className={
+          isHome
+            ? // Home: cabeçalho flutuante sobre o mapa, estilo app de mapas.
+              'absolute inset-x-0 top-0 z-40 border-b border-ocean-900/5 bg-white/80 backdrop-blur'
+            : 'sticky top-0 z-40 border-b border-ocean-900/10 bg-white/90 backdrop-blur'
+        }
+      >
         <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3">
           <Link to="/" className="flex items-center gap-2 rounded-lg focus-visible:outline-2">
             <span className="grid size-10 place-items-center rounded-xl bg-ocean-950 text-white">
@@ -97,7 +104,8 @@ export function Layout() {
         id="conteudo"
         className={
           isHome
-            ? 'relative flex-1'
+            ? // Ocupa a viewport inteira: o mapa corre por baixo do cabeçalho.
+              'relative h-dvh'
             : 'mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 md:pb-12'
         }
       >
