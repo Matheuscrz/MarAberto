@@ -1,28 +1,22 @@
-import { useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Phone, Siren, X } from 'lucide-react';
-import { DEMO_DATA_NOTICE } from '../data/demo-data';
-import { useOverlay } from '../lib/overlay';
+import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { Phone, Siren, X } from "lucide-react";
+import { DEMO_DATA_NOTICE } from "../data/demo-data";
+import { useOverlay } from "../lib/overlay";
 
-/**
- * Botão flutuante de SOS (RF07, ADR-001): visível em todas as telas, com
- * confirmação em dois passos para evitar acionamento involuntário. A
- * confirmação não envia nada — o envio real segue no fluxo da página /sos, com
- * resposta do servidor antes de qualquer promessa de socorro.
- */
 export function SosFab() {
   const [confirming, setConfirming] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const close = () => setConfirming(false);
 
-  // Foco no "cancelar", Escape/backdrop e retorno do foco ao fechar.
-  useOverlay(confirming, panelRef, () => setConfirming(false));
+  useOverlay(confirming, panelRef, close);
 
   return (
     <>
       <button
         type="button"
         onClick={() => setConfirming(true)}
-        className="fixed bottom-24 right-4 z-40 inline-flex size-16 items-center justify-center rounded-full bg-coral-600 text-white shadow-xl shadow-coral-700/30 ring-1 ring-coral-700 transition hover:bg-coral-500 focus-visible:outline-2 md:bottom-6"
+        className="fixed bottom-8 right-4 z-40 inline-flex size-16 items-center justify-center rounded-full bg-coral-600 text-white shadow-xl shadow-coral-700/30 ring-1 ring-coral-700 transition hover:bg-coral-500 focus-visible:outline-2"
         aria-label="Abrir SOS com confirmação"
       >
         <Siren aria-hidden="true" className="size-7" />
@@ -51,20 +45,22 @@ export function SosFab() {
             >
               <X aria-hidden="true" className="size-5" />
             </button>
-
             <h2
               id="sos-confirm-title"
               className="flex items-center gap-2 pr-8 text-xl font-black text-ocean-950"
             >
-              <Siren aria-hidden="true" className="size-6 shrink-0 text-coral-600" />
+              <Siren
+                aria-hidden="true"
+                className="size-6 shrink-0 text-coral-600"
+              />
               Acionar o SOS?
             </h2>
             <p className="mt-2 text-sm text-ocean-700">
-              O SOS envia sua localização para a central de guarda-vidas da instalação. Ele precisa
-              de internet e não substitui o 193. Deseja continuar?
+              O SOS envia sua localização para a central de guarda-vidas da
+              instalação. Ele precisa de internet e não substitui o 193. Deseja
+              continuar?
             </p>
             <p className="mt-2 text-xs text-amber-800">{DEMO_DATA_NOTICE}</p>
-
             <div className="mt-4 grid gap-2">
               <div className="grid grid-cols-2 gap-2">
                 <button

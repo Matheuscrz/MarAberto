@@ -1,15 +1,15 @@
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
 
 export function Card({
   children,
-  className = '',
+  className = "",
 }: {
   children: ReactNode;
   className?: string;
 }) {
   return (
     <section
-      className={`rounded-2xl border border-ocean-900/10 bg-white p-5 shadow-sm ${className}`}
+      className={`rounded-2xl border border-ocean-900/10 bg-white p-4 shadow-sm ${className}`}
     >
       {children}
     </section>
@@ -26,10 +26,14 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
       <div>
-        <h1 className="text-3xl font-black tracking-tight text-ocean-950 md:text-4xl">{title}</h1>
-        {subtitle ? <p className="mt-2 max-w-2xl text-ocean-700">{subtitle}</p> : null}
+        <h1 className="text-xl font-black tracking-tight text-ocean-950">
+          {title}
+        </h1>
+        {subtitle ? (
+          <p className="mt-1 text-xs text-ocean-700">{subtitle}</p>
+        ) : null}
       </div>
       {actions}
     </div>
