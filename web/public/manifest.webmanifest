@@ -8,11 +8,18 @@
   "scope": "/",
   "id": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
   "orientation": "portrait-primary",
   "background_color": "#fdf9f1",
   "theme_color": "#0d2836",
-  "categories": ["health", "navigation", "utilities"],
+  "categories": [
+    "health",
+    "navigation",
+    "utilities"
+  ],
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -39,21 +46,43 @@
       "short_name": "SOS",
       "description": "Enviar a localização para a central de guarda-vidas",
       "url": "/sos",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     },
     {
       "name": "Praias",
       "short_name": "Praias",
       "description": "Consultar bandeira e riscos",
       "url": "/praias",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     },
     {
       "name": "Marés",
       "short_name": "Marés",
       "description": "Ver a tábua de marés",
       "url": "/mares",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     }
-  ]
+  ],
+  "launch_handler": {
+    "client_mode": [
+      "navigate-existing",
+      "new"
+    ]
+  },
+  "prefer_related_applications": false
 }
