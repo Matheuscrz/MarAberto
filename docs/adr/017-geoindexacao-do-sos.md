@@ -1,0 +1,26 @@
+# ADR-017: Geoindexação do SOS
+
+- Status: Aceito (2026-11-10)
+- Contexto: o SOS é o único fluxo que **escolhe destinatários por posição** (posto fixo, base móvel e rondas mais próximos — RF07/RF21) e o mais sensível a latência (RNF01: p95 < 3 s). A tabela `emergency_calls` guarda `latitude`/`longitude` em `double precision` por exigência de despacho e geofence, e a ADR-012 veda cifrar a mesma coluna usada em consulta espacial. As tabelas de praia, posto, base e zona de risco já nascem com índice GiST (`V1__init_postgis.sql`), mas o ponto do chamado não tem índice espacial e ainda não existe consulta que o use. Sem uma regra explícita, o risco é duplo: consulta de raio fazendo varredura quando o volume crescer e índice espacial criado "por precaução" em tudo, pagando escrita e _bloat_ sem consulta que justifique.
+- Decisão:
+  - **A verdade continua em `latitude`/`longitude`** (`double precision`), como na ADR-012. O ponto geográfico é uma **coluna gerada** no banco, não um campo escrito pela aplicação: `location GEOGRAPHY(Point,4326) GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(longitude, latitude),4326)::geography) STORED`, com índice **GiST**. A coluna não é mapeada no ORM nem aparece em DTO, então não há escrita duplicada nem risco de divergir.
+  - **Distância sempre em metros** via `geography` (`ST_DWithin`/`ST_Distance`). `geometry(…,4326)` fica para polígonos e `ST_Contains`; `ST_DWithin` sobre geometria 4326 mediria graus.
+  - **Postos elegíveis:** `ST_DWithin(p.location, :sos_point::geography, :coverage_radius_m)` (usa o GiST), com `ST_Distance` só na projeção e ordenação por KNN (`<->`), limite 3. O raio é por posto quando a coluna existir; até a migração, vale o padrão configurado da instalação. Quando nenhum posto cai no raio, o _fallback_ é **KNN puro** (`ORDER BY location <-> point LIMIT 3`): sempre há alguém para notificar.
+  - **Geofence não bloqueia o SOS.** O `ST_Contains` no polígono da praia (com margem) apenas marca `outside_area` para triagem e priorização. Gate de geofence contraria a ADR-001: um falso negativo de GPS derrubaria o chamado justamente no pior momento.
+  - **Fila de escalonamento continua B-tree parcial** (`created_at` com filtro de `status`, `FOR UPDATE SKIP LOCKED`): é consulta de fila, não espacial.
+  - **Índice só com consulta real**: cada consulta espacial nova entra com `EXPLAIN (ANALYZE, BUFFERS)` no PR, e o índice precisa aparecer no plano com ganho medido. Revisar `pg_stat_user_indexes.idx_scan` e o _bloat_ do GiST periodicamente.
+  - **Privacidade:** a coluna derivada herda a restrição de `latitude`/`longitude` (ADR-012) — nunca em listagem pública, GeoJSON, log, cache, métrica ou exportação aberta. Índice não é superfície de API.
+- Alternativas:
+  - **Mapear `location geography` no ORM e escrever as duas colunas** (rejeitada): duplica a escrita, permite divergência silenciosa entre ponto e coordenadas e adiciona um campo a mais em todo `INSERT`.
+  - **Coluna `geometry(Point,4326)`** (rejeitada): obrigaria `::geography` em toda consulta de distância, o que impede o uso do índice no `ST_DWithin`.
+  - **Índice GiST direto sobre coordenada cifrada** (rejeitada): inviabiliza consulta espacial (ADR-012) sem ganho real de segurança.
+  - **Geofence bloqueante** (rejeitada): contraria a ADR-001 e transforma falha de GPS/permissão em SOS não enviado.
+  - **Índice espacial em toda tabela com coordenada** (rejeitada): ponto lido por chave não ganha nada com GiST; custo é escrita e manutenção.
+  - **PostGIS/Elasticsearch como serviço separado para geo** (rejeitada): o volume é de uma instalação por órgão e o perfil mínimo roda em uma VM (RNF11); um serviço a mais custa memória e operação sem resolver nada que o Postgres já não resolva.
+- Consequências:
+  - A coluna gerada e o índice entram em migração nova (`V8+`) **junto da consulta de postos elegíveis** (escalonamento do SOS), não antes dela; hoje a `V3` mantém a tabela sem índice espacial.
+  - A consulta de postos elegíveis passa a ser implementável sem alterar o modelo de `emergency_calls` nem o contrato público do SOS (as coordenadas seguem em `double precision`).
+  - O índice é usado de fato: no teste com 2 000 chamados o plano foi `Index Scan using idx_emergency_calls_location` com `Index Cond: (location && _st_expand(...))`; em volume maior o planner pode preferir `Bitmap Index Scan` — o que importa é o GiST aparecer no plano, não a forma do nó. Validado em PostgreSQL 16 + PostGIS antes de escrever esta ADR.
+  - `emergency_calls` passa a ter uma coluna derivada: qualquer alteração futura em `latitude`/`longitude` recalcula o ponto automaticamente, e `pg_dump`/restauração continuam triviais.
+  - A regra vale para o resto do sistema: `geography` para metros, `geometry` para polígonos, GiST apenas onde há filtro por área.
+- Referências: `docs/Architecture.md` §7.5 (postos elegíveis), §7.12 (geoindexação do SOS), §8.1 (fluxo do SOS), ADR-001 (SOS sem conta), ADR-012 (proteção de dados sensíveis), RNF01 (latência).

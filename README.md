@@ -15,17 +15,17 @@
 
 ## 📌 1. Visão Geral do Projeto
 
-O **MarAberto** é uma iniciativa *open source* desenvolvida para aproximar a população dos serviços de salvamento aquático (Corpo de Bombeiros e guarda-vidas). Diferente de plataformas informativas estáticas, o MarAberto atua em três frentes complementares:
+O **MarAberto** é uma iniciativa _open source_ desenvolvida para aproximar a população dos serviços de salvamento aquático (Corpo de Bombeiros e guarda-vidas). Diferente de plataformas informativas estáticas, o MarAberto atua em três frentes complementares:
 
-1. **Prevenção Ativa & Conscientização:** Mapeamento visual de zonas de risco permanente (ex.: desembocaduras perigosas de rios, fossas submarinas e rebojos como na Praia dos Artistas), sincronização automática da tábua de marés oficial e vídeos educativos curados (YouTube) sobre como escapar de correntes de retorno (*rip currents*).
+1. **Prevenção Ativa & Conscientização:** Mapeamento visual de zonas de risco permanente (ex.: desembocaduras perigosas de rios, fossas submarinas e rebojos como na Praia dos Artistas), sincronização automática da tábua de marés oficial e vídeos educativos curados (YouTube) sobre como escapar de correntes de retorno (_rip currents_).
 2. **Colaboração Cidadã Confiável:** Estimativa passiva e anônima de ocupação da praia (estilo Waze), envio de reportes comunitários de perigo com validação por quórum geográfico e canal de **SOS Cidadão** para socorro rápido, sem exigir cadastro ou conta prévia do banhista.
-3. **Console Tático Operacional:** Aplicação de campo para guarda-vidas atualizarem bandeiramento em tempo real, registrarem postos móveis com fotos, receberem despachos de emergência por proximidade e monitorarem a cobertura da orla.
+3. **Console Tático Operacional:** Aplicação de campo para guarda-vidas atualizarem bandeiramento em tempo real, registrarem postos móveis com fotos (inclusive usando a localização atual), receberem despachos de emergência por proximidade e **registrarem ocorrências** — as geradas por SOS e as que chegaram pelo 193 ou fora do sistema — com uma ficha pronta para transcrever no CIOSP. Um único `/login` leva cada perfil à sua área: operador de campo, gestão do Corpo de Bombeiros e TI.
 
 ---
 
 ## 🏗️ 2. Arquitetura e Engenharia
 
-O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, dividindo os contextos de domínio de acordo com os princípios do *Domain-Driven Design* (DDD). Essa abordagem garante alta coesão e baixo acoplamento sem a sobrecarga de infraestrutura de microsserviços.
+O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, dividindo os contextos de domínio de acordo com os princípios do _Domain-Driven Design_ (DDD). Essa abordagem garante alta coesão e baixo acoplamento sem a sobrecarga de infraestrutura de microsserviços.
 
 ```
                            +--------------------------------------------+
@@ -48,6 +48,10 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 |  - Riscos Permanentes     - Bandeiramento do Dia      - STOMP WebSockets      - Ingestão DHN    |
 |  - Estimativa Lotação     - Upload Fotos (Presigned)  - Quórum Comunitário    - Marés de Sizígia|
 |                                                                                                 |
+|  [ occurrences ]          [ search ]                  [ identity / audit ]                      |
+|  - Ocorrências (SOS e 193) - Busca tolerante a erros  - Login, papéis, trilha imutável          |
+|  - Ficha para o CIOSP     - pg_trgm (sem serviço extra)                                         |
+|                                                                                                 |
 |  [ content ]              [ shared / kernel ]                                                   |
 |  - Vídeos YouTube         - Auth JWT, CPF operacional, Operações Geoespaciais                  |
 +------------------------------------------------+------------------------------------------------+
@@ -63,12 +67,13 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 ```
 
 ### Principais Decisões Tecnológicas:
-* **PostgreSQL 16 + PostGIS:** Permite cálculos esféricos precisos via tipo `geography(Point, 4326)` e geofencing com `geometry(Polygon, 4326)` indexados com GiST para consultas espaciais de alta performance (`ST_Contains`, `ST_DWithin`).
-* **MapLibre GL JS + OpenStreetMap:** Camada de visualização de mapas sem custos de faturamento por visualização de tiles, substituindo APIs pagas do Google Maps.
-* **Upload via Presigned URLs (S3-compatível):** O backend não atua como intermediário no tráfego de imagens pesadas; ele gera links temporários pré-assinados e o cliente envia a foto diretamente para o storage. O código fala a API S3, então o armazenamento pode ser trocado sem alterar o domínio.
-* **STOMP sobre WebSockets:** Notificações em tempo real para os postos de guarda-vidas com latência sub-segundo em ocorrências de SOS.
-* **Autenticação embutida:** registro e login são do próprio sistema (JWT de vida curta + refresh com rotação, MFA para perfis operacionais), sem dependência de provedor de identidade externo.
-* **Eventos com Outbox transacional:** o alerta de SOS só é notificado depois de persistido, e eventos pendentes são reenviados após uma reinicialização.
+
+- **PostgreSQL 16 + PostGIS:** Permite cálculos esféricos precisos via tipo `geography(Point, 4326)` e geofencing com `geometry(Polygon, 4326)` indexados com GiST para consultas espaciais de alta performance (`ST_Contains`, `ST_DWithin`).
+- **MapLibre GL JS + OpenStreetMap:** Camada de visualização de mapas sem custos de faturamento por visualização de tiles, substituindo APIs pagas do Google Maps.
+- **Upload via Presigned URLs (S3-compatível):** O backend não atua como intermediário no tráfego de imagens pesadas; ele gera links temporários pré-assinados e o cliente envia a foto diretamente para o storage. O código fala a API S3, então o armazenamento pode ser trocado sem alterar o domínio.
+- **STOMP sobre WebSockets:** Notificações em tempo real para os postos de guarda-vidas com latência sub-segundo em ocorrências de SOS.
+- **Autenticação embutida:** registro e login são do próprio sistema (JWT de vida curta + refresh com rotação, MFA para perfis operacionais), sem dependência de provedor de identidade externo.
+- **Eventos com Outbox transacional:** o alerta de SOS só é notificado depois de persistido, e eventos pendentes são reenviados após uma reinicialização.
 
 > Os detalhes e a justificativa de cada decisão estão em [`docs/Architecture.md`](docs/Architecture.md).
 
@@ -76,43 +81,53 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 
 ## 🎯 3. Matriz de Funcionalidades
 
-| Domínio | Módulo | Descrição Detalhada |
-| :--- | :--- | :--- |
-| **Banhista** | Mapa Dinâmico Multicamadas | Visualização de postos ativos, bandeiras do dia, áreas de banho seguras e alertas comunitários. |
-| **Banhista** | Zonas Críticas Permanentes | Demarcação explícita de áreas de alto perigo estático (ex.: desembocadura do rio com o mar, pedrais submersos, rebojos profundos). |
-| **Banhista** | Tábua de Marés em Tempo Real | Indicador visual de preamar/baixa-mar, coeficientes de maré, horários de pico e avisos de maré de sizígia (maré viva). |
-| **Banhista** | Hub Educativo (YouTube) | Vídeos informativos embutidos (*lazy-loaded*) com instruções de auto-resgate, fuga de correntes de retorno e primeiros socorros. |
-| **Banhista** | SOS Cidadão (Botão de Pânico) | Disparo georreferenciado de socorro imediato para guarda-vidas da circunscrição, sem cadastro ou CPF prévio. |
-| **Banhista** | Nível de Lotação "Waze" | Estimativa anônima de ocupação da praia através de geocheck no dispositivo sem persistência de rastro do usuário. |
-| **Guarda-Vidas**| Gestão de Postos e Bases Móveis | Abertura de ponto de atendimento em campo com foto da viatura/posto e coordenadas em tempo real. |
-| **Guarda-Vidas**| Bandeiramento & Correntes | Atualização da sinalização diária (verde, amarela, vermelha) com fotos comprobatórias das bandeiras fincadas. |
-| **Guarda-Vidas**| Moderação e Quórum | Homologação de reportes da população ou promoção automática caso $\ge 3$ banhistas distintos relatem o mesmo problema em 100 m. |
-| **Guarda-Vidas**| Central Receptora de SOS | Alertas visuais e sonoros com cálculo métrico de distância e rota até o banhista solicitante. |
-| **Gestão** | Painel Tático e Estatísticas | Mapa de calor (*heatmap*) de ocorrências e inteligência geoespacial para distribuição preventiva de efetivo. |
+| Domínio          | Módulo                          | Descrição Detalhada                                                                                                                                                                                                |
+| :--------------- | :------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Banhista**     | Mapa Dinâmico Multicamadas      | Visualização de postos ativos, bandeiras do dia, áreas de banho seguras e alertas comunitários.                                                                                                                    |
+| **Banhista**     | Zonas Críticas Permanentes      | Demarcação explícita de áreas de alto perigo estático (ex.: desembocadura do rio com o mar, pedrais submersos, rebojos profundos).                                                                                 |
+| **Banhista**     | Tábua de Marés em Tempo Real    | Indicador visual de preamar/baixa-mar, coeficientes de maré, horários de pico e avisos de maré de sizígia (maré viva).                                                                                             |
+| **Banhista**     | Hub Educativo (YouTube)         | Vídeos informativos embutidos (_lazy-loaded_) com instruções de auto-resgate, fuga de correntes de retorno e primeiros socorros.                                                                                   |
+| **Banhista**     | SOS Cidadão (Botão de Pânico)   | Disparo georreferenciado de socorro imediato para guarda-vidas da circunscrição, sem cadastro ou CPF prévio.                                                                                                       |
+| **Banhista**     | Nível de Lotação "Waze"         | Estimativa anônima de ocupação da praia através de geocheck no dispositivo sem persistência de rastro do usuário.                                                                                                  |
+| **Guarda-Vidas** | Gestão de Postos e Bases Móveis | Abertura de ponto de atendimento em campo com foto da viatura/posto e coordenadas em tempo real.                                                                                                                   |
+| **Guarda-Vidas** | Bandeiramento & Correntes       | Atualização da sinalização diária (verde, amarela, vermelha) com fotos comprobatórias das bandeiras fincadas.                                                                                                      |
+| **Guarda-Vidas** | Moderação e Quórum              | Homologação de reportes da população ou promoção automática caso $\ge 3$ banhistas distintos relatem o mesmo problema em 100 m.                                                                                    |
+| **Guarda-Vidas** | Central Receptora de SOS        | Alertas visuais e sonoros com cálculo métrico de distância e rota até o banhista solicitante.                                                                                                                      |
+| **Guarda-Vidas** | Ocorrências e Ficha CIOSP       | Todo SOS gera uma ocorrência; ocorrências do 193 ou de fora do sistema são registradas manualmente. Fila de pendentes e ficha com os campos na ordem do CIOSP para transcrição. O sistema não se integra ao CIOSP. |
+| **Gestão**       | Acompanhamento do Campo         | Área `/gestao`: plantões, SOS em andamento, ocorrências e pendências de registro no CIOSP por posto.                                                                                                               |
+| **Gestão**       | Painel Tático e Estatísticas    | Mapa de calor (_heatmap_) de ocorrências e inteligência geoespacial para distribuição preventiva de efetivo.                                                                                                       |
+| **TI**           | Administração da Instalação     | Área `/admin`: cadastro e convite de usuários, papéis e configuração regional.                                                                                                                                     |
+| **Todos**        | Busca tolerante a erros         | Encontra praias, postos e pontos mesmo com erro de digitação (PostgreSQL `pg_trgm`).                                                                                                                               |
 
 ---
 
 ## 📚 4. Documentação
 
-| Documento | Conteúdo |
-| :--- | :--- |
-| [`docs/Requirements.md`](docs/Requirements.md) | Visão, personas, requisitos funcionais e não funcionais, regras de negócio, escala e decisões registradas. |
-| [`docs/Architecture.md`](docs/Architecture.md) | Arquitetura, módulos, modelo de dados, fluxos críticos (SOS), cache, segurança, observabilidade, implantação e riscos. |
-| [`Contributing.md`](Contributing.md) | Como contribuir, padrões de código e checklist de Pull Request. |
-| [`Security.md`](Security.md) | Como reportar vulnerabilidades, modelo de sanitização/criptografia e recomendações de implantação. |
-| [`docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md`](docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md) | Decisão sobre sanitização de entrada e criptografia de dados sensíveis em repouso. |
-| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Regras de convivência da comunidade. |
+| Documento                                                                                                                | Conteúdo                                                                                                               |
+| :----------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
+| [`docs/Requirements.md`](docs/Requirements.md)                                                                           | Visão, personas, requisitos funcionais e não funcionais, regras de negócio, escala e decisões registradas.             |
+| [`docs/Architecture.md`](docs/Architecture.md)                                                                           | Arquitetura, módulos, modelo de dados, fluxos críticos (SOS), cache, segurança, observabilidade, implantação e riscos. |
+| [`Contributing.md`](Contributing.md)                                                                                     | Como contribuir, padrões de código e checklist de Pull Request.                                                        |
+| [`Security.md`](Security.md)                                                                                             | Como reportar vulnerabilidades, modelo de sanitização/criptografia e recomendações de implantação.                     |
+| [`docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md`](docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md) | Decisão sobre sanitização de entrada e criptografia de dados sensíveis em repouso.                                     |
+| [`docs/adr/013-ocorrencias-operacionais.md`](docs/adr/013-ocorrencias-operacionais.md)                                   | Ocorrência como entidade própria, criada por evento a partir do SOS e por registro manual.                             |
+| [`docs/adr/014-busca-tolerante-a-erros.md`](docs/adr/014-busca-tolerante-a-erros.md)                                     | Busca com `pg_trgm` antes de OpenSearch e critérios para reavaliar.                                                    |
+| [`docs/adr/015-frontend-feature-based.md`](docs/adr/015-frontend-feature-based.md)                                       | Estrutura `app/ shared/ features/` do frontend e regras de fronteira.                                                  |
+| [`AGENTS.md`](AGENTS.md)                                                                                                 | Memória de contexto para agentes de IA e convenções do repositório.                                                    |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)                                                                               | Regras de convivência da comunidade.                                                                                   |
 
 ---
 
 ## 🚀 5. Guia de Execução Rápida
 
 ### Pré-requisitos
-* **Java 21 LTS** ou superior
-* **Node.js 20+**
-* **Docker & Docker Compose**
+
+- **Java 21 LTS** ou superior
+- **Node.js 20+**
+- **Docker & Docker Compose**
 
 ### 1. Iniciar Infraestrutura de Apoio
+
 Suba os serviços de banco de dados PostGIS, cache Redis e armazenamento de arquivos S3-compatível via Docker Compose:
 
 ```bash
@@ -135,13 +150,13 @@ Para parar os serviços sem remover os dados persistidos:
 docker compose down
 ```
 
-| Serviço | Porta do Host | Credenciais / Notas |
-| :--- | :--- | :--- |
-| **PostgreSQL + PostGIS** | `5432` | user: `maraberto` / pass: `maraberto` |
-| **Redis** | `6379` | Cache de dados e rate limiting |
-| **Garage S3 API** | `9000` | S3-compatível; bucket `media-public` |
-| **Garage Admin** | `9001` | API administrativa |
-| **RabbitMQ** | `5672` / `15672` | AMQP / console de gestão |
+| Serviço                  | Porta do Host    | Credenciais / Notas                   |
+| :----------------------- | :--------------- | :------------------------------------ |
+| **PostgreSQL + PostGIS** | `5432`           | user: `maraberto` / pass: `maraberto` |
+| **Redis**                | `6379`           | Cache de dados e rate limiting        |
+| **Garage S3 API**        | `9000`           | S3-compatível; bucket `media-public`  |
+| **Garage Admin**         | `9001`           | API administrativa                    |
+| **RabbitMQ**             | `5672` / `15672` | AMQP / console de gestão              |
 
 > 🔒 **Estas credenciais são exclusivamente para desenvolvimento local.** Nunca as utilize em produção. Veja as recomendações de implantação em [`Security.md`](Security.md).
 >
@@ -154,8 +169,29 @@ cd backend
 ./gradlew bootRun
 ```
 
-* API REST disponível em: `http://localhost:8080/api/v1`
-* Documentação interativa Swagger/OpenAPI: `http://localhost:8080/swagger-ui/index.html`
+- API REST disponível em: `http://localhost:8080/api/v1`
+- Documentação interativa Swagger/OpenAPI: `http://localhost:8080/swagger-ui/index.html`
+
+#### Contas de desenvolvimento (login real)
+
+O login único já usa o backend (`POST /api/v1/auth/login`) e o papel decide a área. Para criar as contas locais, suba o backend com o seed de desenvolvimento ligado:
+
+```bash
+cd backend
+IDENTITY_DEV_SEED=true ./gradlew bootRun
+```
+
+| Perfil        | Área        | Nome       | E-mail                    | Matrícula | CPF           |
+| :------------ | :---------- | :--------- | :------------------------ | :-------- | :------------ |
+| `LIFEGUARD`   | `/operador` | Sgt. Silva | `operador@maraberto.dev`  | `BM-10492` | `11144477735` |
+| `COORDINATOR` | `/gestao`   | Ten. Rocha | `coordenador@maraberto.dev` | `CBM-2041` | `52998224725` |
+| `ADMIN` (TI)  | `/admin`    | Ana (TI)   | `admin@maraberto.dev`     | —         | `39053344705` |
+
+- **Senha de todas as contas:** `demo1234`.
+- O identificador aceita **e-mail, CPF ou matrícula** (a conta de TI não tem matrícula).
+- O seed é idempotente por e-mail: reiniciar o backend não duplica usuários. As contas permanecem no banco mesmo sem a variável; o seed só as recria se o banco for zerado.
+- ⚠️ O seed é **exclusivo de desenvolvimento**: o backend **recusa subir** com `IDENTITY_DEV_SEED=true` nos perfis `prod`/`production`. Nunca use essas contas em ambiente compartilhado.
+- O seed também pode ser ligado pelo Compose (`IDENTITY_DEV_SEED` no `.env`, padrão `false`).
 
 ### 3. Rodar o Frontend PWA
 
@@ -165,9 +201,10 @@ npm install
 npm run dev
 ```
 
-* Aplicação Web acessível em: `http://localhost:3000`
-* O Vite encaminha `/api` para `http://localhost:8080` (`VITE_PROXY_TARGET` para sobrescrever).
-* `npm run build` gera o PWA; `npm run lint` verifica o código; `npm run icons` regenera os ícones PNG.
+- Aplicação Web acessível em: `http://localhost:3000`
+- O Vite encaminha `/api` para `http://localhost:8080` (`VITE_PROXY_TARGET` para sobrescrever).
+- **Configuração regional do mapa** (sem dados fixos no código): `VITE_MAP_DEFAULT_CENTER` (JSON `[lon, lat]`, padrão `[-51.9253, -14.2350]`, centro do Brasil), `VITE_MAP_DEFAULT_ZOOM` e `VITE_MAP_BOUNDS` (opcional). Qualquer Corpo de Bombeiros pode implantar a própria instância definindo esses valores.
+- `npm run build` gera o PWA; `npm run lint` verifica o código; `npm run icons` regenera os ícones PNG.
 
 ### 4. Rodar os testes
 

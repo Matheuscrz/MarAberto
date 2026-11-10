@@ -1,5 +1,6 @@
 package com.maraberto.emergency.api;
 
+import com.maraberto.shared.api.FieldValidationError;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import org.springframework.http.HttpHeaders;

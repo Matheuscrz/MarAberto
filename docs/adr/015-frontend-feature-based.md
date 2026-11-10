@@ -1,0 +1,7 @@
+# ADR-015: Frontend em estrutura feature-based
+
+- Status: Aceito (2026-11-09)
+- Contexto: o frontend cresceu em pastas por tipo técnico (`components/`, `pages/`, `lib/`, `types.ts` global) e vai receber três áreas autenticadas (`/operador`, `/gestao`, `/admin`). Pastas por tipo espalham cada domínio por todo o projeto e permitem importações cruzadas sem controle.
+- Decisão: adotar `app/` (composição, rotas, layout, providers), `shared/` (componentes, `lib` e tipos reutilizáveis) e `features/<dominio>/` (`api/`, `components/`, `types/`, `pages/`, `index.ts`). Regras verificadas por lint no CI: feature importa apenas de `shared/` e de si; importação entre features só pelo `index.ts` e só nas arestas permitidas (`operator→occurrences`, `management→occurrences`, `admin→stations`, `*→auth`); `shared/` nunca importa de `features/` ou `app/`. A composição entre domínios (ex.: home com mapa + praias + postos) fica em `app/`. Um único app com áreas lazy, em vez de dois bundles.
+- Alternativas: manter a estrutura por tipo (rejeitada: escala mal); workspace pnpm com apps separados público/operacional (adiada: duplica build, CSP e service worker sem ganho enquanto o público não baixar os chunks operacionais).
+- Consequências: migração em PRs pequenos (tabela de/para na Etapa 8A); custo inicial de reorganizar imports; fronteiras passam a falhar o build, não só a revisão; as áreas operacionais não afetam o orçamento de carga do banhista por serem chunks lazy, mas o service worker e a CSP continuam únicos e não podem cachear rotas autenticadas.

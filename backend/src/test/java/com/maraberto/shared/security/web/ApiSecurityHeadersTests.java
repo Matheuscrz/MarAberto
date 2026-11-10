@@ -12,6 +12,12 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
 
+/**
+ * Cabeçalhos de segurança e {@code Cache-Control: no-store} nas rotas de sessão.
+ *
+ * <p>A rota usada é protegida: além dos headers, o teste confirma que a
+ * requisição sem token recebe 401 em RFC 9457 (e não uma página HTML).
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 class ApiSecurityHeadersTests extends PostgisIntegrationTest {
@@ -20,9 +26,9 @@ class ApiSecurityHeadersTests extends PostgisIntegrationTest {
     private MockMvc mockMvc;
 
     @Test
-    void addsSecurityHeadersAndPreventsCachingOfEmergencyResponses() throws Exception {
-        mockMvc.perform(get("/api/v1/emergency-calls"))
-                .andExpect(status().isMethodNotAllowed())
+    void addsSecurityHeadersAndPreventsCachingOfSessionResponses() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/me"))
+                .andExpect(status().isUnauthorized())
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
                 .andExpect(header().string("X-Frame-Options", "DENY"))
                 .andExpect(header().string("Referrer-Policy", "no-referrer"))

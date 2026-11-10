@@ -1,6 +1,7 @@
 package com.maraberto.emergency.api;
 
 import com.maraberto.emergency.application.CreateEmergencyCallService;
+import com.maraberto.shared.api.ApiProblem;
 import com.maraberto.emergency.domain.EmergencyCall;
 import com.maraberto.shared.security.sanitization.SanitizationPolicy;
 import com.maraberto.shared.security.sanitization.Sanitized;

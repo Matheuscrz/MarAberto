@@ -32,6 +32,17 @@ dependencies {
     implementation 'org.springframework.modulith:spring-modulith-starter-core'
     testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
 
+    // Spring Security
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    // Suporte ao algoritmo Argon2id no Spring Security
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+
+    // JJWT (Java JWT)
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
     // Cache distribuído e tempo real
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
