@@ -68,6 +68,21 @@ maraberto:
       # Rotação: adicione chaves antigas como mapa, por exemplo
       # previous-keys: { k0: "<base64>" } (ou MARABERTO_SECURITY_CRYPTO_PREVIOUS_KEYS_K0).
       previous-keys: {}
+    jwt:
+      # Segredo HMAC-SHA256 com no mínimo 32 bytes. O valor padrão é de
+      # desenvolvimento e é recusado no perfil `prod`. Em qualquer ambiente
+      # compartilhado, defina JWT_SECRET (ex.: openssl rand -base64 48).
+      secret: ${JWT_SECRET:dev-only-maraberto-jwt-secret-32bytes!!}
+      issuer: ${JWT_ISSUER:maraberto}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT15M}
+      refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:P7D}
+      # Janela de tolerância para duas abas renovando ao mesmo tempo.
+      refresh-reuse-tolerance: ${JWT_REFRESH_REUSE_TOLERANCE:PT10S}
+  identity:
+    dev-seed:
+      # Contas de desenvolvimento para o login real das três áreas. Desligado
+      # por padrão e recusado no perfil `prod`.
+      enabled: ${IDENTITY_DEV_SEED:false}
 
 server:
   port: 8080

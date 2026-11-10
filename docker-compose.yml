@@ -20,6 +20,11 @@ services:
       # Defina CRYPTO_MASTER_KEY no .env (openssl rand -base64 32) fora do dev local.
       CRYPTO_KEY_ID: ${CRYPTO_KEY_ID:-k1}
       CRYPTO_MASTER_KEY: ${CRYPTO_MASTER_KEY:-ZGV2LW9ubHktbWFyYWJlcnRvLWtleS0zMmJ5dGVzISE=}
+      # Segredo do JWT de desenvolvimento; recusado no perfil `prod`.
+      JWT_SECRET: ${JWT_SECRET:-dev-only-maraberto-jwt-secret-32bytes!!}
+      # Contas demo (operador@/coordenador@/admin@maraberto.dev, senha demo1234).
+      # Mantenha `false` fora do ambiente local.
+      IDENTITY_DEV_SEED: ${IDENTITY_DEV_SEED:-false}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     depends_on:

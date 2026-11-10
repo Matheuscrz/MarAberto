@@ -4,6 +4,8 @@
  * Regras de segurança e de produto:
  * - NUNCA cachear `/api/**` (SOS, autenticação e dados operacionais precisam
  *   ser sempre frescos) nem qualquer requisição não-GET.
+ * - NUNCA interceptar navegação das áreas autenticadas (`/login`, `/operador`,
+ *   `/gestao`, `/admin`): o shell em cache é do app público.
  * - NUNCA cachear `/tiles/**` (PMTiles do ADR-005) nem tráfego de WebSocket.
  * - NUNCA cachear requisições com `Range` (vídeo/stream).
  * - Navegação: network-first com fallback para o shell em cache e, por fim,
@@ -13,8 +15,9 @@
  *
  * Ao mudar o shell, incremente CACHE_VERSION para descartar caches antigos.
  */
-const CACHE_VERSION = 'maraberto-shell-v3-map-worker';
+const CACHE_VERSION = 'maraberto-shell-v4-areas';
 const OFFLINE_URL = '/offline.html';
+const PRIVATE_PREFIXES = ['/login', '/operador', '/gestao', '/admin'];
 const PRECACHE_URLS = [
   '/',
   OFFLINE_URL,
@@ -72,6 +75,14 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.mode === 'navigate') {
+    const isPrivate = PRIVATE_PREFIXES.some(
+      (prefix) =>
+        url.pathname === prefix || url.pathname.startsWith(`${prefix}/`),
+    );
+    if (isPrivate) {
+      // Áreas autenticadas não usam o shell público em cache.
+      return;
+    }
     event.respondWith(networkFirstNavigation(request));
     return;
   }

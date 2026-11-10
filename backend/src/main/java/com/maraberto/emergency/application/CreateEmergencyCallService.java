@@ -14,7 +14,6 @@ import com.maraberto.emergency.infra.EmergencyOutboxEventRepository;
 import com.maraberto.shared.security.crypto.SensitiveDataProtector;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
-import java.util.UUID;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

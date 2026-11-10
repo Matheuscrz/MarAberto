@@ -149,7 +149,7 @@ Prefira PRs pequenos. Um PR que faz uma coisa bem feita é revisado mais rápido
 - Respeite as **fronteiras dos módulos/contextos** (`identity`, `region`, `beaches`, `operations`, `emergency`, `safety`, `tides`, `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`). Um módulo não deve acessar o interior de outro; use a API pública do módulo ou eventos de domínio. O teste `ApplicationModules.verify()` falha o build em caso de violação.
 - Regras de negócio ficam no **domínio**, não em controllers. Controllers apenas traduzem HTTP para casos de uso.
 - **Migrações de banco** (Flyway) são imutáveis depois de integradas: para corrigir, crie uma nova migração.
-- Consultas geoespaciais: use `geography` para distâncias em metros e `geometry` para polígonos; cuide dos índices GiST e valide a geometria.
+- Consultas geoespaciais: use `geography` para distâncias em metros e `geometry` para polígonos; cuide dos índices GiST e valide a geometria. No SOS, siga a §7.12 da Arquitetura: coluna geográfica **gerada** + GiST, `ST_DWithin`/KNN para escolher postos, `ST_Contains` para geofence (que sinaliza, mas **não** bloqueia o chamado) e `EXPLAIN (ANALYZE, BUFFERS)` no PR que cria o índice.
 - Escreva **testes** junto com o código: unitários para regras de negócio e de integração (preferencialmente com Testcontainers) para banco, cache e armazenamento.
 - Trate erros de forma explícita e use mensagens que não vazem detalhes internos.
 
