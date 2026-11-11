@@ -150,6 +150,7 @@ Prefira PRs pequenos. Um PR que faz uma coisa bem feita é revisado mais rápido
 - Regras de negócio ficam no **domínio**, não em controllers. Controllers apenas traduzem HTTP para casos de uso.
 - **Migrações de banco** (Flyway) são imutáveis depois de integradas: para corrigir, crie uma nova migração.
 - Consultas geoespaciais: use `geography` para distâncias em metros e `geometry` para polígonos; cuide dos índices GiST e valide a geometria. No SOS, siga a §7.12 da Arquitetura: coluna geográfica **gerada** + GiST, `ST_DWithin`/KNN para escolher postos, `ST_Contains` para geofence (que sinaliza, mas **não** bloqueia o chamado) e `EXPLAIN (ANALYZE, BUFFERS)` no PR que cria o índice.
+- **Quem notificar não é assunto do broker.** A seleção de destinatários do SOS é uma consulta espacial no banco (§7.5/§7.13), gravada em `emergency_dispatches` na transação do chamado; STOMP, Web Push e RabbitMQ só entregam o que já foi decidido. Não proponha routing key por geohash, célula ou posto, nem filtro geográfico no consumidor.
 - Escreva **testes** junto com o código: unitários para regras de negócio e de integração (preferencialmente com Testcontainers) para banco, cache e armazenamento.
 - Trate erros de forma explícita e use mensagens que não vazem detalhes internos.
 
@@ -189,6 +190,9 @@ Mudanças nas áreas abaixo têm exigências adicionais e podem receber revisão
 - Preserve a **persistência antes da notificação** (nunca avisar sem ter gravado).
 - Operações concorrentes (ex.: dois postos assumindo o mesmo SOS) precisam de **teste de concorrência**.
 - Falhas de infraestrutura (ex.: Redis fora) **não podem impedir** a criação de um SOS.
+- A escolha de **quem** é notificado é do banco, não do transporte: os destinatários entram em `emergency_dispatches` na mesma transação do chamado e a entrega é idempotente por `dispatchId`. Falha da consulta espacial cai em KNN/coordenação e **nunca** descarta o chamado (RN03/RN19, §7.13).
+- O destinatário precisa de **teste de concorrência e de fallback**: dois postos assumindo (um vence), ninguém no raio (KNN), nenhum plantão aberto (coordenação) e broker fora (evento continua `PENDING`).
+- Canal de notificação novo só entra se o perfil mínimo continuar entregando sem ele: RabbitMQ é perfil opcional (ADR-004).
 - A interface **nunca** deve indicar que o socorro está a caminho sem confirmação real.
 
 ### Privacidade e LGPD

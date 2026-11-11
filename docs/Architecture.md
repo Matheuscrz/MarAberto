@@ -52,6 +52,7 @@ O desenho foca em três coisas:
 | 013 | **Ocorrência como entidade própria** (módulo `occurrences`), criada por evento a partir do SOS e por registro manual  | O SOS é um alerta de segundos; a ocorrência é a ficha operacional e também recebe o que veio do 193 ou de fora do sistema (seção 8.7).                                          |
 | 014 | **Busca tolerante a erros no PostgreSQL** (`pg_trgm`) atrás de `SearchPort`; OpenSearch opcional                      | Poucos milhares de documentos não justificam outro serviço na VM única (seção 7.10).                                                                                            |
 | 015 | **Frontend _feature-based_** com fronteiras verificadas por lint                                                      | Um app, áreas lazy por perfil, sem acoplamento entre domínios (seção 6.1).                                                                                                      |
+| 018 | **O PostGIS escolhe quem notificar; o broker só entrega** (dispatches por destinatário, ack por CAS, escalonamento no banco) | Filtro geográfico no broker erra fronteira de célula, não faz KNN e não acompanha o posto que se move (seção 7.13).                                                             |
 
 ### Por que não Kafka (agora)?
 
@@ -173,7 +174,7 @@ Implementados com **Spring Modulith**: cada módulo é um pacote de topo; só a 
 | `analytics`   | Visões agregadas, mapa de calor, dados abertos.                                                                                     | —                                                                              | `EmergencyCallResolved`, `AlertActivated`            |
 | `shared`      | Kernel mínimo (tipos, erros, geoutils).                                                                                             | —                                                                              | —                                                    |
 
-**Dependências permitidas (resumo):** `emergency → operations(api)`, `emergency → audit(api)`, `occurrences → operations(api)`, `occurrences → beaches(api)`, `occurrences → audit(api)` (o `emergency` **não** depende de `occurrences`: a ligação é por evento), `safety → beaches(api)`, `safety → audit(api)`, `operations → beaches(api)`, `occupancy → beaches(api)`, `realtime` apenas escuta eventos. Qualquer outro acoplamento direto é violação.
+**Dependências permitidas (resumo):** `emergency → operations(api)`, `emergency → audit(api)`, `emergency → realtime(api)` (portas de publicação — hoje `RealtimePublisherPort`, no despacho do SOS `SosNotifierPort`), `occurrences → operations(api)`, `occurrences → beaches(api)`, `occurrences → audit(api)` (o `emergency` **não** depende de `occurrences`: a ligação é por evento), `safety → beaches(api)`, `safety → audit(api)`, `operations → beaches(api)`, `occupancy → beaches(api)`, `realtime →` **nenhum módulo de domínio** (consome eventos e entrega; nunca decide destinatário — §7.13). Qualquer outro acoplamento direto é violação.
 
 > **Auditoria é chamada direta, não evento.** Um evento assíncrono pode se perder entre o commit e a escrita; a trilha de auditoria precisa estar **na mesma transação** do ato auditado.
 
@@ -500,7 +501,7 @@ CREATE TABLE occupancy_snapshots (
 
 > As tabelas `beaches`, `critical_zones`, `educational_videos`, `lifeguard_posts` e `safety_alerts` seguem o documento inicial, com os ajustes da seção 7.2. A tabela `event_publication` é criada pelo Spring Modulith (Outbox).
 >
-> A DDL acima é o **alvo**. No código atual, `emergency_calls` guarda `latitude`/`longitude` em `double precision` (ADR-012) e o ponto geográfico entra como coluna **gerada** a partir delas, com índice GiST — ver §7.12. Para a operação de campo, `shift_sessions` (§7.11) substitui `shifts`: inclui base móvel, setor, última posição e o escopo do painel.
+> A DDL acima é o **alvo**. No código atual, `emergency_calls` guarda `latitude`/`longitude` em `double precision` (ADR-012) e o ponto geográfico entra como coluna **gerada** a partir delas, com índice GiST — ver §7.12. Para a operação de campo, `shift_sessions` (§7.11) substitui `shifts`: inclui base móvel, setor, última posição e o escopo do painel. A migração `V8` já materializa `shift_sessions`, `coverage_radius_m` em postos/bases, a coluna gerada com GiST e `emergency_dispatches` com uma linha por destinatário (§7.13). O nome físico da tabela de usuários é `operational_users` (`V6`); `app_users` é o nome do modelo-alvo e aparece aqui apenas como referência conceitual.
 
 ### 7.4 Consulta de contexto do banhista (com _fallback_)
 
@@ -525,22 +526,54 @@ LEFT JOIN critical_zones z
       AND ST_Contains(z.geometry, (SELECT p FROM me));
 ```
 
-### 7.5 Postos elegíveis a um SOS (distância em metros)
+### 7.5 Plantões elegíveis a um SOS (distância em metros)
+
+Elegibilidade = **posto/base ativo** + **plantão aberto** (`shift_sessions.ended_at IS NULL`) + **dentro do raio de cobertura**. A distância é medida a partir da **posição do plantão** (`shift_sessions.last_position`), com a posição da estrutura como fallback. A regra é **notificar todos** os plantões no raio — não uma amostra dos mais próximos. Duas consultas (fixos e móveis), unidas:
 
 ```sql
-SELECT p.id, p.name,
-       ST_Distance(p.location, :sos_point::geography) AS distance_m
+WITH sos AS (
+    SELECT CAST(ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326) AS geography) AS point
+)
+SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
+       -- A distância é de quem atende, não do cadastro da estrutura.
+       ST_Distance(COALESCE(s.last_position, p.location), sos.point) AS distance_m,
+       -- Sem posição reportada a distância cai no cadastro da estrutura: isso é
+       -- sinal, não detalhe. `stale` cobre "nunca reportou" e "reportou há muito".
+       (s.last_position_at IS NULL OR s.last_position_at < :stale_before) AS position_stale
 FROM lifeguard_posts p
+JOIN sos ON TRUE
 JOIN shift_sessions s ON s.post_id = p.id AND s.ended_at IS NULL
+JOIN operational_users u ON u.id = s.user_id AND u.active
 WHERE p.active
-  AND ST_DWithin(p.location, :sos_point::geography, :coverage_radius_m)
+  AND ST_DWithin(COALESCE(s.last_position, p.location), sos.point,
+                 COALESCE(p.coverage_radius_m, :default_coverage_radius_m))
+
+UNION ALL
+
+SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
+       ST_Distance(COALESCE(s.last_position, b.location), sos.point) AS distance_m,
+       (s.last_position_at IS NULL OR s.last_position_at < :stale_before) AS position_stale
+FROM mobile_bases b
+JOIN sos ON TRUE
+JOIN shift_sessions s ON s.mobile_base_id = b.id AND s.ended_at IS NULL
+JOIN operational_users u ON u.id = s.user_id AND u.active
+WHERE b.active
+  AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point,
+                 COALESCE(b.coverage_radius_m, :default_coverage_radius_m))
+
 ORDER BY distance_m
-LIMIT 3;
+LIMIT :max_recipients;                                                -- teto de 50
 ```
 
-- `ST_DWithin` sobre `geography` mede metros e é o que aciona o índice **GiST** de `lifeguard_posts.location`; `ST_Distance` só projeta o valor.
-- `coverage_radius_m` é um raio por posto; enquanto a coluna não existir, use o padrão configurado da instalação (ex.: 2 km). A coluna entra na migração que implementa a consulta (V8+), junto da coluna gerada do chamado.
-- Quando nenhum posto cai no raio, o _fallback_ é o vizinho mais próximo por KNN (`ORDER BY location <-> point`), para nunca deixar um SOS sem destinatário.
+- **Medir pela estrutura é bug de produto, não otimização.** O posto é um cadastro; o guarda-vidas está onde o plantão diz que está. Antes da correção, um plantão em campo a poucos metros do chamado era despachado com a distância do posto cadastrado (207 km no caso real que originou a regra) e aparecia como "mais próximo" para quem estava longe.
+- **`last_position` vence `p.location`/`b.location`.** Sem posição reportada (plantão recém-aberto, ou posto fixo em que ninguém atualizou), a estrutura é o fallback — e o console mostra o aviso de que a distância vem dela.
+- **Sem prefiltro espacial da estrutura.** Nenhum `ST_DWithin` constante sobre `p.location`/`b.location`: ele descartaria justamente o plantão distante do posto e perto do chamado. O conjunto varrido é o de plantões abertos (índices parciais da `V8`) com a estrutura por chave primária; com centenas de plantões abertos o custo é menor do que decidir pelo posto e errar a distância. Não existe mais `maraberto.dispatch.search-radius-m`.
+- `coverage_radius_m` é **por posto/base** (ex.: 1 km em posto urbano, 3 km em trecho isolado). A coluna existe desde a `V8`; quando nula, vale `maraberto.dispatch.default-coverage-radius-m` (2 km por padrão). O raio continua sendo da estrutura: quem se desloca leva a cobertura do posto/base a que está vinculado.
+- **`position_stale` é sinal, não descarte.** Nas **duas** ramificações fica `stale` quando não há posição reportada (`last_position_at IS NULL`) **ou** quando ela é mais velha que `maraberto.dispatch.position-stale-after` (padrão 30 min). "Nunca reportou" também é stale porque a distância, nesse caso, é a do cadastro da estrutura — exatamente o caso em que dizer "de você" mentiria (o 196,4 km real era um plantão aberto sem `last_position`). O console rotula a distância como "da sua unidade" quando `position_stale` e "de você" quando não.
+- **`max-recipients` é teto de segurança, não seleção.** O padrão é 50 justamente para uma instalação inteira dentro de um raio mal configurado não gerar fan-out absurdo. Não use esse valor para "escolher os 3 primeiros": todos os plantões no raio são notificados.
+- `shift_sessions` tem algumas centenas de linhas abertas por instalação: a consulta usa o índice parcial de plantão aberto; **não** criar GiST em `last_position` sem um `EXPLAIN` que mostre varredura dominante (§7.6).
+- Quando ninguém cai no raio, o _fallback_ é o vizinho mais próximo por KNN puro (`ORDER BY <-> LIMIT :fallback_recipients`, padrão 3, sem `ST_DWithin`); se nem isso existir, a coordenação central é notificada e a resposta orienta o 193 (RN03). O SOS nunca fica sem destinatário nem deixa de ser gravado.
+- O resultado destas consultas vira **uma linha de `emergency_dispatches` por destinatário** dentro da transação do SOS (§7.13); a entrega não recalcula nada.
 - Detalhes de índice, geofence e medição com `EXPLAIN` estão na §7.12.
 
 ### 7.6 Otimização de consultas, cache e idempotência (usar quando justificado)
@@ -728,13 +761,19 @@ CREATE TABLE shift_sessions (
     last_seen_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_shift_end CHECK (ended_at IS NULL OR ended_at >= started_at)
 );
-CREATE INDEX idx_shift_open ON shift_sessions (user_id) WHERE ended_at IS NULL;
-CREATE INDEX idx_shift_scope ON shift_sessions (beach_id, beach_sector_id, started_at DESC);
+CREATE UNIQUE INDEX uq_shift_open  ON shift_sessions (user_id) WHERE ended_at IS NULL;
+CREATE INDEX idx_shift_open        ON shift_sessions (user_id) WHERE ended_at IS NULL;
+CREATE INDEX idx_shift_scope       ON shift_sessions (beach_id, beach_sector_id, started_at DESC);
 ```
 
+- `uq_shift_open` impede dois plantões abertos para o mesmo operador (§17, concorrência) e é o índice que a consulta de elegibilidade do SOS usa (§7.5).
+- No código atual a tabela de usuários é `operational_users` (`V6`); o DDL acima usa `app_users`, que é o nome do modelo-alvo (§7.3).
+- **A `V8` materializa esta tabela** junto de `coverage_radius_m` e do dispatch por destinatário (§7.13). Sem plantão aberto não há como saber "quem está perto", então esta é a primeira dependência do despacho do SOS. O ciclo está implementado em `operations` (`GET /api/v1/dispatch/shifts/targets`, `POST /api/v1/dispatch/shifts`, `GET /api/v1/dispatch/shifts/current`, `PUT /api/v1/dispatch/shifts/current/position`, `POST /api/v1/dispatch/shifts/current/close`).
+- **Só estrutura ativa é destino de plantão.** `GET /api/v1/dispatch/shifts/targets` devolve postos fixos (com praia) e bases móveis ativos, com a posição e o raio de cobertura; o console só permite abrir plantão nessa lista. Plantão em posto/base inativo continuaria no banco e sumiria da seleção do SOS sem aviso.
 - **Check-in/check-out explícito:** o operador inicia e encerra o plantão; o encerramento remove a posição da visão da coordenação (o histórico fica só como duração, sem trajeto).
-- **Atualização da posição:** no início do plantão e sob ação explícita ("atualizar minha posição"), com `position_accuracy_m`; sem _background geolocation_ e sem _watchPosition_ contínuo.
-- **Privacidade:** `last_position` é dado sensível (RN14) — visível apenas à coordenação do escopo, nunca em listagem pública, log, cache, métrica ou exportação aberta. A posição do posto/base é pública; a do operador não.
+- **Atualização da posição:** no início do plantão (GPS do aparelho, com ajuste manual), sob ação explícita ("atualizar minha localização") e por renovação a cada 5 min **enquanto o console está aberto e visível**, com `position_accuracy_m`. Sem _background geolocation_, sem `watchPosition` e sem persistência de coordenada no navegador — a renovação existe para a base móvel não envelhecer além de `position-stale-after` (30 min).
+- **A posição do plantão é o ponto do despacho.** Vale para posto fixo e base móvel: o raio de cobertura é da estrutura, mas a distância medida é a de `last_position` (fallback: posição do posto/base). Um guarda-vidas em campo com o posto cadastrado a 200 km precisa ser escolhido e medido pela posição em que está, não pela ficha da estrutura (§7.5).
+- **Privacidade:** `last_position` é dado sensível (RN17) — visível apenas à coordenação do escopo, nunca em listagem pública, log, cache, métrica ou exportação aberta. A posição do posto/base é pública; a do operador não.
 - **Painel:** uma consulta por escopo agrega plantões abertos + última posição + contadores do dia (ocorrências por origem/status, sinalizações, pendências CIOSP). Contadores usam índices parciais (`occurred_at`, `status`) e podem virar _view_ de leitura; não usar _view materializada_ para SOS/plantão, que precisam ser frescos.
 - **Escopo:** `COORDINATOR` vê praias/setores do seu escopo; `ADMIN` vê tudo; `LIFEGUARD` vê o próprio plantão e o posto.
 
@@ -744,10 +783,10 @@ O SOS é o fluxo mais sensível a latência (RNF01: p95 < 3 s) e o único que **
 
 | Consulta do caminho de SOS                                   | Coluna indexada                                                          | Índice            | Operador espacial                             |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------ | ----------------- | --------------------------------------------- |
-| Postos/bases elegíveis no raio do chamado (§7.5, RF07/RF21)   | `lifeguard_posts.location`, `mobile_bases.location` — `geography(Point,4326)` | **GiST** (V1)     | `ST_DWithin` + KNN `<->`                      |
+| Plantões elegíveis no raio do chamado (§7.5, RF07/RF21)       | `shift_sessions.last_position` (fallback: `lifeguard_posts.location`) com plantão aberto | **B-tree parcial** (`V8`) | `ST_DWithin` sobre `geography` (sem GiST) |
 | Geofence: o chamado caiu dentro da praia (+ margem)?          | `beaches.boundary` — `geometry(Polygon,4326)`                             | **GiST** (V1)     | `ST_Contains` / `ST_DWithin` sobre `geography` |
 | Zona de risco no ponto do chamado (contexto do alerta)        | `critical_zones.geometry` — `geometry(Polygon,4326)`                       | **GiST** (V1)     | `ST_Contains`                                 |
-| Chamados recentes numa área (dedupe, painel, calor por trecho) | `emergency_calls.location` — derivada de `latitude`/`longitude`            | **GiST** (a criar) | `ST_DWithin` + janela de tempo                |
+| Chamados recentes numa área (dedupe, painel, calor por trecho) | `emergency_calls.location` — derivada de `latitude`/`longitude`            | **GiST** (V8)      | `ST_DWithin` + janela de tempo                |
 | Fila de chamados sem ack (escalonamento, §8.1)                | `emergency_calls.created_at` com filtro de `status`                        | B-tree **parcial** | — (não é consulta espacial)                   |
 
 **Coluna geográfica derivada.** A verdade continua em `latitude`/`longitude` (`double precision`), porque despacho e geofence precisam do valor exato e a ADR-012 veda cifrar a mesma coluna usada para consulta espacial. Em vez de duplicar a escrita (e arriscar divergência), o banco deriva o ponto:
@@ -769,22 +808,38 @@ CREATE INDEX idx_emergency_calls_location
 - Nada muda no ORM: a coluna não é mapeada, não é escrita pela aplicação e não aparece em DTO.
 - `geography` e não `geometry`: `ST_DWithin` sobre `geometry` em 4326 mede **graus**, não metros (§7.2, item 6).
 
-**Postos elegíveis (raio em metros, com _fallback_ por vizinho mais próximo).**
+**Plantões elegíveis (raio em metros, todos os plantões no raio).**
 
 ```sql
-SELECT p.id,
-       ST_Distance(p.location, :sos_point::geography) AS distance_m
-FROM lifeguard_posts p
-JOIN shift_sessions s ON s.post_id = p.id AND s.ended_at IS NULL
-WHERE p.active
-  AND ST_DWithin(p.location, :sos_point::geography, :coverage_radius_m)
-ORDER BY p.location <-> :sos_point::geography
-LIMIT 3;
+WITH sos AS (
+    SELECT CAST(ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326) AS geography) AS point
+)
+SELECT s.id,
+       ST_Distance(COALESCE(s.last_position, p.location), sos.point) AS distance_m
+FROM shift_sessions s
+JOIN sos ON TRUE
+JOIN lifeguard_posts p ON p.id = s.post_id AND p.active
+WHERE s.ended_at IS NULL
+  AND ST_DWithin(COALESCE(s.last_position, p.location), sos.point,
+                 COALESCE(p.coverage_radius_m, 2000));
 ```
 
-- O `ST_DWithin` é o que usa o GiST; `ST_Distance` só projeta a distância e o `<->` ordena.
-- Se nenhum posto estiver no raio, o _fallback_ é KNN puro (`ORDER BY location <-> point LIMIT 3`, sem `ST_DWithin`): sempre há alguém para notificar.
-- `coverage_radius_m` é por posto quando a coluna existir; até lá, vale o raio padrão configurado da instalação. A coluna e a coluna gerada de `emergency_calls` entram na mesma migração (V8+).
+- **Sem GiST nesta consulta, de propósito.** O predicado é sobre `COALESCE(last_position, location)` — expressão que nenhum índice espacial da estrutura atende. Quem seleciona o conjunto é o índice **parcial** de plantão aberto (`idx_shift_post_open`/`idx_shift_base_open`, `V8`), com a estrutura por chave primária. Com centenas de plantões abertos por instalação isso é barato; medir antes de "otimizar" com GiST em `last_position` (§7.6).
+- **Prefiltro espacial da estrutura seria errado.** Um `ST_DWithin(p.location, …)` constante descarta o plantão cujo posto está longe e cujo operador está no local do chamado — exatamente o caso real que fez um chamado a poucos metros aparecer com 207 km. O envelope `maraberto.dispatch.search-radius-m` foi removido junto com o prefiltro.
+- Se nenhum plantão estiver no raio, o _fallback_ é KNN puro (`ORDER BY COALESCE(last_position, location) <-> point LIMIT :fallback_recipients`, padrão 3, sem `ST_DWithin`): o chamado nunca fica sem destinatário. O KNN também ordena sobre a expressão, sem índice.
+- `coverage_radius_m` é por posto (coluna da `V8`); nulo cai no raio padrão `maraberto.dispatch.default-coverage-radius-m`. A coluna e a coluna gerada de `emergency_calls` entraram na mesma migração (`V8`).
+- `max-recipients` (padrão 50) é **teto de segurança** do `INSERT`, não critério de escolha: todos os plantões no raio recebem despacho.
+
+**Medição (PostgreSQL 16 + PostGIS 3.4, tabela sintética).**
+
+| Cenário | Consulta | Plano | Tempo |
+| ------- | -------- | ----- | ----- |
+| 5.000 postos | `ST_DWithin` com `COALESCE(coverage_radius_m, …)` por linha (desenho antigo, decidindo pelo posto) | `Seq Scan`, 76 linhas | **14,3 ms** |
+| 5.000 postos | prefiltro constante de 10 km + raio real (desenho antigo) | `Index Scan` no GiST | **1,7 ms** |
+| 20.000 posts, 20.000 usuários, 196 plantões | consulta completa (`posts → shifts → users`) | `Nested Loop` a partir do GiST | **8,0 ms** |
+| 20.000 posts, 3.185 plantões | consulta completa | `Bitmap Index Scan` no GiST | **16,6 ms** |
+
+As duas primeiras linhas são o desenho **anterior**, que decidia pelo posto: serviram para justificar o prefiltro constante e continuam aqui como registro. A consulta atual parte de `shift_sessions` e faz o join por PK, então o plano dela precisa ser remedido com o volume real de plantões abertos — o custo absoluto esperado é baixo (centenas de linhas), mas a regra da §7.6 continua valendo: `EXPLAIN (ANALYZE, BUFFERS)` antes de qualquer índice novo.
 
 **Chamados recentes na área** (dedupe de duplo toque, painel da coordenação, calor por trecho):
 
@@ -806,7 +861,87 @@ A janela de tempo reduz o conjunto e o GiST resolve o raio; o plano real (medido
 - **Medir antes de criar.** Toda consulta acima entra com `EXPLAIN (ANALYZE, BUFFERS)` no PR; sem plano usando o índice e ganho medido, o índice não entra (§7.6).
 - **Manutenção.** `emergency_calls` é tabela de alto volume e pouca atualização: monitorar _bloat_ do GiST e revisar o índice se ele não for usado por nenhuma consulta real (`pg_stat_user_indexes.idx_scan`).
 - **Privacidade.** A coluna derivada não amplia exposição: sai do mesmo dado já armazenado e herda a restrição de `latitude`/`longitude` (ADR-012) — nunca em listagem pública, GeoJSON, log, cache, métrica ou exportação. Índice não é superfície de API.
-- **Estado atual:** a `V3` cria `emergency_calls` com `latitude`/`longitude` e **sem** índice espacial; a coluna derivada e o GiST entram junto da consulta de postos elegíveis (escalonamento do SOS), não antes dela.
+- **Estado atual:** a `V8` adiciona a coluna gerada `location` e o GiST `idx_emergency_calls_location`, já usados pela consulta de elegíveis (`operations.infra.JdbcEligibleRespondersRepository`), que roda na transação do SOS.
+
+### 7.13 Despacho do SOS: quem notificar e como entregar
+
+São **duas decisões diferentes**, e misturá-las é a origem da maior parte dos erros de despacho:
+
+| Pergunta                                    | Quem responde                                          | Onde vive                             |
+| ------------------------------------------- | ------------------------------------------------------ | ------------------------------------- |
+| Quem deve ser notificado neste chamado?     | **PostGIS** (verdade única, por chamado)               | `emergency_dispatches` por destinatário |
+| Como a mensagem chega até essa pessoa?      | Transporte (STOMP, Web Push, RabbitMQ opcional)         | porta `SosNotifierPort` em `realtime`  |
+| Quem assumiu o chamado?                     | Banco, por _compare-and-set_                            | `emergency_calls` + `emergency_dispatches` |
+| Quem é notificado se ninguém assumir?       | Banco, por job de escalonamento (round 2)               | índice parcial `idx_emergency_calls_open` |
+
+**Regra dura:** o broker **não** filtra geografia. Routing key por geohash/célula erra a fronteira da célula, não acompanha raio por posto, não sabe que a base móvel se deslocou e não tem KNN de fallback (ADR-018). O filtro espacial fica em um lugar só: a consulta da §7.5, dentro da transação do SOS.
+
+```sql
+-- V8 (aplicada): emergency_dispatches deixa de ser "um pendente por chamado"
+-- e passa a ser a prova de notificação, uma linha por destinatário.
+-- A §7.3 já previa uma linha por posto (post_id); os nomes físicos seguem a V3
+-- (emergency_call_id) e ganham recipient_* porque base móvel e operador também recebem.
+ALTER TABLE emergency_dispatches
+    ADD COLUMN round              SMALLINT NOT NULL DEFAULT 1,
+    ADD COLUMN recipient_post_id  UUID REFERENCES lifeguard_posts(id),
+    ADD COLUMN recipient_base_id  UUID REFERENCES mobile_bases(id),
+    ADD COLUMN recipient_user_id  UUID REFERENCES operational_users(id),
+    ADD COLUMN distance_m         NUMERIC(8,1),
+    ADD COLUMN position_stale     BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN notified_at        TIMESTAMPTZ,
+    ADD COLUMN acknowledged_at    TIMESTAMPTZ,
+    ADD COLUMN cancelled_at       TIMESTAMPTZ;
+
+-- a V3 é imutável; o dispatch antigo (sem destinatário) é dado de desenvolvimento
+ALTER TABLE emergency_dispatches DROP COLUMN assigned_post_id;
+ALTER TABLE emergency_dispatches
+    ADD CONSTRAINT ck_emergency_dispatches_recipient CHECK (
+        num_nonnulls(recipient_post_id, recipient_base_id, recipient_user_id) >= 1)
+    NOT VALID;
+
+CREATE UNIQUE INDEX uq_emergency_dispatches_recipient
+    ON emergency_dispatches (emergency_call_id, round,
+                             COALESCE(recipient_post_id, recipient_base_id, recipient_user_id));
+CREATE INDEX idx_emergency_dispatches_pending
+    ON emergency_dispatches (created_at) WHERE status = 'PENDING';
+CREATE INDEX idx_emergency_dispatches_unacked
+    ON emergency_dispatches (created_at) WHERE status IN ('PENDING', 'NOTIFIED');
+
+-- colunas de ciclo de vida que o ack precisa (alvo da §7.3)
+ALTER TABLE emergency_calls
+    ADD COLUMN assigned_post_id UUID REFERENCES lifeguard_posts(id),
+    ADD COLUMN acknowledged_at  TIMESTAMPTZ,
+    ADD COLUMN version          BIGINT NOT NULL DEFAULT 0;
+```
+
+O `NOT VALID` da constraint de destinatário é deliberado: a `V3` já está aplicada e pode conter despachos antigos sem destinatário em bancos de desenvolvimento. A regra vale para toda linha nova e pode ser validada depois de uma limpeza.
+
+- **Seleção dentro da transação do SOS.** A consulta da §7.5 roda em milissegundos e o `INSERT` de um despacho por plantão elegível é barato; o custo de não fazer isso é notificar depois, fora da verdade, e não conseguir provar quem foi avisado. **Todos os plantões abertos dentro do raio recebem despacho** (o teto `max-recipients=50` existe só para raio mal configurado); o KNN de fallback é limitado (`fallback-recipients=3`) porque ali é degradação, não a regra. A chamada é registrada de qualquer forma: falha da consulta espacial cai no KNN puro e, no limite, na coordenação (RN03). **A geoindexação nunca bloqueia o salvamento do SOS.** A seleção roda em `REQUIRES_NEW`: um erro de SQL nela não aborta a transação que gravou o chamado.
+- **Um evento de outbox por destinatário**, com `messageId = dispatchId`. Reenviar o mesmo `dispatchId` não duplica alerta: o consumidor é idempotente por `dispatchId` e o console deduplica por `callId`. A outbox usa lease (`claimed_at`, `maraberto.emergency.outbox.claim-lease`): reivindicar, publicar e marcar acontecem em transações curtas, então a publicação nunca segura o lock das linhas.
+- **Ack por _compare-and-set_:** `UPDATE emergency_calls SET status = 'ACKNOWLEDGED', assigned_post_id = ?, version = version + 1 WHERE id = ? AND status = 'DISPATCHED'`. O primeiro vence; os demais recebem `409` com o tipo `call-already-acknowledged`. Quem recebeu o alerta mas perdeu a corrida também recebe `409`; `403` (`call-not-assigned`) é só para quem nunca foi despachado. O ack fecha `acknowledged_at` no vencedor, cancela os demais despachos e publica o cancelamento após o commit.
+- **Assumir não apaga o chamado.** `GET /api/v1/dispatch/calls` é a fila de disputa (só `DISPATCHED` com o despacho em `PENDING`/`NOTIFIED`); `GET /api/v1/dispatch/calls/assigned` devolve o **atendimento em curso** do operador (`c.status IN ('ACKNOWLEDGED', 'EN_ROUTE', 'ON_SCENE')` e `d.status = 'ACKNOWLEDGED'`), com `acknowledgedAt` e a mesma coordenada restrita. É essa rota que mantém a localização do banhista na mesa depois do ack: o console mostra a **rota até o banhista** (deep link `https://www.google.com/maps/dir/?api=1&destination=lat,lon`, aberto só no clique, `rel="noreferrer"`) e é dela que nascerá a ocorrência operacional (`occurrences`, ADR-013). Sem isso, o endereço do chamado desapareceria no instante em que alguém o assume — e a ficha do CIOSP perderia a referência.
+- **Distância atual, não a da abertura.** O `distance_m` do despacho é a foto do instante do SOS; depois do ack o guarda-vidas se desloca. Por isso `/calls/assigned` também devolve `currentDistanceMeters` (`ST_Distance(sh.last_position, c.location)` da **última posição do plantão** até o ponto do banhista), `currentPositionAt` e `currentPositionStale` (mesmo `maraberto.dispatch.position-stale-after`). O console reconcilia de 10 em 10 s e mostra a distância em destaque ("Distância agora"), com a hora da posição — é o que permite decidir entre deslocamento **a pé ou de veículo**. Sem posição no plantão, a distância da abertura é o fallback explícito ("na abertura do chamado"); posição desatualizada é avisada, nunca apresentada como "de você".
+- **Coordenada só em rota autenticada e só por gesto.** O frame STOMP, o log, a outbox e a notificação continuam sem coordenada; o ponto chega por `/calls` e `/calls/assigned` (destinatário + papel) e só sai do navegador para o app de mapas quando o operador toca em "Abrir rota". O console avisa isso na própria ficha.
+- **Abandonar o atendimento não é ack.** Ainda não há transição para `RESOLVED`/`FALSE_ALARM` a partir do console; o atendimento em curso permanece na mesa até a feature de ocorrências concluí-la. Não existe endpoint para "sumir" com o chamado.
+- **Escalonamento no banco, não no broker.** Job `@Scheduled` + ShedLock, `FOR UPDATE SKIP LOCKED` sobre `idx_emergency_calls_open`: `DISPATCHED` sem ack por N segundos (padrão 20 s) → round 2 (raio maior, postos de apoio e coordenação) → `EmergencyCallEscalated`. Mensagem com _delay_ no Rabbit seria estado invisível: não aparece no painel, não sobrevive a _restart_ limpo e não é auditável.
+- **Canais redundantes e independentes:** destino STOMP por usuário, Web Push e _polling_ de reconciliação (`GET /api/v1/dispatch/calls` a cada 10 s). Qualquer um sozinho tem de entregar; **nenhum** é fonte da verdade.
+- **Autenticação do WebSocket:** o JWT é validado no frame `CONNECT` (`StompAuthenticationInterceptor`, com `identity.api.AccessTokenVerifier`) e a entrega é por usuário. O cliente assina `/user/queue/sos`; o servidor publica em `/queue/sos` via `convertAndSendToUser`. O tópico aberto `/topic/operational.emergency.calls` foi **removido** — sem autorização no socket, "notificar só os próximos" é cosmético.
+- **Porta, não acoplamento:** `realtime.api.SosNotifierPort` com adaptadores `StompSosNotifier` (padrão) e `AmqpSosNotifier` (perfil `rabbit`). O `emergency` não importa `realtime` além da porta, e o `@Externalized` do Spring Modulith **não** é usado no SOS (a outbox cifrada própria já é o registro de publicação; ter as duas duplicaria a semântica).
+
+**Publicação da outbox com broker externo.** O `publishPending` reivindica as linhas com lease em uma transação curta, publica **fora** dela e marca `PUBLISHED` em outra transação curta, por `id` e com checagem de status. Com o perfil `rabbit` (passo 5) entram publisher confirms + `mandatory`; a semântica continua _at-least-once_ e, sem confirm, o evento fica `PENDING` e o sweep reenvia.
+
+| Item                | Proposta                                                                   | Por quê                                                                    |
+| ------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Exchange            | `maraberto.emergency` (topic, durable)                                      | Separa o domínio de emergência do resto.                                   |
+| Routing keys        | `sos.notify` e `sos.cancel`                                                 | Semânticas e estáveis; destinatários vão no corpo, já resolvidos pelo banco |
+| Filas               | `q.sos.realtime`, `q.sos.push` (+ `*.parking`), DLX `maraberto.emergency.dlx` | Um consumidor por papel; sem uma fila por posto                            |
+| Mensagem            | persistente, `messageId = dispatchId`, só ids (`callId`, `dispatchId`, `recipientUserId`, `postId`/`baseId`, `round`) | Sem coordenadas, sem nome de vítima, sem `clientRequestId`                 |
+| Consumidor          | ack manual, prefetch baixo, idempotente por `dispatchId`, retry com TTL e DLQ | Reprocessamento seguro e falha visível                                     |
+| Contingência        | Rabbit fora → evento `PENDING` + sweep; STOMP direto e polling seguem        | O broker é perfil opcional (ADR-004): nenhum canal pode ser obrigatório     |
+
+- **Estado da implementação (2026-11-11):** passos 1–4 concluídos — `V8` aplicada (`shift_sessions`, `coverage_radius_m`, coluna gerada + GiST, dispatch por destinatário), consulta de elegíveis em `operations.infra.JdbcEligibleRespondersRepository` (todos os plantões no raio, com a **posição do plantão** decidindo a distância e a estrutura só como fallback; KNN de fallback; `position_stale` para posto e base móvel, inclusive quando nunca reportaram), despacho na transação do SOS com um evento de outbox por destinatário, STOMP autenticado por JWT no `CONNECT` e ack por CAS com cancelamento dos demais. No frontend, o console do operador (`/operador`) consome `GET /api/v1/dispatch/calls`, assume por `POST …/ack` (tratando `409`/`403`), assina `/user/queue/sos` por STOMP, reconcilia por _polling_ de 10 s e abre **popup, sirene e notificação do sistema** ao receber o despacho; o chamado assumido continua na mesa em "Em atendimento por você" (`GET …/calls/assigned`) com rota até o banhista e **distância agora** (calculada da última posição do plantão, com hora da posição, para decidir entre a pé e veículo), e o check-in de plantão exige a posição do aparelho (sem ela o despacho mede pelo cadastro da estrutura). Faltam: perfil `rabbit` com confirms/DLQ, Web Push com o app fechado, job de escalonamento (round 2), métricas, sonda e k6, e a conclusão do atendimento (`RESOLVED`) pela ocorrência. Testes de elegibilidade: `SosDispatchEligibilityTests`; ack e atendimento em curso: `EmergencyDispatchAckTests`.
+- **Ordem de implementação:** (1) `V8` com `shift_sessions`, `coverage_radius_m`, coluna gerada + GiST e dispatch por destinatário — **feito**; (2) consulta de elegíveis com `EXPLAIN (ANALYZE, BUFFERS)` no PR — **feito**; (3) dispatch na transação + fan-out STOMP autenticado, **sem Rabbit** — **feito**; (4) ack por CAS e cancelamento — **feito**; (5) perfil `rabbit` com confirms e Testcontainers; (6) Web Push e escalonamento; (7) métricas, sonda e k6. Cada passo entra com a documentação no mesmo PR. Detalhes e alternativas na [ADR-018](adr/018-selecao-de-destinatarios-e-entrega-do-sos.md).
+- **Métricas do despacho:** `sos_time_to_notify_seconds` (do commit à notificação), `sos_unacked_current`, `sos_dispatches_by_round_total`, `sos_dispatch_without_recipient_total` (fallback acionado) e, no perfil `rabbit`, profundidade de DLQ e taxa de retry.
 
 ---
 
@@ -828,32 +963,35 @@ sequenceDiagram
 
     B->>N: POST /api/v1/emergency-calls (client_request_id, lat, lon, accuracy)
     N->>E: encaminha (rate limit via Redis)
-    E->>DB: postos elegíveis no raio (GiST: ST_DWithin + KNN, §7.12)
-    E->>DB: TX única: insere call + dispatches + audit + event_publication
+    E->>DB: postos/bases elegíveis no raio (GiST: ST_DWithin + KNN, §7.5)
+    E->>DB: TX única: insere call + 1 dispatch por destinatário + audit + outbox
     DB-->>E: commit
     E-->>B: 201 {callId, status=DISPATCHED}
-    Note over E,R: após o commit, o registry publica o evento
-    E->>R: evento EmergencyCallCreated
+    Note over E,R: após o commit, cada dispatch vira uma notificação
+    E->>R: evento por destinatário (dispatchId)
     R->>RD: publish no canal do posto
-    RD-->>G: WebSocket (alerta + som)
+    RD-->>G: WebSocket /user/queue/sos (alerta + som)
     R->>G: Web Push (tela bloqueada)
     G->>E: PATCH /emergency-calls/{id}/ack
     E->>DB: UPDATE ... WHERE status='DISPATCHED' (compare-and-set)
+    E->>R: sos.cancel para os demais destinatários
     E-->>B: status ACKNOWLEDGED (polling/SSE)
     J->>DB: a cada 5 s: DISPATCHED sem ack > 20 s?
-    J->>E: escalar (próximos postos + coordenação)
+    J->>E: escalar (round 2: raio maior + coordenação)
 ```
 
 **Pontos de projeto**
 
 1. **Persistir antes de notificar.** O 201 só volta depois do commit. Se o app cair em seguida, o Outbox republica o evento na reinicialização.
-2. **Idempotência.** `client_request_id` evita SOS duplicado por duplo toque ou retry de rede.
-3. **Ack por _compare-and-set_.** `UPDATE emergency_calls SET status='ACKNOWLEDGED', assigned_post_id=?, version=version+1 WHERE id=? AND status='DISPATCHED'` — o primeiro posto a assumir vence; os demais recebem "já assumido". Sem lock longo, sem corrida.
-4. **Escalonamento durável.** Job (com ShedLock para múltiplas instâncias) consulta o índice parcial `idx_calls_open`. Sem dependência de timer em memória.
+2. **Idempotência.** `client_request_id` evita SOS duplicado por duplo toque ou retry de rede; `dispatchId` evita alerta duplicado no console.
+3. **Ack por _compare-and-set_.** `UPDATE emergency_calls SET status='ACKNOWLEDGED', assigned_post_id=?, version=version+1 WHERE id=? AND status='DISPATCHED'` — o primeiro posto a assumir vence; os demais recebem "já assumido" e o evento `sos.cancel`. Sem lock longo, sem corrida.
+4. **Escalonamento durável.** Job (com ShedLock para múltiplas instâncias) consulta o índice parcial `idx_emergency_calls_open`. Sem dependência de timer em memória nem de fila com _delay_.
 5. **Canais redundantes.** WebSocket, Web Push e _polling de reconciliação_ (`GET /operations/sos/open` a cada 10 s no console). Qualquer um sozinho entrega.
 6. **Cliente honesto.** Se o POST não for confirmado em ~5 s, o app mostra **"Não foi possível enviar — ligue 193"** com botão de chamada. Nunca exibir "socorro a caminho" sem ack.
 7. **Anti-abuso.** Redis (token bucket) limita SOS por usuário/dispositivo; a geofence marca chamados fora da praia (+ margem) para triagem e priorização — sem bloquear o envio.
 8. **Geoindexação.** A escolha dos postos usa GiST sobre `geography` (`ST_DWithin` + KNN), a geofence usa `ST_Contains` sobre o polígono da praia e o painel usa a coluna derivada de `emergency_calls` — ver §7.12. Índice espacial **não** entra no caminho crítico: a geofence marca `outside_area` para triagem, mas nunca impede gravar e despachar o chamado.
+9. **Quem escolhe é o banco.** A lista de destinatários é materializada em `emergency_dispatches` dentro da transação; o broker só entrega (§7.13, ADR-018). Se a consulta espacial falhar, o chamado é gravado com fallback KNN e coordenação — **nunca** por filtro no broker ou no cliente.
+10. **Sem ninguém no raio.** KNN puro escolhe os mais próximos; sem nenhum plantão aberto, a coordenação é notificada e a resposta orienta o 193 (RN03). Um SOS jamais fica sem destinatário registrado.
 
 ### 8.2 Bandeiramento
 
@@ -980,6 +1118,8 @@ sequenceDiagram
 - **Fan-out entre instâncias:** a instância que processa o evento publica em canal Redis; todas retransmitem aos seus clientes conectados. Redis Pub/Sub é _at-most-once_ — por isso **a verdade está no banco** e o console reconcilia periodicamente.
 - **Reconexão:** _backoff_ exponencial com _jitter_; ao reconectar, o cliente busca o estado atual (SOS abertos) em vez de confiar em mensagens perdidas.
 - **Web Push:** payload mínimo (id e tipo); o conteúdo é buscado após abrir. Observação: o suporte a push em iOS depende de a PWA estar instalada — validar com os dispositivos reais dos operacionais.
+- **Destino por usuário, não tópico aberto.** O console assina `/user/queue/sos`; o JWT é validado no frame `CONNECT` (`StompAuthenticationInterceptor` com `identity.api.AccessTokenVerifier`) e o destinatário já vem resolvido do banco (§7.13). O tópico aberto `/topic/operational.emergency.calls` foi removido; o frame entregue continua redigido (sem coordenadas e sem `clientRequestId`), porque o payload útil é sempre buscado por HTTP autenticado.
+- **Ajuste no cliente (pendente no PWA):** o console do operador ainda usa dados de demonstração; falta o cliente STOMP (`@stomp/stompjs`) autenticando no `CONNECT` e o ack real por `POST /api/v1/dispatch/calls/{callId}/ack`.
 - **Escala:** 300 operacionais em WebSocket é trivial; o público **não** mantém conexão.
 
 ---
@@ -1015,10 +1155,12 @@ sequenceDiagram
 | Perfil                | Quando                                                                                                                                    | O que muda                                                                                       |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | _(padrão)_ sem broker | Perfil mínimo e equilibrado                                                                                                               | Tudo roda in-process + Outbox.                                                                   |
-| `rabbit`              | Isolar trabalhadores (envio de push, processamento de imagem) em processos separados, ou múltiplas instâncias com muita carga de tarefas. | Eventos selecionados são **externalizados** para AMQP; _workers_ consomem filas com retry e DLQ. |
+| `rabbit`              | Isolar trabalhadores (envio de push, processamento de imagem) em processos separados, ou múltiplas instâncias com muita carga de tarefas. | Eventos selecionados são **externalizados** para AMQP; _workers_ consomem filas com retry e DLQ. **No SOS**, externaliza a notificação por destinatário já resolvida pelo banco (§7.13) — nunca a decisão de quem notificar. |
 | `kafka`               | Analytics contínuo, consolidação multi-instalação, integração com sistemas que já usam Kafka.                                             | Eventos externalizados para tópicos particionados por `beachId`; consumidores independentes.     |
 
-Ambos entram via **externalização do Spring Modulith**, sem alterar o código de domínio.
+Ambos entram via **externalização do Spring Modulith**, sem alterar o código de domínio — **exceto o SOS**, que usa a outbox cifrada própria atrás da porta `SosNotifierPort` (§7.13, ADR-018). Misturar `@Externalized` com a outbox do SOS criaria dois registros de publicação para o mesmo evento.
+
+**Regra de entrega.** O broker **não** decide destinatário: nada de routing key por geohash, célula ou posto. A escolha é uma consulta espacial no banco (§7.5) materializada em `emergency_dispatches`; a mensagem leva apenas ids e o consumidor é idempotente por `dispatchId`. Sem broker, o perfil mínimo entrega por STOMP autenticado + Web Push + _polling_ de reconciliação.
 
 ---
 
@@ -1156,6 +1298,9 @@ Decisão completa em [ADR-012](adr/012-protecao-de-dados-sensiveis-e-sanitizacao
 | `sos_time_to_notify_seconds`       | histogram | **RNF01** (p95 < 3 s).   |
 | `sos_time_to_ack_seconds`          | histogram | Eficiência operacional.  |
 | `sos_unacked_current`              | gauge     | Alerta imediato.         |
+| `sos_dispatches_by_round_total`    | counter   | Escalonamento (round 2). |
+| `sos_dispatch_without_recipient_total` | counter | Fallback KNN/coordenação. |
+| `amqp_dlq_depth{queue}`            | gauge     | Perfil `rabbit`: mensagem parada. |
 | `outbox_incomplete_events`         | gauge     | Saúde do Outbox.         |
 | `ws_connections_current`           | gauge     | Operacionais conectados. |
 | `push_delivery_failures_total`     | counter   | Canal de push.           |
@@ -1170,6 +1315,8 @@ Decisão completa em [ADR-012](adr/012-protecao-de-dados-sensiveis-e-sanitizacao
 | SOS sem reconhecimento            | `sos_unacked_current > 0` por > 20 s        | **Crítico** (aciona coordenação) |
 | Outbox travado                    | `outbox_incomplete_events > 0` por > 60 s   | Crítico                          |
 | Sonda sintética falhou            | canário de SOS não chegou ao console em 5 s | Crítico                          |
+| SOS sem destinatário              | `sos_dispatch_without_recipient_total` > 0  | Crítico (verificar plantões)     |
+| DLQ com mensagem (perfil `rabbit`) | `amqp_dlq_depth > 0` por > 5 min            | Alto                             |
 | Maré desatualizada                | `tide_days_ahead < 2`                       | Alto                             |
 | 5xx elevado / latência p95 alta   | limiares por rota                           | Alto                             |
 | Disco, memória, conexões do banco | limiares                                    | Médio                            |
@@ -1233,6 +1380,10 @@ Pipeline (GitHub Actions ou Jenkins): build → testes unitários → testes de 
 | Provedor de maré fora                    | Previsão não renova                 | Serve do banco; alerta se < 48 h restantes.                                                                           |
 | Perda de rede do guarda-vidas            | Console cego                        | Indicador visível "sem conexão"; procedimento operacional de contingência (rádio/telefone); SMS como extensão futura. |
 | Instância da app cai                     | Redução de capacidade               | Nginx remove do _upstream_; Outbox republica eventos pendentes ao subir.                                              |
+| RabbitMQ indisponível (perfil `rabbit`)  | Notificação não sai pelo broker     | Evento continua `PENDING` e o sweep reenvia; STOMP direto e polling de reconciliação entregam; alerta de DLQ/fila.     |
+| Seleção de destinatários falhou ou lenta | Despacho sem o destinatário ideal   | Chamado é gravado com fallback KNN e coordenação (RN03); métrica `sos_dispatch_without_recipient_total`; nunca bloqueia. |
+| Nenhum plantão aberto no raio            | Ninguém elegível em campo           | KNN puro + coordenação central; a resposta orienta o 193; o fallback fica registrado em `emergency_dispatches`.        |
+| Posição da base móvel desatualizada      | Base notificada fora de lugar       | `last_position_at` + `position_stale` no despacho; posto fixo tem preferência; console mostra a idade da posição.      |
 
 **Padrões:** _timeouts_ explícitos em toda chamada externa; _retry_ apenas em operações idempotentes; _circuit breaker_ (Resilience4j) para provedor de maré e SMTP; _bulkhead_ separando pools das rotas críticas (SOS/ops) das rotas públicas.
 
@@ -1249,6 +1400,11 @@ Pipeline (GitHub Actions ou Jenkins): build → testes unitários → testes de 
 | **Concorrência**   | Plantões duplicados do mesmo operador.                                                                  | Índice único parcial `ended_at IS NULL`.                                                                           |
 | **Consistência**   | Eventos duplicados após _replay_ do Outbox.                                                             | Consumidores idempotentes (tags de push, CAS, `processed_events`).                                                 |
 | **Consistência**   | Mensagens Pub/Sub perdidas no Redis.                                                                    | Verdade no banco; reconciliação periódica no console.                                                              |
+| **Consistência**   | Broker decidir destinatário (routing key por geohash/célula).                                           | Seleção por chamado no banco (PostGIS); broker só transporta a lista já resolvida (§7.13).                          |
+| **Concorrência**   | Publicação no broker segurando locks da outbox reivindicada.                                            | Reivindicar em transação curta, publicar fora dela e marcar `PUBLISHED` após o confirm.                            |
+| **Consistência**   | Notificar sem prova de quem foi avisado.                                                                | `emergency_dispatches` por destinatário + `dispatchId` idempotente + `notified_at`.                                 |
+| **Segurança**      | Tópico STOMP aberto expondo alerta a qualquer cliente.                                                  | JWT no `CONNECT` + destino `/user/{id}/queue/sos`; frame redigido enquanto o tópico existir.                       |
+| **Operacional**    | Base móvel sem posição recente recebendo chamado de outra área.                                         | `last_position_at` + `position_stale`, preferência do posto fixo e idade da posição visível no console.            |
 | **Escalabilidade** | Pico de leitura de verão.                                                                               | Micro-cache Nginx + Redis; sem WS para público; tiles estáticos; pré-escalonar para o perfil Equilibrado.          |
 | **Escalabilidade** | Geoconsultas lentas.                                                                                    | Índices GIST, `ST_DWithin` sobre `geography`, EXPLAIN nos testes de carga; polígonos simplificados para o cliente. |
 | **Segurança**      | Vazamento de dados pessoais/CPF.                                                                        | Seção 13.                                                                                                          |
@@ -1268,6 +1424,8 @@ Pipeline (GitHub Actions ou Jenkins): build → testes unitários → testes de 
 | **Event Sourcing / CQRS**                                            | Rejeitada. Sem necessidade; auditoria já atendida por `audit_log` + `emergency_call_events`.                                                                                                                                                                                                                                                                          |
 | **Kafka como espinha dorsal**                                        | Rejeitada para o núcleo; mantida como adaptador opcional (seção 3 e 11.3).                                                                                                                                                                                                                                                                                            |
 | **RabbitMQ obrigatório** (proposta inicial)                          | Rebaixada a opcional. Útil para isolar _workers_, mas não necessário no MVP.                                                                                                                                                                                                                                                                                          |
+| **Filtro geográfico no broker** (routing key por geohash/célula)      | Rejeitada. Fronteira de célula não corresponde ao raio por posto, o raio muda por base, o operador se desloca e o broker não faz KNN. Quem escolhe é o PostGIS; o broker só entrega (§7.13, ADR-018).                                                                                                                                                                   |
+| **Notificar todos e filtrar no cliente**                             | Rejeitada. Todo operador veria chamado de outra praia e "só os próximos" viraria cosmético; a autorização por escopo precisa ser do servidor.                                                                                                                                                                                                                    |
 | **WebSocket para todos os banhistas**                                | Rejeitada. Polling cacheável é mais barato e resiliente.                                                                                                                                                                                                                                                                                                              |
 | **Keycloak / IdP externo**                                           | Descartado por decisão do projeto (menos peças, identidade própria). Continua possível como adaptador OIDC opcional se um estado exigir SSO institucional.                                                                                                                                                                                                            |
 | **MongoDB/NoSQL para geodados**                                      | Rejeitada. PostGIS resolve melhor e mantém consistência forte.                                                                                                                                                                                                                                                                                                        |

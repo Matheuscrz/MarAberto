@@ -5,11 +5,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.maraberto.emergency.api.EmergencyCallCreated;
+import com.maraberto.emergency.api.EmergencyCallDispatched;
 import com.maraberto.emergency.api.EmergencyCallNotification;
 import com.maraberto.emergency.application.EmergencyOutboxPublisher;
-import com.maraberto.realtime.api.RealtimePublisherPort;
+import com.maraberto.realtime.api.SosNotifierPort;
 import com.maraberto.shared.security.crypto.SensitiveDataProtector;
+import com.maraberto.support.EmergencyTestData;
 import com.maraberto.support.PostgisIntegrationTest;
 import java.time.Instant;
 import java.util.List;
@@ -35,7 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
         "maraberto.emergency.outbox.max-attempts=2"
 })
 @AutoConfigureMockMvc
-@Import(EmergencyOutboxPublisherTests.RealtimeTestConfiguration.class)
+@Import(EmergencyOutboxPublisherTests.NotifierTestConfiguration.class)
 class EmergencyOutboxPublisherTests extends PostgisIntegrationTest {
 
     @Autowired
@@ -54,69 +55,70 @@ class EmergencyOutboxPublisherTests extends PostgisIntegrationTest {
     private EmergencyOutboxPublisher publisher;
 
     @Autowired
-    private RecordingRealtimePublisher realtimePublisher;
+    private RecordingSosNotifier notifier;
 
     @BeforeEach
     void reset() {
-        realtimePublisher.reset();
+        EmergencyTestData.clearDispatchState(jdbcTemplate);
+        notifier.reset();
     }
 
     @Test
-    void publishesRightAfterCommitWithRedactedPayload() throws Exception {
-        String response = mockMvc.perform(post("/api/v1/emergency-calls")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "clientRequestId": "%s",
-                                  "latitude": -10.9472,
-                                  "longitude": -37.0731,
-                                  "accuracyMeters": 12.5
-                                }
-                                """.formatted(UUID.randomUUID())))
-                .andExpect(status().isCreated())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        UUID callId = UUID.fromString(objectMapper.readTree(response).get("callId").asText());
+    void publishesRightAfterCommitToTheAssignedOperator() throws Exception {
+        double latitude = -15.7900;
+        double longitude = -47.8800;
+        UUID operatorId = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
+        UUID postId = EmergencyTestData.createPost(jdbcTemplate, latitude, longitude, 500);
+        EmergencyTestData.openPostShift(jdbcTemplate, operatorId, postId);
 
-        assertThat(realtimePublisher.published())
+        UUID callId = createCall(latitude, longitude);
+
+        assertThat(notifier.delivered())
                 .singleElement()
                 .satisfies(entry -> {
-                    assertThat(entry.destination())
-                            .isEqualTo("/topic/operational.emergency.calls");
-                    EmergencyCallNotification notification = (EmergencyCallNotification) entry.payload();
+                    assertThat(entry.userId()).isEqualTo(operatorId);
+                    EmergencyCallNotification notification = entry.notification();
                     assertThat(notification.callId()).isEqualTo(callId);
                     assertThat(notification.status()).isEqualTo("DISPATCHED");
+                    assertThat(notification.dispatchId()).isNotNull();
                 });
 
-        String serialized = objectMapper.writeValueAsString(realtimePublisher.published().getFirst().payload());
+        String serialized = objectMapper.writeValueAsString(notifier.delivered().getFirst().notification());
         assertThat(serialized)
-                .doesNotContain("-10.9472")
-                .doesNotContain("-37.0731")
+                .doesNotContain(String.valueOf(latitude))
+                .doesNotContain(String.valueOf(longitude))
                 .doesNotContain("clientRequestId");
+
         assertThat(outboxStatus(callId)).isEqualTo("PUBLISHED");
         assertThat(outboxAttempts(callId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM emergency_dispatches WHERE emergency_call_id = ?",
+                String.class, callId))
+                .isEqualTo("NOTIFIED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT notified_at FROM emergency_dispatches WHERE emergency_call_id = ?",
+                Instant.class, callId))
+                .isNotNull();
     }
 
     @Test
     void sweepRecoversPendingEventsLeftByACrash() throws Exception {
-        UUID callId = UUID.randomUUID();
-        insertPendingEvent(callId);
+        UUID operatorId = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
+        UUID callId = insertPendingDispatch(operatorId);
 
         int claimed = publisher.publishPending();
 
         assertThat(claimed).isGreaterThanOrEqualTo(1);
-        assertThat(realtimePublisher.published())
-                .anySatisfy(entry -> assertThat(((EmergencyCallNotification) entry.payload()).callId())
-                        .isEqualTo(callId));
+        assertThat(notifier.delivered())
+                .anySatisfy(entry -> assertThat(entry.notification().callId()).isEqualTo(callId));
         assertThat(outboxStatus(callId)).isEqualTo("PUBLISHED");
     }
 
     @Test
     void retriesAndGivesUpAfterMaxAttempts() throws Exception {
-        UUID callId = UUID.randomUUID();
-        insertPendingEvent(callId);
-        realtimePublisher.failWith(new IllegalStateException("broker indisponível"));
+        UUID operatorId = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
+        UUID callId = insertPendingDispatch(operatorId);
+        notifier.failWith(new IllegalStateException("transport indisponível"));
 
         publisher.publishPending();
 
@@ -124,9 +126,12 @@ class EmergencyOutboxPublisherTests extends PostgisIntegrationTest {
         assertThat(outboxAttempts(callId)).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT last_error FROM emergency_outbox_events WHERE aggregate_id = ?",
-                String.class,
-                callId))
+                String.class, callId))
                 .isEqualTo("IllegalStateException");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM emergency_dispatches WHERE emergency_call_id = ?",
+                String.class, callId))
+                .isEqualTo("PENDING");
 
         publisher.publishPending();
 
@@ -136,54 +141,76 @@ class EmergencyOutboxPublisherTests extends PostgisIntegrationTest {
         assertThat(publisher.publishPending()).isZero();
     }
 
-    private void insertPendingEvent(UUID callId) throws Exception {
-        EmergencyCallCreated created = new EmergencyCallCreated(
-                callId,
-                UUID.randomUUID().toString(),
-                -10.9472,
-                -37.0731,
-                12.5,
-                Instant.now());
-        String payload = sensitiveDataProtector.encrypt(
-                objectMapper.writeValueAsString(created),
-                SensitiveDataProtector.AAD_EMERGENCY_OUTBOX);
+    private UUID createCall(double latitude, double longitude) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/emergency-calls")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "clientRequestId": "%s",
+                                  "latitude": %s,
+                                  "longitude": %s,
+                                  "accuracyMeters": 12.5
+                                }
+                                """.formatted(UUID.randomUUID(), latitude, longitude)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return UUID.fromString(objectMapper.readTree(response).get("callId").asText());
+    }
 
+    private UUID insertPendingDispatch(UUID operatorId) throws Exception {
+        UUID callId = UUID.randomUUID();
+        UUID dispatchId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO emergency_calls
+                    (id, client_request_id, latitude, longitude, status)
+                VALUES (?, ?, -15.79, -47.88, 'DISPATCHED')
+                """, callId, UUID.randomUUID().toString());
+        jdbcTemplate.update("""
+                INSERT INTO emergency_dispatches
+                    (id, emergency_call_id, round, recipient_user_id, status)
+                VALUES (?, ?, 1, ?, 'PENDING')
+                """, dispatchId, callId, operatorId);
+
+        EmergencyCallDispatched dispatched = new EmergencyCallDispatched(
+                callId, dispatchId, operatorId, null, null, 1, Instant.now());
+        String payload = sensitiveDataProtector.encrypt(
+                objectMapper.writeValueAsString(dispatched),
+                SensitiveDataProtector.AAD_EMERGENCY_OUTBOX);
         jdbcTemplate.update("""
                 INSERT INTO emergency_outbox_events (aggregate_id, event_type, payload, status)
                 VALUES (?, ?, ?, 'PENDING')
-                """, callId, EmergencyCallCreated.class.getName(), payload);
+                """, callId, EmergencyCallDispatched.class.getName(), payload);
+        return callId;
     }
 
     private String outboxStatus(UUID callId) {
         return jdbcTemplate.queryForObject(
                 "SELECT status FROM emergency_outbox_events WHERE aggregate_id = ?",
-                String.class,
-                callId);
+                String.class, callId);
     }
 
     private Integer outboxAttempts(UUID callId) {
         return jdbcTemplate.queryForObject(
                 "SELECT attempts FROM emergency_outbox_events WHERE aggregate_id = ?",
-                Integer.class,
-                callId);
+                Integer.class, callId);
     }
 
-    record PublishedEntry(String destination, Object payload) {
+    record Delivery(UUID userId, EmergencyCallNotification notification) {
     }
 
-    static class RecordingRealtimePublisher implements RealtimePublisherPort {
+    static class RecordingSosNotifier implements SosNotifierPort {
 
-        private final List<PublishedEntry> entries = new CopyOnWriteArrayList<>();
+        private final List<Delivery> entries = new CopyOnWriteArrayList<>();
         private final AtomicBoolean failing = new AtomicBoolean(false);
         private volatile RuntimeException failure;
 
         @Override
-        public void publish(String destination, Object payload) {
+        public void send(UUID userId, Object payload) {
             RuntimeException currentFailure = failure;
             if (failing.get() && currentFailure != null) {
                 throw currentFailure;
             }
-            entries.add(new PublishedEntry(destination, payload));
+            entries.add(new Delivery(userId, (EmergencyCallNotification) payload));
         }
 
         void failWith(RuntimeException exception) {
@@ -197,18 +224,18 @@ class EmergencyOutboxPublisherTests extends PostgisIntegrationTest {
             failure = null;
         }
 
-        List<PublishedEntry> published() {
+        List<Delivery> delivered() {
             return List.copyOf(entries);
         }
     }
 
     @TestConfiguration
-    static class RealtimeTestConfiguration {
+    static class NotifierTestConfiguration {
 
         @Bean
         @Primary
-        RecordingRealtimePublisher recordingRealtimePublisher() {
-            return new RecordingRealtimePublisher();
+        RecordingSosNotifier recordingSosNotifier() {
+            return new RecordingSosNotifier();
         }
     }
 }

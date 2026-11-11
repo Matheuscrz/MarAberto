@@ -113,6 +113,8 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 | [`docs/adr/013-ocorrencias-operacionais.md`](docs/adr/013-ocorrencias-operacionais.md)                                   | Ocorrência como entidade própria, criada por evento a partir do SOS e por registro manual.                             |
 | [`docs/adr/014-busca-tolerante-a-erros.md`](docs/adr/014-busca-tolerante-a-erros.md)                                     | Busca com `pg_trgm` antes de OpenSearch e critérios para reavaliar.                                                    |
 | [`docs/adr/015-frontend-feature-based.md`](docs/adr/015-frontend-feature-based.md)                                       | Estrutura `app/ shared/ features/` do frontend e regras de fronteira.                                                  |
+| [`docs/adr/017-geoindexacao-do-sos.md`](docs/adr/017-geoindexacao-do-sos.md)                                             | Coluna geográfica gerada + GiST, `ST_DWithin`/KNN para postos e geofence que não bloqueia o SOS.                        |
+| [`docs/adr/018-selecao-de-destinatarios-e-entrega-do-sos.md`](docs/adr/018-selecao-de-destinatarios-e-entrega-do-sos.md) | O banco decide quem notificar e o transporte só entrega; sem filtro geográfico no broker.                              |
 | [`AGENTS.md`](AGENTS.md)                                                                                                 | Memória de contexto para agentes de IA e convenções do repositório.                                                    |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)                                                                               | Regras de convivência da comunidade.                                                                                   |
 
@@ -192,6 +194,19 @@ IDENTITY_DEV_SEED=true ./gradlew bootRun
 - O seed é idempotente por e-mail: reiniciar o backend não duplica usuários. As contas permanecem no banco mesmo sem a variável; o seed só as recria se o banco for zerado.
 - ⚠️ O seed é **exclusivo de desenvolvimento**: o backend **recusa subir** com `IDENTITY_DEV_SEED=true` nos perfis `prod`/`production`. Nunca use essas contas em ambiente compartilhado.
 - O seed também pode ser ligado pelo Compose (`IDENTITY_DEV_SEED` no `.env`, padrão `false`).
+
+#### Plantão e postos de demonstração
+
+Para testar o ciclo completo no console do operador (abrir plantão → receber SOS → assumir), ligue também o seed de estrutura operacional:
+
+```bash
+cd backend
+IDENTITY_DEV_SEED=true OPERATIONS_DEV_SEED=true ./gradlew bootRun
+```
+
+- Cria **um posto fixo** (`Posto Pajuçara 01`, com praia) e **uma base móvel** (`Base Móvel Orla`) em Maceió/AL — apenas se ainda não existir nenhum posto/base no banco.
+- O operador escolhe a estrutura, captura a posição do aparelho e abre o plantão em `/operador`. Sem plantão aberto ele **não** é escolhido pelo PostGIS.
+- ⚠️ Mesma regra das contas: recusado nos perfis `prod`/`production`. Em um ambiente real, postos e bases vêm do cadastro/importação de mapeamento.
 
 ### 3. Rodar o Frontend PWA
 

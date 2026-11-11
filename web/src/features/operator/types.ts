@@ -61,3 +61,88 @@ export const OUTCOME_LABEL: Record<OccurrenceOutcome, string> = {
   FALSE_ALARM: "Falso alarme",
   CANCELLED: "Cancelado",
 };
+
+/**
+ * Chamado aberto atribuído ao operador (`GET /api/v1/dispatch/calls`).
+ *
+ * <p>As coordenadas só existem nesta rota autenticada e restrita aos
+ * destinatários; a notificação STOMP leva apenas ids.
+ */
+export interface DispatchOpenCall {
+  readonly callId: string;
+  readonly status: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly accuracyMeters: number | null;
+  readonly createdAt: string;
+  readonly dispatchId: string;
+  readonly round: number;
+  readonly distanceMeters: number | null;
+  readonly positionStale: boolean;
+}
+
+/**
+ * Chamado assumido pelo operador (`GET /api/v1/dispatch/calls/assigned`).
+ *
+ * <p>É o atendimento em curso: enquanto existir, o console mantém a localização
+ * do banhista na mesa para a rota no mapa e para a ocorrência operacional
+ * (ADR-013). A coordenada só chega por esta rota autenticada.
+ */
+export interface DispatchAssignedCall {
+  readonly callId: string;
+  readonly status: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly accuracyMeters: number | null;
+  readonly createdAt: string;
+  readonly acknowledgedAt: string;
+  readonly dispatchId: string;
+  readonly round: number;
+  readonly distanceMeters: number | null;
+  readonly positionStale: boolean;
+  /**
+   * Distância **atual** da última posição do plantão até o banhista, em metros.
+   *
+   * <p>Calculada no servidor a cada consulta (o console reconcilia de 10 em
+   * 10 s), é o que sustenta a decisão de ir a pé ou de veículo depois do ack.
+   * `null` quando o plantão não tem posição reportada — aí vale
+   * `distanceMeters`, a distância da abertura do chamado.
+   */
+  readonly currentDistanceMeters: number | null;
+  /** Instante da posição usada em `currentDistanceMeters`. */
+  readonly currentPositionAt: string | null;
+  /** A posição do plantão está ausente ou mais velha que o limite configurado. */
+  readonly currentPositionStale: boolean;
+}
+
+/** Notificação redigida recebida em `/user/queue/sos` (sem coordenadas). */export interface SosNotification {
+  readonly callId: string;
+  readonly dispatchId: string;
+  readonly round: number;
+  readonly status: string;
+  readonly occurredAt: string;
+}
+
+/** Plantão aberto do operador (`GET /api/v1/dispatch/shifts/current`). */
+export interface ShiftSnapshot {
+  readonly id: string;
+  readonly postId: string | null;
+  readonly mobileBaseId: string | null;
+  readonly startedAt: string;
+  readonly endedAt: string | null;
+  readonly lastPositionAt: string | null;
+  readonly lastPositionAccuracyMeters: number | null;
+}
+
+/** Posto fixo ou base móvel ativo (`GET /api/v1/dispatch/shifts/targets`). */
+export type ShiftTargetKind = "POST" | "MOBILE_BASE";
+
+export interface ShiftTarget {
+  readonly id: string;
+  readonly kind: ShiftTargetKind;
+  readonly name: string;
+  readonly beachName: string | null;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly coverageRadiusMeters: number | null;
+}

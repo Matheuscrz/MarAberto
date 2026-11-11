@@ -41,11 +41,26 @@ public class EmergencyCall {
     @Column(nullable = false, length = 30)
     private EmergencyCallStatus status;
 
+    /** Posto que assumiu o chamado; nulo enquanto ninguém deu ack ou se a base móvel assumiu. */
+    @Column(name = "assigned_post_id")
+    private UUID assignedPostId;
+
+    @Column(name = "acknowledged_at")
+    private Instant acknowledgedAt;
+
+    /**
+     * Versão usada pelo ack por compare-and-set. Não é optimistic locking do
+     * Hibernate: a transição de estado é feita por {@code UPDATE ... WHERE
+     * status = 'DISPATCHED'}, que não depende do objeto em memória.
+     */
+    @Column(nullable = false)
+    private long version;
+
     @CreationTimestamp
-    @Column(nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
     @UpdateTimestamp
-    @Column(nullable = false)
+    @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 }

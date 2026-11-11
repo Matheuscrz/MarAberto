@@ -156,3 +156,38 @@ async function networkFirst(request, event) {
     return new Response('', { status: 503, statusText: 'Offline' });
   }
 }
+
+/*
+ * Clique na notificação do SOS: foca a mesa já aberta ou abre uma nova. O alvo
+ * vem de `data.url` (rota interna do console), nunca de conteúdo do chamado.
+ */
+self.addEventListener('notificationclick', (event) => {
+  const data = event.notification.data || {};
+  const targetUrl =
+    typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/operador';
+  event.notification.close();
+
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+      const consoleWindow = windows.find((client) => {
+        try {
+          return new URL(client.url).pathname.startsWith('/operador');
+        } catch {
+          return false;
+        }
+      });
+      if (consoleWindow) {
+        await consoleWindow.focus();
+        if ('navigate' in consoleWindow) {
+          await consoleWindow.navigate(targetUrl);
+        }
+        return;
+      }
+      await self.clients.openWindow(targetUrl);
+    })(),
+  );
+});
