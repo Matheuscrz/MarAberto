@@ -18,7 +18,7 @@
   - **Índice espacial em toda tabela com coordenada** (rejeitada): ponto lido por chave não ganha nada com GiST; custo é escrita e manutenção.
   - **PostGIS/Elasticsearch como serviço separado para geo** (rejeitada): o volume é de uma instalação por órgão e o perfil mínimo roda em uma VM (RNF11); um serviço a mais custa memória e operação sem resolver nada que o Postgres já não resolva.
 - Consequências:
-  - A coluna gerada e o índice entram em migração nova (`V8+`) **junto da consulta de postos elegíveis** (escalonamento do SOS), não antes dela; hoje a `V3` mantém a tabela sem índice espacial.
+  - A coluna gerada e o índice entraram na `V8`, **junto da consulta de postos elegíveis** (escalonamento do SOS), não antes dela; a `V3` permanece imutável e sem índice espacial.
   - A consulta de postos elegíveis passa a ser implementável sem alterar o modelo de `emergency_calls` nem o contrato público do SOS (as coordenadas seguem em `double precision`).
   - O índice é usado de fato: no teste com 2 000 chamados o plano foi `Index Scan using idx_emergency_calls_location` com `Index Cond: (location && _st_expand(...))`; em volume maior o planner pode preferir `Bitmap Index Scan` — o que importa é o GiST aparecer no plano, não a forma do nó. Validado em PostgreSQL 16 + PostGIS antes de escrever esta ADR.
   - `emergency_calls` passa a ter uma coluna derivada: qualquer alteração futura em `latitude`/`longitude` recalcula o ponto automaticamente, e `pg_dump`/restauração continuam triviais.

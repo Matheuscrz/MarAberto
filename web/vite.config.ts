@@ -8,7 +8,8 @@ import { defineConfig } from 'vite';
  *
  * Em desenvolvimento, `/api` é encaminhado ao backend Spring Boot para o
  * frontend usar a mesma origem (e o mesmo contrato de cookies/CSRF do
- * ambiente de produção). Os cabeçalhos de segurança completos, incluindo a CSP,
+ * ambiente de produção). `/ws` precisa de `ws: true` para o upgrade do STOMP
+ * do console do operador. Os cabeçalhos de segurança completos, incluindo a CSP,
  * ficam no Nginx (`nginx.conf`), que serve o build de produção.
  */
 export default defineConfig({
@@ -31,6 +32,12 @@ export default defineConfig({
       '/api': {
         target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080',
         changeOrigin: true,
+      },
+      // Console do operador: STOMP sobre WebSocket, JWT no frame CONNECT.
+      '/ws': {
+        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080',
+        changeOrigin: true,
+        ws: true,
       },
     },
   },

@@ -1,5 +1,8 @@
 package com.maraberto.support;
 
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -8,6 +11,12 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * Sobe um PostgreSQL com PostGIS uma única vez por JVM e o disponibiliza
  * como datasource para os testes de integração.
+ *
+ * <p>O container é compartilhado entre classes, mas cada classe ganha o seu
+ * próprio contexto Spring. Por isso o estado do despacho do SOS é limpo antes
+ * de cada teste: sem isso, um plantão deixado por outra classe entra no KNN do
+ * {@code max-recipients} e muda o destinatário esperado. Usuários, praias e
+ * postos permanecem para não invalidar sessões já abertas.
  */
 public abstract class PostgisIntegrationTest {
 
@@ -20,6 +29,17 @@ public abstract class PostgisIntegrationTest {
 
     static {
         POSTGRES.start();
+    }
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void clearEmergencyDispatchState() {
+        jdbcTemplate.update("DELETE FROM emergency_outbox_events");
+        jdbcTemplate.update("DELETE FROM emergency_dispatches");
+        jdbcTemplate.update("DELETE FROM emergency_calls");
+        jdbcTemplate.update("DELETE FROM shift_sessions");
     }
 
     @DynamicPropertySource

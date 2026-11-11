@@ -49,7 +49,19 @@ maraberto:
   storage:
     provider: ${STORAGE_PROVIDER:stub}
   realtime:
-    allowed-origins: ${REALTIME_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+    # Origens aceitas no handshake do WebSocket. Inclui localhost e 127.0.0.1
+    # porque o navegador trata os dois como origens distintas no dev local.
+    allowed-origins: ${REALTIME_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000}
+  dispatch:
+    # Raio padrão de cobertura quando o posto/base não define o seu (metros).
+    default-coverage-radius-m: ${DISPATCH_DEFAULT_COVERAGE_RADIUS_M:2000}
+    # Idade a partir da qual a última posição do plantão é considerada velha.
+    position-stale-after: ${DISPATCH_POSITION_STALE_AFTER:PT30M}
+    # Teto de segurança por rodada. Todos os plantões dentro do raio são
+    # notificados; o teto só evita fan-out absurdo por raio mal configurado.
+    max-recipients: ${DISPATCH_MAX_RECIPIENTS:50}
+    # Vizinhos mais próximos notificados quando ninguém está dentro do raio.
+    fallback-recipients: ${DISPATCH_FALLBACK_RECIPIENTS:3}
   emergency:
     outbox:
       # Sweep de recuperação da outbox: intervalo curto porque o SOS tem
@@ -59,6 +71,9 @@ maraberto:
       sweep-initial-delay: ${EMERGENCY_OUTBOX_SWEEP_INITIAL_DELAY:PT10S}
       batch-size: ${EMERGENCY_OUTBOX_BATCH_SIZE:50}
       max-attempts: ${EMERGENCY_OUTBOX_MAX_ATTEMPTS:10}
+      # Tempo de posse de um evento reivindicado. Passado o prazo, outra
+      # instância (ou o sweep) pode reassumir a publicação.
+      claim-lease: ${EMERGENCY_OUTBOX_CLAIM_LEASE:PT30S}
   security:
     crypto:
       # Chave de desenvolvimento (32 bytes em base64). NUNCA use em produção:
@@ -83,6 +98,12 @@ maraberto:
       # Contas de desenvolvimento para o login real das três áreas. Desligado
       # por padrão e recusado no perfil `prod`.
       enabled: ${IDENTITY_DEV_SEED:false}
+  operations:
+    dev-seed:
+      # Posto fixo e base móvel de demonstração para abrir plantão e testar o
+      # despacho sem o importador de mapeamento. Desligado por padrão e
+      # recusado no perfil `prod`.
+      enabled: ${OPERATIONS_DEV_SEED:false}
 
 server:
   port: 8080

@@ -15,7 +15,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       STORAGE_PROVIDER: stub
-      REALTIME_ALLOWED_ORIGINS: ${REALTIME_ALLOWED_ORIGINS:-http://localhost:3000}
+      REALTIME_ALLOWED_ORIGINS: ${REALTIME_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       # Chave de desenvolvimento; o backend recusa esta chave no perfil `prod`.
       # Defina CRYPTO_MASTER_KEY no .env (openssl rand -base64 32) fora do dev local.
       CRYPTO_KEY_ID: ${CRYPTO_KEY_ID:-k1}
@@ -25,6 +25,9 @@ services:
       # Contas demo (operador@/coordenador@/admin@maraberto.dev, senha demo1234).
       # Mantenha `false` fora do ambiente local.
       IDENTITY_DEV_SEED: ${IDENTITY_DEV_SEED:-false}
+      # Posto fixo e base móvel de demonstração para abrir plantão no console.
+      # Mantenha `false` fora do ambiente local.
+      OPERATIONS_DEV_SEED: ${OPERATIONS_DEV_SEED:-false}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     depends_on:

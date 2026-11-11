@@ -33,6 +33,16 @@ export function formatAccuracy(accuracyMeters?: number): string {
   return `±${Math.round(accuracyMeters)} m`;
 }
 
+export function formatDistance(meters: number | null | undefined): string {
+  if (meters === null || meters === undefined || !Number.isFinite(meters)) {
+    return 'distância desconhecida';
+  }
+  if (meters < 1000) {
+    return `${Math.round(meters)} m`;
+  }
+  return `${(meters / 1000).toFixed(1).replace('.', ',')} km`;
+}
+
 export function formatOccupancy(percent: number): string {
   return `${Math.round(percent)}%`;
 }

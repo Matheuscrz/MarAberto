@@ -55,7 +55,8 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
                         "idx_beaches_boundary",
                         "idx_lifeguard_posts_location",
                         "idx_mobile_bases_location",
-                        "idx_critical_zones_geometry");
+                        "idx_critical_zones_geometry",
+                        "idx_emergency_calls_location");
 
         assertThat(jdbcTemplate.queryForList("""
                 SELECT conname

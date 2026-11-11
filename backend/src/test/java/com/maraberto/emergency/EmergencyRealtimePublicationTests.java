@@ -4,8 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.maraberto.realtime.api.RealtimeDestinations;
+import com.maraberto.identity.application.AuthenticationService;
+import com.maraberto.realtime.api.SosDestinations;
+import com.maraberto.support.EmergencyTestData;
 import com.maraberto.support.PostgisIntegrationTest;
+import com.maraberto.support.TestOperatorAuth;
 import java.lang.reflect.Type;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -14,6 +17,7 @@ import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,6 +27,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.converter.MappingJackson2MessageConverter;
 import org.springframework.messaging.simp.stomp.StompFrameHandler;
 import org.springframework.messaging.simp.stomp.StompHeaders;
@@ -30,12 +35,20 @@ import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 
 /**
- * Prova o caminho completo: {@code POST /api/v1/emergency-calls} → outbox →
- * STOMP → assinante. É o "walking skeleton" do canal operacional.
+ * Prova o caminho completo do alerta: {@code POST /api/v1/emergency-calls} →
+ * banco escolhe o plantão → outbox → STOMP autenticado → fila pessoal do
+ * operador.
+ *
+ * <p>A entrega usa o usuário definido no frame {@code CONNECT} (JWT). O destino
+ * é {@code /user/queue/sos}: um cliente sem token não tem sessão autenticada e,
+ * portanto, não recebe nada.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "maraberto.emergency.outbox.sweep-initial-delay=PT1H")
 class EmergencyRealtimePublicationTests extends PostgisIntegrationTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
@@ -49,21 +62,46 @@ class EmergencyRealtimePublicationTests extends PostgisIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private AuthenticationService authenticationService;
+
+    @BeforeEach
+    void cleanDispatchState() {
+        EmergencyTestData.clearDispatchState(jdbcTemplate);
+    }
+
     @Test
-    void deliversRedactedSosNotificationOverStomp() throws Exception {
+    void deliversRedactedSosToTheOperatorOnShiftOverAuthenticatedStomp() throws Exception {
+        TestOperatorAuth.Session operator = TestOperatorAuth.registerAndLogin(
+                authenticationService, restTemplate, objectMapper, "LIFEGUARD");
+        UUID postId = EmergencyTestData.createPost(jdbcTemplate, -10.9472, -37.0731, 500);
+        EmergencyTestData.openPostShift(jdbcTemplate, operator.userId(), postId);
+
         WebSocketStompClient stompClient = new WebSocketStompClient(new StandardWebSocketClient());
         stompClient.setMessageConverter(new MappingJackson2MessageConverter());
 
         BlockingQueue<JsonNode> frames = new LinkedBlockingQueue<>();
         List<UUID> createdCalls = new ArrayList<>();
 
+        StompHeaders connectHeaders = new StompHeaders();
+        connectHeaders.add(HttpHeaders.AUTHORIZATION, "Bearer " + operator.accessToken());
+
         StompSession session = stompClient
-                .connectAsync("ws://localhost:" + port + "/ws", new StompSessionHandlerAdapter() {
-                })
+                .connectAsync(
+                        "ws://localhost:" + port + "/ws",
+                        new WebSocketHttpHeaders(),
+                        connectHeaders,
+                        new StompSessionHandlerAdapter() {
+                        })
                 .get(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
 
         try {
-            session.subscribe(RealtimeDestinations.OPERATIONAL_EMERGENCY_CALLS, new StompFrameHandler() {
+            // O cliente assina o destino de usuário; quem publica usa
+            // /queue/sos via convertAndSendToUser.
+            session.subscribe(SosDestinations.SOS_SUBSCRIPTION, new StompFrameHandler() {
                 @Override
                 public Type getPayloadType(StompHeaders headers) {
                     return JsonNode.class;
@@ -76,11 +114,12 @@ class EmergencyRealtimePublicationTests extends PostgisIntegrationTest {
             });
 
             JsonNode notification = awaitNotification(frames, createdCalls);
-
             assertThat(UUID.fromString(notification.get("callId").asText())).isIn(createdCalls);
             assertThat(notification.get("status").asText()).isEqualTo("DISPATCHED");
+            assertThat(notification.get("dispatchId").isTextual()).isTrue();
+            assertThat(notification.get("round").asInt()).isEqualTo(1);
             assertThat(notification.has("occurredAt")).isTrue();
-            // Redação: nenhum dado pessoal no tópico aberto.
+            // Redação: nem coordenada, nem clientRequestId no frame.
             assertThat(notification.toString())
                     .doesNotContain("latitude")
                     .doesNotContain("longitude")
