@@ -58,6 +58,7 @@ Todas são lidas em tempo de build (`VITE_*`) — mudar o `.env` exige reiniciar
 | `VITE_MAP_DEFAULT_ZOOM` | `4` | zoom inicial |
 | `VITE_MAP_BOUNDS` | — | limite opcional de navegação `[[oeste,sul],[leste,norte]]` |
 | `VITE_PMTILES_URL` | — | tiles vetoriais próprios (ADR-005) |
+| `VITE_DEMO_TILE_URL` | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` | basemap raster de demonstração; a origem entra na CSP do Nginx e do app |
 | `VITE_APP_NAME` / `VITE_ORGANIZATION_NAME` | `MarAberto` / `Instituto Mar Aberto` | textos de marca |
 | `VITE_DEMO_AUTH` | `false` | atalho de login fictício **só** em desenvolvimento |
 
@@ -135,21 +136,54 @@ O que muda no build nativo e **não pode ser esquecido**:
 O projeto nativo já está gerado, sincroniza e gera **APK debug**
 (`android/app/build/outputs/apk/debug/app-debug.apk`). O que falta para distribuir:
 
-1. **Sessão no WebView** — **implementada**: todas as chamadas usam `CapacitorHttp` e o
-   cookie de refresh é tratado pelo jar do processo (`CapacitorCookies` +
-   `CookieManager` do WebView), sem afrouxar `SameSite=Strict` e sem mudar o backend.
-   Falta **validar em aparelho real** (login, reload com refresh e logout).
+1. **Sessão no WebView** — **implementada e validada no emulador**: todas as chamadas usam
+   `CapacitorHttp` e o cookie de refresh é tratado pelo jar do processo (`CapacitorCookies` +
+   `CookieManager` do WebView), sem afrouxar `SameSite=Strict` e sem mudar o backend. O
+   login real foi validado no **emulador Android 15 (API 35)** contra o backend local por
+   túnel HTTPS (ver abaixo). Falta repetir em **aparelho físico** (login, reload com
+   refresh e logout).
 2. **Plugins restantes** — já integrados por `shared/lib/native.ts`: `geolocation`
    (posição pontual), `local-notifications` (SOS) e `@capacitor-community/keep-awake`.
    Faltam `camera` (captura de foto) e `push-notifications` (app fechado, ADR-018 item 6);
    `browser` não é necessário porque o `Bridge` já abre `http(s)`/`tel:` no app externo.
 3. **Ícone, splash, versão e keystore** de release (`versionCode`/`versionName`).
 4. **iOS** — `npx cap add ios` em macOS; avaliar App Store x app não listado (diretriz 4.2).
-5. **Teste em aparelho real** — login, refresh, GPS, notificação, sirene e keep-awake no
-   Android físico.
+5. **Teste em aparelho físico** — refresh, GPS, notificação, sirene e keep-awake no
+   Android real (o login já foi validado no emulador).
+6. **Alerta com o app fechado** — hoje o popup/sirene/notificação só acontecem com a mesa
+   em **primeiro plano**. Medido no emulador: 60 s minimizado ou tela bloqueada → nenhum
+   alerta; o chamado aparece ao voltar ao app. Resolver com push FCM de prioridade alta +
+   `fullScreenIntent` (ADR-018 item 6) ou foreground service de plantão.
 
 Detalhes e checklist completo em `docs/Implementation.md` (Etapa 8B) e
 `docs/adr/019-app-mobile-com-capacitor.md`.
+
+### Testar o app no emulador Android
+
+O refresh é cookie `__Secure-`, então o app **precisa de HTTPS de verdade**: apontar para
+`http://10.0.2.2:8080` faz o WebView rejeitar o cookie e a sessão não sobrevive. O caminho
+que funciona é expor o backend local por um túnel HTTPS:
+
+```bash
+# 1. backend local com os seeds de desenvolvimento
+cd backend
+IDENTITY_DEV_SEED=true OPERATIONS_DEV_SEED=true \
+  REALTIME_ALLOWED_ORIGINS="http://localhost:3000,https://localhost,capacitor://localhost" \
+  ./gradlew bootRun
+
+# 2. túnel HTTPS para a API (qualquer provedor serve; o exemplo usa cloudflared)
+cloudflared tunnel --url http://localhost:8080     # copie a URL https://*.trycloudflare.com
+
+# 3. build do app apontando para o túnel, e instalação
+cd web
+VITE_API_BASE_URL=https://<sua-url>.trycloudflare.com npm run cap:sync
+cd android && JAVA_HOME=/caminho/jdk-21 ./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+`adb logcat` mostra o tráfego do WebView; o túnel muda de URL a cada execução, então
+rebuildar (`cap:sync`) sempre que trocar. Para simular a posição do guarda-vidas:
+`adb emu geo fix -35.7088 -9.6659`.
 
 ## Segurança (regras que valem para qualquer tela nova)
 
