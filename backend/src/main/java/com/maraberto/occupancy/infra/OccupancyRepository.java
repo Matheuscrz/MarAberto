@@ -62,10 +62,43 @@ public class OccupancyRepository {
         return count == null ? 0 : count;
     }
 
+    /**
+     * Amostras distintas por setor ativo da área, na ordem do mapeamento.
+     *
+     * <p>O {@code LEFT JOIN} devolve também os setores sem nenhuma amostra
+     * (contagem zero), para o cliente mostrar "dados insuficientes" no setor
+     * certo em vez de omiti-lo. As contagens por setor <strong>não</strong> são
+     * somadas: quem está na fronteira de dois setores conta nos dois, e a área
+     * usa a contagem própria (união, não soma).
+     */
+    public List<SectorSample> countDistinctTokensBySector(UUID beachId, OffsetDateTime since) {
+        return jdbc.query("""
+                        SELECT s.id AS sector_id,
+                               count(DISTINCT o.anonymous_token) AS samples
+                          FROM beach_sectors s
+                          LEFT JOIN occupancy_samples o
+                                 ON o.sector_id = s.id
+                                AND o.beach_id = ?
+                                AND o.created_at >= ?
+                         WHERE s.beach_id = ?
+                           AND s.active
+                         GROUP BY s.id, s.display_order
+                         ORDER BY s.display_order, s.id
+                        """,
+                (rs, rowNum) -> new SectorSample(
+                        rs.getObject("sector_id", UUID.class),
+                        rs.getInt("samples")),
+                beachId, since, beachId);
+    }
+
     public void purgeOlderThan(OffsetDateTime cutoff) {
         jdbc.update("DELETE FROM occupancy_samples WHERE created_at < ?", cutoff);
     }
 
     public record SectorLocation(UUID sectorId, UUID beachId) {
+    }
+
+    /** Contagem distinta de aparelhos num setor; zero quando ninguém amostrou. */
+    public record SectorSample(UUID sectorId, int samples) {
     }
 }

@@ -7,6 +7,7 @@ import com.maraberto.shared.security.crypto.BlindIndexer;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -21,7 +22,9 @@ import org.springframework.transaction.annotation.Transactional;
  * são apagadas na escrita, então não sobra trilha para reconstruir circulação.
  *
  * <p>O número de amostras **não** sai da API: abaixo do mínimo a resposta é
- * "dados insuficientes"; acima, apenas a faixa.
+ * "dados insuficientes"; acima, apenas a faixa. Na leitura por área e por setor
+ * vale a mesma regra, e a área é sempre a união das amostras — somar os setores
+ * contaria duas vezes quem está na fronteira.
  */
 @Service
 public class OccupancyService {
@@ -71,18 +74,53 @@ public class OccupancyService {
         return estimate(beachId, Instant.now());
     }
 
+    /**
+     * Faixa da área e de cada setor ativo. A área usa a contagem própria
+     * (união das amostras), nunca a soma das faixas por setor.
+     */
+    public BeachOccupancy occupancy(UUID beachId) {
+        OffsetDateTime since =
+                Instant.now().minus(properties.getWindow()).atOffset(ZoneOffset.UTC);
+        int windowMinutes = (int) properties.getWindow().toMinutes();
+        int samples = repository.countDistinctTokens(beachId, since);
+
+        List<OccupancySector> sectors = repository
+                .countDistinctTokensBySector(beachId, since).stream()
+                .map(sector -> band(sector.sectorId(), sector.samples()))
+                .toList();
+
+        OccupancyStatus status = statusOf(samples);
+        return new BeachOccupancy(
+                beachId,
+                status,
+                status == OccupancyStatus.ESTIMATE ? level(samples) : null,
+                windowMinutes,
+                sectors);
+    }
+
     private OccupancyEstimate estimate(UUID beachId, Instant now) {
         int samples = repository.countDistinctTokens(
                 beachId,
                 now.minus(properties.getWindow()).atOffset(ZoneOffset.UTC));
         int windowMinutes = (int) properties.getWindow().toMinutes();
 
-        if (samples < properties.getMinimumSample()) {
-            return new OccupancyEstimate(
-                    beachId, OccupancyStatus.INSUFFICIENT, null, windowMinutes);
+        OccupancyStatus status = statusOf(samples);
+        if (status == OccupancyStatus.INSUFFICIENT) {
+            return new OccupancyEstimate(beachId, status, null, windowMinutes);
         }
-        return new OccupancyEstimate(
-                beachId, OccupancyStatus.ESTIMATE, level(samples), windowMinutes);
+        return new OccupancyEstimate(beachId, status, level(samples), windowMinutes);
+    }
+
+    private OccupancyStatus statusOf(int samples) {
+        return samples < properties.getMinimumSample()
+                ? OccupancyStatus.INSUFFICIENT
+                : OccupancyStatus.ESTIMATE;
+    }
+
+    private OccupancySector band(UUID sectorId, int samples) {
+        OccupancyStatus status = statusOf(samples);
+        return new OccupancySector(
+                sectorId, status, status == OccupancyStatus.ESTIMATE ? level(samples) : null);
     }
 
     private OccupancyLevel level(int samples) {

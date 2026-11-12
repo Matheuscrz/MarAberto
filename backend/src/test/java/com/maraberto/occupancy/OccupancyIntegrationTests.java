@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.maraberto.beaches.application.BathingAreaImportService;
 import com.maraberto.beaches.application.BathingAreaImportService.ImportCommand;
 import com.maraberto.beaches.application.ImportMode;
+import com.maraberto.occupancy.application.BeachOccupancy;
 import com.maraberto.occupancy.application.OccupancyEstimate;
 import com.maraberto.occupancy.application.OccupancyService;
 import com.maraberto.occupancy.domain.OccupancyLevel;
@@ -116,14 +117,72 @@ class OccupancyIntegrationTests extends PostgisIntegrationTest {
                 .doesNotContain("latitude", "longitude", "token", "ip");
     }
 
+    @Test
+    void theAreaIsTheUnionOfTheSectorsAndNeverTheirSum() {
+        UUID beachId = importBeachWithTwoSectors();
+
+        // Os mesmos cinco aparelhos aparecem nos dois setores (fronteira).
+        // A união continua sendo 5; a soma daria 10 e mudaria a faixa.
+        for (int index = 0; index < 5; index++) {
+            String token = "token-fronteira-" + index;
+            record(-10.0095, -35.0095, token);
+            record(-10.0295, -35.0295, token);
+        }
+
+        BeachOccupancy occupancy = occupancyService.occupancy(beachId);
+
+        assertThat(occupancy.status()).isEqualTo(OccupancyStatus.ESTIMATE);
+        assertThat(occupancy.level()).isEqualTo(OccupancyLevel.LOW);
+        assertThat(occupancy.sectors()).hasSize(2);
+        assertThat(occupancy.sectors()).allSatisfy(sector -> {
+            assertThat(sector.status()).isEqualTo(OccupancyStatus.ESTIMATE);
+            assertThat(sector.level()).isEqualTo(OccupancyLevel.LOW);
+        });
+    }
+
+    @Test
+    void aSectorBelowTheMinimumSampleStaysInsufficientWithoutALevel() {
+        UUID beachId = importBeachWithTwoSectors();
+
+        // Cinco aparelhos só no primeiro setor.
+        for (int index = 0; index < 5; index++) {
+            record(-10.0095, -35.0095, "token-norte-" + index);
+        }
+
+        BeachOccupancy occupancy = occupancyService.occupancy(beachId);
+
+        assertThat(occupancy.level()).isEqualTo(OccupancyLevel.LOW);
+        assertThat(occupancy.sectors()).hasSize(2);
+        assertThat(occupancy.sectors().getFirst().status()).isEqualTo(OccupancyStatus.ESTIMATE);
+        // O outro setor continua sem amostra: "dados insuficientes", sem nível.
+        assertThat(occupancy.sectors().get(1).status()).isEqualTo(OccupancyStatus.INSUFFICIENT);
+        assertThat(occupancy.sectors().get(1).level()).isNull();
+    }
+
     private OccupancyEstimate record(String token) {
-        return occupancyService.record(LATITUDE, LONGITUDE, token)
+        return record(LATITUDE, LONGITUDE, token);
+    }
+
+    private OccupancyEstimate record(double latitude, double longitude, String token) {
+        return occupancyService.record(latitude, longitude, token)
                 .orElseThrow(() -> new AssertionError("o setor importado deveria conter o ponto"));
     }
 
     private UUID importBeach() {
         String file = kml(
                 feature("1", "Praia Perto", "Setor Único", "Aracaju", null, -35.010, -10.010));
+        importService.importKml(new ImportCommand(
+                file.getBytes(StandardCharsets.UTF_8), "areas.kml", "SE", false,
+                ImportMode.UPSERT, null));
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM beaches WHERE external_id = ?", UUID.class, PREFIX + "area:1");
+    }
+
+    /** Duas áreas de setor distantes para exercitar a contagem por setor. */
+    private UUID importBeachWithTwoSectors() {
+        String file = kml(
+                feature("1", "Praia Perto", "Setor Norte", "Aracaju", null, -35.010, -10.010),
+                feature("2", "Praia Perto", "Setor Sul", "Aracaju", null, -35.030, -10.030));
         importService.importKml(new ImportCommand(
                 file.getBytes(StandardCharsets.UTF_8), "areas.kml", "SE", false,
                 ImportMode.UPSERT, null));

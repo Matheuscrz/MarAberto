@@ -1,5 +1,6 @@
 package com.maraberto.occupancy.api;
 
+import com.maraberto.occupancy.application.BeachOccupancy;
 import com.maraberto.occupancy.application.OccupancyEstimate;
 import com.maraberto.occupancy.application.OccupancyService;
 import com.maraberto.shared.api.ApiProblem;
@@ -58,10 +59,12 @@ public class OccupancyController {
 
     @GetMapping("/beaches/{beachId}")
     @Operation(
-            summary = "Faixa de ocupação da área",
-            description = "Janela móvel de 15 min; sem amostra mínima devolve dados insuficientes.")
+            summary = "Ocupação da área e dos setores",
+            description = "Janela móvel de 15 min; sem amostra mínima devolve dados insuficientes "
+                    + "na área e no setor. A faixa da área é a união das amostras, nunca a soma "
+                    + "das faixas por setor: quem está na fronteira conta nos dois setores.")
     @ApiResponse(responseCode = "200", description = "Faixa de ocupação atual")
-    public OccupancyEstimate estimate(@PathVariable UUID beachId) {
-        return service.estimate(beachId);
+    public BeachOccupancy estimate(@PathVariable UUID beachId) {
+        return service.occupancy(beachId);
     }
 }
