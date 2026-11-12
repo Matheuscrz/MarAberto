@@ -340,10 +340,38 @@ commitar. Substitui os dados mocados de praias pelos dados da importação.
   a contagem. Token do cliente é `crypto.getRandomValues` em memória do módulo (rotaciona
   ao recarregar), nunca em storage web. `SecurityConfig` libera `/api/v1/occupancy/**`.
 
+## Fatia 3 — geometria no mapa e ocupação por setor (planejada)
+
+**Plano detalhado:** `docs/plan/fatia-3-mapa-e-ocupacao.md` (2026-11-12). Nada implementado.
+
+A geometria **já é armazenada** (`beaches.boundary`, `beach_sectors.geometry`, projetada em
+`beach_map_features`), mas o cliente só recebe o centroide e a ocupação só agrega por área.
+A fatia fecha três lacunas:
+
+- **Geometria na API:** `GET /api/v1/beaches/{id}/map` devolve `bbox` + `MultiPolygon`
+  simplificado (`ST_SimplifyPreserveTopology`, 6 casas) e `ETag` por versão do mapa
+  (`max(id)` de `import_batches` aplicado) → `304` com `If-None-Match`. A lista continua
+  com centroide; não existe GeoJSON por viewport nesta fatia.
+- **Onde estou:** a resposta de `GET /beaches?lat&lon` ganha `position`
+  (`beachId`/`sectorId`/`sectorLabel`), resolvido por `ST_Contains` em `beach_sectors` com
+  `ORDER BY display_order LIMIT 1`. A query vive em `beaches` (duplicada de propósito: o
+  módulo não pode importar `occupancy`).
+- **Ocupação por setor:** `GET /api/v1/occupancy/beaches/{id}` ganha `sectors`, agrupando as
+  mesmas amostras por `sector_id`. **A área é `count(DISTINCT token)`, nunca a soma dos
+  setores** (quem está na fronteira aparece em dois). `k` mínimo continua 5 para os dois
+  escopos; setor pequeno responder `INSUFFICIENT` é o esperado.
+- **Mapa:** `MapView` ganha prop de foco (`fitBounds` no bbox, `maxZoom: 16`, não voa se a
+  área já está enquadrada) e camadas de área/setor alimentadas por `setData` — nunca recriar
+  o mapa nem tocar no elemento raiz dos marcadores.
+
+Sem migração nova (`V15` continua livre para ocorrências): `bbox` sai de `ST_Envelope` em
+tempo de consulta e as amostras já têm `sector_id`.
+
 ## Roadmap conhecido (curto)
 
-- `beaches` — Fatia 2 acima; depois zonas `PERMANENT`/`SEMI_PERMANENT` com filtro
-  temporal, GeoJSON público com ETag/Redis e importação de postos/bases/zonas.
+- `beaches` — Fatia 3 acima (plano em `docs/plan/fatia-3-mapa-e-ocupacao.md`); depois zonas
+  `PERMANENT`/`SEMI_PERMANENT` com filtro temporal, GeoJSON público por viewport com
+  ETag/Redis e importação de postos/bases/zonas.
 - `occurrences` — `V15` (depois da `V14`), criação por evento do SOS + reconciliação,
   193/`FIELD_ATTENDED` e ficha CIOSP (ADR-013).
 - `operations` — `rip_current_markings` para correntes efêmeras (RF13).
