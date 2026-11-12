@@ -246,6 +246,35 @@ web/src/
 
 A guarda de rota no cliente é **só experiência de uso**; a autorização real é do servidor (13.2).
 
+### 6.2 Empacotamento mobile (Capacitor, ADR-019)
+
+O app Android/iOS é o **mesmo `web/` empacotado em WebView com Capacitor** — não há fork nem segunda base de UI. Browser, PWA instalada e app nativo compartilham as telas, as regras e o cliente HTTP; o projeto Flutter em `mobile/` está **congelado** e não é referência vigente (ADR-019).
+
+```
+web/
+├── capacitor.config.ts       # appId org.maraberto.app, webDir "dist"
+├── .env.capacitor.example    # VITE_API_BASE_URL absoluto e HTTPS no build nativo
+├── android/                  # projeto nativo (versionado; build/ e assets copiados ignorados)
+├── ios/                      # gerado só em macOS com Xcode
+└── dist/                     # saída do Vite, copiada pelo `cap sync`
+```
+
+**O que muda no nativo e não pode ser esquecido:**
+
+| Tema | Navegador/PWA | App Capacitor |
+| --- | --- | --- |
+| Origem | mesma origem + proxy `/api` | `https://localhost` (Android) / `capacitor://localhost` (iOS): `VITE_API_BASE_URL` **absoluto e HTTPS** |
+| Sessão | cookie `HttpOnly; Secure; SameSite=Strict` na mesma origem | `CapacitorHttp` + `CapacitorCookies` (jar nativo), mantendo o cookie; nunca token em storage |
+| Offline | service worker + `offline.html` | bundle local; **service worker não existe** no WKWebView |
+| Alerta do SOS | popup + sirene + `showNotification` via SW | popup + sirene + **notificação nativa** (`local-notifications`; push com app fechado na ADR-018, item 6) |
+| GPS / câmera / links | APIs do navegador | GPS por `@capacitor/geolocation`; `tel:193` e rota no Maps abertos pelo `Bridge` (sem plugin; câmera pendente) |
+| CSP | Nginx (`web/nginx.conf`) | `<meta http-equiv="Content-Security-Policy">` no `index.html` |
+| Backup | — | `android:allowBackup="false"` (o storage do WebView não vai para o backup) |
+
+**Regra de código:** nenhuma feature importa `@capacitor/*` diretamente. Detecção de plataforma e adaptadores ficam em `shared/lib/platform.ts` (plataforma) e `shared/lib/native.ts` (plugins: GPS, notificação e keep-awake), com a implementação web como padrão em `shared/lib/geolocation.ts` e `shared/lib/pwa.ts` — assim o PWA continua funcionando sem plugin e as fronteiras da ADR-015 seguem válidas.
+
+**Build:** `cd web && npm run cap:sync` (equivale a `npm run build:app` + `npx cap sync android`); o APK/AAB sai do Android Studio (`npm run cap:open`) ou de `web/android/gradlew assembleDebug|assembleRelease` (JDK 21 + Android SDK com platform 36). O APK **debug** já é gerado com `JAVA_HOME` no Temurin 21 e `sdk.dir` em `web/android/local.properties`; o release exige keystore. O build nativo usa `--mode capacitor`: exige `VITE_API_BASE_URL` absoluto em HTTPS (validado pelo `vite.config.ts`), injeta a CSP por `<meta>` e desliga o service worker. `cap add ios` e o build iOS exigem macOS + Xcode. Detalhes e o procedimento passo a passo ficam em `docs/Implementation.md`, Etapa 8B.
+
 ---
 
 ## 7. Modelo de dados
@@ -1486,6 +1515,7 @@ MarAberto/
 | Mapa                | MapLibre GL JS + PMTiles                                                           | Tiles próprios do recorte regional.                                                                                                 |
 | Clima               | `WeatherProvider` + OpenWeather                                                    | Chave `OPENWEATHER_API_KEY` opcional por instalação; chamadas somente no backend e respostas em cache.                              |
 | Frontend            | React + TypeScript + Vite + Tailwind, PWA com service worker **manual versionado** | Um app, estrutura _feature-based_ (6.1); áreas `/operador`, `/gestao` e `/admin` em _chunks_ lazy.                                  |
+| App mobile          | **Capacitor 8** sobre o mesmo build do `web/` (ADR-019)                            | Android agora; iOS em macOS. `android/` dentro de `web/`; `mobile/` (Flutter) congelado. Plugins só onde a tela precisa.            |
 | Busca               | PostgreSQL `pg_trgm` atrás de `SearchPort`                                         | OpenSearch opcional (ADR-014).                                                                                                      |
 | Tempo real          | Spring WebSocket (STOMP) + Web Push (VAPID)                                        | Redis para fan-out.                                                                                                                 |
 | Jobs                | `@Scheduled` + ShedLock                                                            | Maré, escalonamento, expiração.                                                                                                     |

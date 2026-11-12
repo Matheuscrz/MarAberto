@@ -7,6 +7,9 @@
  * aberta para manter a última posição utilizável na seleção do SOS.
  */
 
+import { NativePluginError, nativeDevicePosition } from '@/shared/lib/native';
+import { isNativeApp } from '@/shared/lib/platform';
+
 export type GeolocationFailure =
   | "unsupported"
   | "denied"
@@ -40,9 +43,24 @@ export interface DevicePosition {
   readonly accuracyMeters: number;
 }
 
-export function getDevicePosition(
+export async function getDevicePosition(
   options: PositionOptions = {},
 ): Promise<DevicePosition> {
+  // No app empacotado o plugin nativo lida com a permissão do Android/iOS;
+  // no navegador/PWA o caminho é a API do próprio navegador.
+  if (isNativeApp()) {
+    try {
+      return await nativeDevicePosition({
+        timeout: options.timeout,
+        maximumAge: options.maximumAge,
+      });
+    } catch (error) {
+      throw new GeolocationError(
+        error instanceof NativePluginError ? error.reason : 'unavailable',
+      );
+    }
+  }
+
   if (!("geolocation" in navigator)) {
     return Promise.reject(new GeolocationError("unsupported"));
   }

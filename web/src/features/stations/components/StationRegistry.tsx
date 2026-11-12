@@ -8,6 +8,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { safeExternalUrl } from "@/shared/lib/sanitize";
+import {
+  GeolocationError,
+  getDevicePosition,
+} from "@/shared/lib/geolocation";
 import { lifeguardStations as initialStations } from "@/features/stations/api/demo-stations";
 import type {
   LifeguardStation,
@@ -43,28 +47,26 @@ export function StationRegistry() {
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [geoMessage, setGeoMessage] = useState<string | null>(null);
 
-  const useMyLocation = () => {
+  const useMyLocation = async () => {
     setGeoMessage(null);
-    if (!("geolocation" in navigator)) {
-      setGeoMessage("Este navegador não expõe a localização.");
-      return;
+    try {
+      const position = await getDevicePosition({
+        enableHighAccuracy: true,
+        timeout: 10_000,
+        maximumAge: 0,
+      });
+      setLatitude(position.latitude.toFixed(6));
+      setLongitude(position.longitude.toFixed(6));
+      setAccuracy(position.accuracyMeters);
+      setPositionSource("DEVICE_GPS");
+      setGeoMessage("Coordenada preenchida com a localização atual.");
+    } catch (error) {
+      setGeoMessage(
+        error instanceof GeolocationError
+          ? error.message
+          : "Não foi possível obter a localização. Informe as coordenadas manualmente.",
+      );
     }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLatitude(position.coords.latitude.toFixed(6));
-        setLongitude(position.coords.longitude.toFixed(6));
-        setAccuracy(position.coords.accuracy);
-        setPositionSource("DEVICE_GPS");
-        setGeoMessage("Coordenada preenchida com a localização atual.");
-      },
-      () => {
-        setGeoMessage(
-          "Não foi possível obter a localização. Informe as coordenadas manualmente.",
-        );
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-    );
   };
 
   const handleCreate = (event: React.FormEvent) => {

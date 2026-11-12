@@ -7,8 +7,9 @@ import type {
 
 /**
  * Contrato do módulo `identity`. O refresh opaco viaja no cookie
- * `__Secure-maraberto_rt; Path=/api/v1/auth`, por isso `credentials:
- * "same-origin"` no `api-client` — o JS nunca vê o valor.
+ * `__Secure-maraberto_rt; Path=/api/v1/auth`; no navegador o `api-client` usa
+ * `credentials: "same-origin"` e no app o HTTP nativo devolve o `Set-Cookie`
+ * para o jar do aparelho. O JS da aplicação nunca lê o valor.
  */
 interface SessionResponse {
   readonly accessToken: string;
