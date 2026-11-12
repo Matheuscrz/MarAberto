@@ -9,6 +9,7 @@ import {
   closeShift as requestCloseShift,
   fetchCurrentShift,
   fetchShiftTargets,
+  heartbeatShift,
   openShift as requestOpenShift,
   updateShiftPosition,
   type OpenShiftInput,
@@ -16,12 +17,21 @@ import {
 import type { ShiftSnapshot, ShiftTarget } from "@/features/operator/types";
 
 /**
- * Enquanto o console está aberto, a posição do plantão é renovada a cada 5
- * minutos. O limiar do backend (`maraberto.dispatch.position-stale-after`) é
- * 30 min; renovar antes disso mantém a base móvel dentro da seleção espacial
- * sem transformar o painel em rastreamento contínuo.
+ * Sinal de vida do plantão: a cada 5 minutos o console faz **uma** chamada.
+ *
+ * <p>Se o GPS já está autorizado, essa chamada é a atualização de posição (que
+ * também renova o lease e mantém o limiar de 30 min de `position-stale-after`);
+ * sem GPS, é o batimento vazio de `204`. Assim o plantão não expira na web nem
+ * no app sem transformar o painel em rastreamento contínuo — 12 requisições por
+ * hora, no máximo.
  */
-const POSITION_REFRESH_MS = 5 * 60 * 1000;
+const SIGNAL_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Jitter para 50 consoles abertos não baterem no servidor no mesmo segundo. */
+const SIGNAL_JITTER_MS = 45 * 1000;
+
+const IDLE_EXPIRED_MESSAGE =
+  "O plantão foi encerrado por inatividade: o console ficou sem contato com o servidor. Abra um novo plantão para voltar a receber chamados.";
 
 export type ShiftTone = "success" | "warning" | "error";
 
@@ -54,8 +64,12 @@ export interface ShiftConsole {
  * <p>Abrir o plantão é o que torna o operador elegível para o SOS: a posição
  * informada (GPS do aparelho, com ajuste manual) é a última posição conhecida
  * usada pelo PostGIS. Depois disso o console oferece atualização sob demanda e
- * uma renovação periódica enquanto a aba está visível — nada é rastreado em
- * segundo plano e nenhuma coordenada é persistida no navegador.
+ * um sinal de vida a cada 5 minutos enquanto a aba está visível — nada é
+ * rastreado em segundo plano e nenhuma coordenada é persistida no navegador.
+ *
+ * <p>O sinal de vida é o que sustenta o plantão: se o app é fechado à força, o
+ * aparelho desliga ou a rede cai, o servidor encerra o turno por inatividade
+ * (ADR-018). Ao voltar, o console revalida o plantão e avisa quando ele caiu.
  */
 export function useShift(): ShiftConsole {
   const [shift, setShift] = useState<ShiftSnapshot | null>(null);
@@ -68,6 +82,21 @@ export function useShift(): ShiftConsole {
   const mounted = useRef(true);
   /** Só renova sozinho se o GPS já foi autorizado em uma captura desta sessão. */
   const autoPosition = useRef(false);
+  /** Último plantão conhecido, para detectar que ele caiu entre duas leituras. */
+  const shiftRef = useRef<ShiftSnapshot | null>(null);
+
+  /**
+   * O plantão deixou de existir no servidor (expirou por inatividade ou foi
+   * encerrado em outro aparelho). O console precisa dizer isso em vez de
+   * continuar mostrando um turno que não recebe mais chamados.
+   */
+  const markExpired = useCallback(() => {
+    if (!mounted.current) return;
+    autoPosition.current = false;
+    shiftRef.current = null;
+    setShift(null);
+    setFeedback({ tone: "warning", message: IDLE_EXPIRED_MESSAGE });
+  }, []);
 
   const load = useCallback(async () => {
     const [shiftResult, targetsResult] = await Promise.allSettled([
@@ -77,7 +106,14 @@ export function useShift(): ShiftConsole {
     if (!mounted.current) return;
 
     if (shiftResult.status === "fulfilled") {
-      setShift(shiftResult.value);
+      const next = shiftResult.value;
+      if (next === null && shiftRef.current !== null) {
+        // O plantão caiu enquanto o console estava aberto.
+        markExpired();
+      } else {
+        shiftRef.current = next;
+        setShift(next);
+      }
     }
     if (targetsResult.status === "fulfilled") {
       setTargets(targetsResult.value);
@@ -91,7 +127,7 @@ export function useShift(): ShiftConsole {
           : null;
     setLoadError(failure === null ? null : describeError(failure));
     setLoading(false);
-  }, []);
+  }, [markExpired]);
 
   useEffect(() => {
     mounted.current = true;
@@ -107,28 +143,91 @@ export function useShift(): ShiftConsole {
 
   const shiftId = shift?.id ?? null;
 
+  // Espelho do plantão atual, usado para detectar que ele caiu entre leituras.
+  useEffect(() => {
+    shiftRef.current = shift;
+  }, [shift]);
+
+  // Um único laço de sinal: posição quando o GPS está autorizado, batimento
+  // quando não está. Aba escondida não envia nada — é justamente o caso que o
+  // lease do servidor resolve (o turno expira sozinho).
   useEffect(() => {
     if (!shiftId) return;
-    const timer = window.setInterval(() => {
-      if (document.hidden || !autoPosition.current) return;
-      void (async () => {
-        try {
+    let timer = 0;
+    let cancelled = false;
+
+    const schedule = () => {
+      const delay = SIGNAL_INTERVAL_MS + Math.round(Math.random() * SIGNAL_JITTER_MS);
+      timer = window.setTimeout(() => {
+        void run();
+      }, delay);
+    };
+
+    const run = async () => {
+      if (cancelled) return;
+      if (document.hidden) {
+        schedule();
+        return;
+      }
+      try {
+        if (autoPosition.current) {
           const position = await getDevicePosition({ maximumAge: 60_000 });
           const updated = await updateShiftPosition(position);
-          if (mounted.current) setShift(updated);
-        } catch (error) {
-          if (
-            error instanceof GeolocationError &&
-            error.reason === "denied"
-          ) {
-            autoPosition.current = false;
-          }
+          if (!cancelled && mounted.current) setShift(updated);
+        } else {
+          await heartbeatShift();
         }
-      })();
-    }, POSITION_REFRESH_MS);
+      } catch (error) {
+        if (error instanceof GeolocationError && error.reason === "denied") {
+          // Sem GPS o plantão continua: o próximo ciclo só bate o ponto.
+          autoPosition.current = false;
+        } else if (error instanceof ApiError && error.status === 404) {
+          markExpired();
+          return;
+        }
+      }
+      if (!cancelled) schedule();
+    };
 
-    return () => window.clearInterval(timer);
-  }, [shiftId]);
+    schedule();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [shiftId, markExpired]);
+
+  // Voltou do segundo plano: revalida o plantão na hora. A leitura também é
+  // sinal de vida, então quem voltou dentro do prazo continua de plantão sem
+  // esperar o próximo ciclo; quem passou do prazo recebe o aviso.
+  useEffect(() => {
+    if (!shiftId) return;
+
+    const resync = async () => {
+      if (document.hidden) return;
+      try {
+        const current = await fetchCurrentShift();
+        if (!mounted.current) return;
+        if (current === null) {
+          markExpired();
+          return;
+        }
+        setShift(current);
+      } catch {
+        // Falha de rede: o lease do servidor decide no próximo contato.
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (!document.hidden) void resync();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("online", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("online", onVisibilityChange);
+    };
+  }, [shiftId, markExpired]);
 
   const open = useCallback(async (input: OpenShiftInput) => {
     setBusy("open");

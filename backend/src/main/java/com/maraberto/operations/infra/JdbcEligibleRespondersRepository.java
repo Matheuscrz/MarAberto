@@ -58,6 +58,8 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             JOIN shift_sessions s ON s.post_id = p.id AND s.ended_at IS NULL
             JOIN operational_users u ON u.id = s.user_id AND u.active
             WHERE p.active
+              -- Lease do plantão: app fechado à força não recebe chamado.
+              AND s.last_seen_at >= :aliveSince
               -- O prefiltro do GiST não pode entrar aqui: um posto distante com o
               -- operador em campo perto do chamado ficaria de fora. O conjunto
               -- varrido é o de plantões abertos (índice parcial da V8).
@@ -72,6 +74,7 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             JOIN shift_sessions s ON s.mobile_base_id = b.id AND s.ended_at IS NULL
             JOIN operational_users u ON u.id = s.user_id AND u.active
             WHERE b.active
+              AND s.last_seen_at >= :aliveSince
               AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point,
                              COALESCE(b.coverage_radius_m, :defaultRadiusMeters))
             ORDER BY distance_m
@@ -91,6 +94,7 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             JOIN lifeguard_posts p ON p.id = s.post_id AND p.active
             JOIN operational_users u ON u.id = s.user_id AND u.active
             WHERE s.ended_at IS NULL
+              AND s.last_seen_at >= :aliveSince
               AND s.post_id IS NOT NULL
             UNION ALL
             SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
@@ -101,6 +105,7 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             JOIN mobile_bases b ON b.id = s.mobile_base_id AND b.active
             JOIN operational_users u ON u.id = s.user_id AND u.active
             WHERE s.ended_at IS NULL
+              AND s.last_seen_at >= :aliveSince
               AND s.mobile_base_id IS NOT NULL
             ORDER BY distance_m
             LIMIT :fallbackResults
@@ -111,18 +116,21 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
     private final int maxRecipients;
     private final int fallbackRecipients;
     private final Duration positionStaleAfter;
+    private final Duration shiftIdleTimeout;
 
     public JdbcEligibleRespondersRepository(
             NamedParameterJdbcTemplate jdbc,
             @Value("${maraberto.dispatch.default-coverage-radius-m:2000}") int defaultRadiusMeters,
             @Value("${maraberto.dispatch.max-recipients:50}") int maxRecipients,
             @Value("${maraberto.dispatch.fallback-recipients:3}") int fallbackRecipients,
-            @Value("${maraberto.dispatch.position-stale-after:PT30M}") Duration positionStaleAfter) {
+            @Value("${maraberto.dispatch.position-stale-after:PT30M}") Duration positionStaleAfter,
+            @Value("${maraberto.dispatch.shift-idle-timeout:PT15M}") Duration shiftIdleTimeout) {
         this.jdbc = jdbc;
         this.defaultRadiusMeters = defaultRadiusMeters;
         this.maxRecipients = maxRecipients;
         this.fallbackRecipients = fallbackRecipients;
         this.positionStaleAfter = positionStaleAfter;
+        this.shiftIdleTimeout = shiftIdleTimeout;
     }
 
     @Override
@@ -153,7 +161,8 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
                 .addValue("defaultRadiusMeters", defaultRadiusMeters)
                 // O driver não infere o tipo de Instant; OffsetDateTime vira
                 // TIMESTAMPTZ sem depender do timezone da sessão.
-                .addValue("staleBefore", OffsetDateTime.now(ZoneOffset.UTC).minus(positionStaleAfter));
+                .addValue("staleBefore", OffsetDateTime.now(ZoneOffset.UTC).minus(positionStaleAfter))
+                .addValue("aliveSince", OffsetDateTime.now(ZoneOffset.UTC).minus(shiftIdleTimeout));
     }
 
     private EligibleResponder mapRow(java.sql.ResultSet rs, int rowNumber) throws java.sql.SQLException {

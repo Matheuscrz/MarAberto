@@ -1,6 +1,7 @@
 package com.maraberto.operations.api;
 
 import com.maraberto.operations.application.ShiftService;
+import com.maraberto.operations.domain.ShiftEndReason;
 import com.maraberto.operations.domain.ShiftNotFoundException;
 import com.maraberto.operations.domain.ShiftSession;
 import com.maraberto.shared.api.ApiProblem;
@@ -120,6 +121,25 @@ public class ShiftController {
                 request.latitude(), request.longitude(), request.accuracyMeters()));
     }
 
+    @PostMapping("/current/heartbeat")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(summary = "Sinal de vida do plantão",
+            description = "Mantém o plantão aberto enquanto o console está em uso. "
+                    + "O turno expira sem sinal por `maraberto.dispatch.shift-idle-timeout` "
+                    + "(padrão 15 min), cobrindo app fechado à força, aparelho desligado ou sem rede.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Sinal registrado"),
+            @ApiResponse(responseCode = "401", description = "Sem sessão válida (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class))),
+            @ApiResponse(responseCode = "404", description = "Sem plantão aberto (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class)))
+    })
+    public void heartbeat(Authentication authentication) {
+        shiftService.heartbeat(userId(authentication));
+    }
+
     @PostMapping("/current/close")
     @Operation(summary = "Encerrar plantão",
             description = "Fecha o plantão aberto do operador; ele deixa de ser elegível para o SOS.")
@@ -199,6 +219,9 @@ public class ShiftController {
             UUID mobileBaseId,
             Instant startedAt,
             Instant endedAt,
+            @Schema(description = "Motivo do encerramento; nulo enquanto o plantão está aberto",
+                    example = "MANUAL", allowableValues = {"MANUAL", "IDLE_TIMEOUT", "LOGOUT"})
+            ShiftEndReason endedReason,
             Instant lastPositionAt,
             Double lastPositionAccuracyMeters) {
 
@@ -209,6 +232,7 @@ public class ShiftController {
                     shift.getMobileBaseId(),
                     shift.getStartedAt(),
                     shift.getEndedAt(),
+                    shift.getEndedReason(),
                     shift.getLastPositionAt(),
                     shift.getLastPositionAccuracyMeters());
         }

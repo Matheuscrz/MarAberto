@@ -8,6 +8,7 @@ import {
   useAuthSession,
   useLogout,
 } from "@/features/auth";
+import { closeShiftIfOpen } from "@/features/operator";
 
 export interface AreaNavItem {
   readonly to: string;
@@ -31,6 +32,19 @@ interface AreaShellProps {
 export function AreaShell({ title, subtitle, nav }: AreaShellProps) {
   const user = useAuthSession((state) => state.user);
   const { logout, pending } = useLogout();
+
+  /**
+   * Sair da conta encerra o plantão na hora. Não dá para esperar o *lease*
+   * expirar: o turno é do operador, não do aparelho, e quem saiu não deve
+   * receber chamado. Falha aqui não trava a saída — o servidor encerra por
+   * inatividade de qualquer forma.
+   */
+  const handleLogout = async () => {
+    if (user && user.role !== "ADMIN") {
+      await closeShiftIfOpen();
+    }
+    await logout();
+  };
 
   return (
     <div className="min-h-dvh bg-ocean-50 text-ocean-950">
@@ -83,7 +97,7 @@ export function AreaShell({ title, subtitle, nav }: AreaShellProps) {
             <button
               type="button"
               onClick={() => {
-                logout();
+                void handleLogout();
               }}
               disabled={pending}
               className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-ocean-950 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-ocean-900 disabled:opacity-60"

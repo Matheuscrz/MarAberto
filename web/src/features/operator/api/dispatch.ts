@@ -100,3 +100,33 @@ export async function closeShift(): Promise<ShiftSnapshot> {
     method: "POST",
   });
 }
+
+/**
+ * Encerra o plantão sem falhar — usado quando a sessão termina.
+ *
+ * <p>Sair da conta é um encerramento explícito do turno: não faz sentido
+ * esperar o lease expirar. Sem plantão aberto a resposta é `404`, que aqui é
+ * sucesso; falha de rede não trava o logout, porque o servidor encerra o turno
+ * por inatividade de qualquer forma.
+ */
+export async function closeShiftIfOpen(): Promise<void> {
+  try {
+    await closeShift();
+  } catch {
+    // 404 (sem plantão) e queda de rede são esperados e não bloqueiam a saída.
+  }
+}
+
+/**
+ * Sinal de vida do plantão.
+ *
+ * <p>O turno vale como um *lease*: sem sinal por 15 minutos o servidor o encerra
+ * (app fechado à força, aparelho desligado, sem rede). O batimento é uma
+ * requisição vazia de resposta `204`, sem payload e sem consulta espacial — bem
+ * mais barato que reenviar a posição só para dizer "estou aqui".
+ */
+export async function heartbeatShift(): Promise<void> {
+  await apiRequest<void>("/api/v1/dispatch/shifts/current/heartbeat", {
+    method: "POST",
+  });
+}

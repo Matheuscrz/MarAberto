@@ -62,6 +62,14 @@ maraberto:
     max-recipients: ${DISPATCH_MAX_RECIPIENTS:50}
     # Vizinhos mais próximos notificados quando ninguém está dentro do raio.
     fallback-recipients: ${DISPATCH_FALLBACK_RECIPIENTS:3}
+    # Plantão sem sinal de vida (app fechado, sem rede ou sem GPS) é encerrado.
+    # O console renova o sinal a cada 5 min enquanto está aberto e visível.
+    shift-idle-timeout: ${DISPATCH_SHIFT_IDLE_TIMEOUT:PT15M}
+    # Job de carimbo: só arruma `ended_at`/`ended_reason` das linhas vencidas.
+    # A correção real já acontece nas consultas (expiração preguiçosa), então
+    # este intervalo pode ser largo sem deixar o SOS chamar quem saiu.
+    shift-sweep-interval: ${DISPATCH_SHIFT_SWEEP_INTERVAL:PT10M}
+    shift-sweep-initial-delay: ${DISPATCH_SHIFT_SWEEP_INITIAL_DELAY:PT2M}
   emergency:
     outbox:
       # Sweep de recuperação da outbox: intervalo curto porque o SOS tem
