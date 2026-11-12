@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <ExtendedData>
+        <SchemaData schemaUrl="#areas">
+          <SimpleData name="id">7</SimpleData>
+          <SimpleData name="Praia">Praia do Farol</SimpleData>
+          <SimpleData name="Setor">Setor Norte</SimpleData>
+          <SimpleData name="Municipio">Aracaju</SimpleData>
+          <SimpleData name="Num. de Oc">12</SimpleData>
+        </SchemaData>
+      </ExtendedData>
+      <MultiGeometry>
+        <Polygon>
+          <outerBoundaryIs>
+            <LinearRing>
+              <coordinates>
+                -35.0100,-10.0100,1.5 -35.0000,-10.0100,2.5
+                -35.0000,-10.0000,3.5 -35.0100,-10.0000,4.5
+                -35.0100,-10.0100,1.5
+              </coordinates>
+            </LinearRing>
+          </outerBoundaryIs>
+        </Polygon>
+        <Polygon>
+          <outerBoundaryIs>
+            <LinearRing>
+              <coordinates>
+                -34.9900,-10.0100 -34.9800,-10.0100 -34.9800,-10.0000
+                -34.9900,-10.0000 -34.9900,-10.0100
+              </coordinates>
+            </LinearRing>
+          </outerBoundaryIs>
+        </Polygon>
+      </MultiGeometry>
+    </Placemark>
+    <Placemark>
+      <ExtendedData>
+        <SchemaData schemaUrl="#areas">
+          <SimpleData name="id">8</SimpleData>
+          <SimpleData name="Praia">Praia do Farol</SimpleData>
+          <SimpleData name="Setor">-</SimpleData>
+          <SimpleData name="Municipio">Aracaju</SimpleData>
+        </SchemaData>
+      </ExtendedData>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -35.0200,-10.0100 -35.0100,-10.0100 -35.0100,-10.0000
+              -35.0200,-10.0000 -35.0200,-10.0100
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+    <Placemark>
+      <ExtendedData>
+        <SchemaData schemaUrl="#areas">
+          <SimpleData name="id">9</SimpleData>
+          <SimpleData name="Praia">Barragem de Lagarto</SimpleData>
+          <SimpleData name="Setor">Setor Único</SimpleData>
+          <SimpleData name="Municipio">Lagarto</SimpleData>
+          <SimpleData name="Estado">SE</SimpleData>
+        </SchemaData>
+      </ExtendedData>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -37.0100,-10.9100 -37.0000,-10.9100 -37.0000,-10.9000
+              -37.0100,-10.9000 -37.0100,-10.9100
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  </Document>
+</kml>
