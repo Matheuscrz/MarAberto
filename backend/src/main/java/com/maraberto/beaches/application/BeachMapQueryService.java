@@ -1,14 +1,13 @@
 package com.maraberto.beaches.application;
 
 import com.maraberto.beaches.api.BeachDetail;
-import com.maraberto.beaches.api.BeachSummary;
+import com.maraberto.beaches.api.BeachMap;
 import com.maraberto.beaches.api.BathingAreaMapChanged;
 import com.maraberto.beaches.api.BeachChanged;
 import com.maraberto.beaches.api.NearbyBeaches;
 import com.maraberto.beaches.infra.PublicBeachRepository;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,6 +34,13 @@ public class BeachMapQueryService {
     public static final int MAX_RADIUS_METERS = 30_000;
     public static final int DEFAULT_RADIUS_METERS = MAX_RADIUS_METERS;
 
+    /**
+     * Tolerância da simplificação da geometria, em graus (≈ 5 m). O suficiente
+     * para o zoom de bairro sem mudar o desenho do setor; a geometria completa
+     * continua no banco.
+     */
+    public static final double SIMPLIFY_TOLERANCE = 5e-5;
+
     private static final Duration CACHE_TTL = Duration.ofSeconds(120);
     private static final int CACHE_MAX_ENTRIES = 512;
 
@@ -51,8 +57,10 @@ public class BeachMapQueryService {
         int radius = requireRadius(radiusMeters);
 
         String key = nearbyKey(lat, lon, radius);
-        List<BeachSummary> beaches = cached(key, () -> repository.findNearby(lat, lon, radius));
-        return new NearbyBeaches(radius, beaches);
+        return cached(key, () -> new NearbyBeaches(
+                radius,
+                repository.findPositionAt(lat, lon).orElse(null),
+                repository.findNearby(lat, lon, radius)));
     }
 
     public BeachDetail detail(UUID beachId) {
@@ -62,6 +70,37 @@ public class BeachMapQueryService {
         return cached("detail:" + beachId,
                 () -> repository.findDetail(beachId)
                         .orElseThrow(() -> new BeachNotFoundException(beachId)));
+    }
+
+    /**
+     * Geometria da área e dos setores, pronta para o mapa.
+     *
+     * <p>Nunca devolve a geometria completa: o cliente desenha no zoom de
+     * bairro, e o {@code ETag} evita baixar o mesmo polígono de novo.
+     */
+    public BeachMap map(UUID beachId) {
+        if (beachId == null) {
+            throw new InvalidLocationException("Identificador da área de banho é obrigatório");
+        }
+        return cached("map:" + beachId,
+                () -> repository.findMap(beachId, SIMPLIFY_TOLERANCE)
+                        .orElseThrow(() -> new BeachNotFoundException(beachId)));
+    }
+
+    /**
+     * Identificador de versão da geometria daquela área ({@code ETag}).
+     *
+     * <p>Inclui a área porque a versão do mapa é global: sem o identificador,
+     * um {@code If-None-Match} de outra praia responderia {@code 304} para uma
+     * área que o cliente nunca viu. A versão muda só quando um lote é aplicado,
+     * que é quando a projeção é recarregada.
+     */
+    public String etag(UUID beachId) {
+        if (beachId == null) {
+            throw new InvalidLocationException("Identificador da área de banho é obrigatório");
+        }
+        return String.format(Locale.ROOT, "\"%s-%s-t%s\"",
+                beachId, repository.mapVersion(), SIMPLIFY_TOLERANCE);
     }
 
     /** O mapa mudou: o resultado público em cache deixou de valer. */

@@ -4,8 +4,10 @@ import static com.maraberto.support.KmlFixtures.feature;
 import static com.maraberto.support.KmlFixtures.kml;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 import com.maraberto.beaches.api.BeachDetail;
+import com.maraberto.beaches.api.BeachMap;
 import com.maraberto.beaches.api.BeachSummary;
 import com.maraberto.beaches.api.NearbyBeaches;
 import com.maraberto.beaches.application.BeachMapQueryService;
@@ -144,6 +146,120 @@ class PublicBeachQueryIntegrationTests extends PostgisIntegrationTest {
     void unknownAreaIsReportedAsNotFound() {
         assertThatThrownBy(() -> queryService.detail(UUID.randomUUID()))
                 .isInstanceOf(BeachNotFoundException.class);
+        assertThatThrownBy(() -> queryService.map(UUID.randomUUID()))
+                .isInstanceOf(BeachNotFoundException.class);
+    }
+
+    @Test
+    void positionResolvesTheAreaAndSectorThatContainTheDevice() {
+        importFile(kml(
+                feature("1", "Praia Perto", "Setor Norte", "Aracaju", null, -35.010, -10.010),
+                feature("2", "Praia Perto", "Setor Sul", "Aracaju", null, -35.030, -10.030)));
+
+        NearbyBeaches nearby = queryService.nearby(-10.0095, -35.0095, null);
+
+        assertThat(nearby.position()).isNotNull();
+        assertThat(nearby.position().beachName()).isEqualTo("Praia Perto");
+        assertThat(nearby.position().sectorLabel()).isEqualTo("Setor Norte");
+        assertThat(nearby.position().beachId()).isEqualTo(nearby.beaches().getFirst().id());
+    }
+
+    @Test
+    void positionIsNullOutsideTheMappedSectors() {
+        importFile(kml(
+                feature("1", "Praia Perto", "Setor Único", "Aracaju", null, -35.010, -10.010)));
+
+        // Dentro do raio de 30 km, mas fora do polígono de qualquer setor.
+        NearbyBeaches nearby = queryService.nearby(-9.9000, -35.2000, null);
+
+        assertThat(nearby.position()).isNull();
+    }
+
+    @Test
+    void overlappingSectorsResolveToTheFirstInTheMappingOrder() {
+        // Dois setores com o mesmo polígono: vence o de menor display_order,
+        // a mesma regra da amostra de ocupação.
+        importFile(kml(
+                feature("1", "Praia Perto", "Setor A", "Aracaju", null, -35.010, -10.010),
+                feature("2", "Praia Perto", "Setor B", "Aracaju", null, -35.010, -10.010)));
+
+        NearbyBeaches nearby = queryService.nearby(-10.0095, -35.0095, null);
+
+        assertThat(nearby.position()).isNotNull();
+        assertThat(nearby.position().sectorLabel()).isEqualTo("Setor A");
+    }
+
+    @Test
+    void unnamedSectorStillGetsALabelFromItsOrder() {
+        importFile(kml(
+                feature("1", "Praia Perto", "-", "Aracaju", null, -35.010, -10.010)));
+
+        NearbyBeaches nearby = queryService.nearby(-10.0095, -35.0095, null);
+
+        assertThat(nearby.position()).isNotNull();
+        assertThat(nearby.position().sectorLabel()).isEqualTo("Setor 1");
+    }
+
+    @Test
+    void mapExposesTheSectorGeometryAndTheBoundingBox() {
+        importFile(kml(
+                feature("1", "Praia Perto", "Setor Norte", "Aracaju", null, -35.010, -10.010),
+                feature("2", "Praia Perto", "Setor Sul", "Aracaju", null, -35.030, -10.030)));
+
+        UUID beachId = jdbcTemplate.queryForObject(
+                "SELECT id FROM beaches WHERE external_id = ?", UUID.class, PREFIX + "area:1");
+        BeachMap map = queryService.map(beachId);
+
+        assertThat(map.sectors()).hasSize(2);
+        // O PostGIS emite "Polygon" quando o MultiPolygon tem uma única parte.
+        assertThat(map.geometry().get("type").asText()).isIn("Polygon", "MultiPolygon");
+        assertThat(map.sectors().getFirst().geometry().get("type").asText())
+                .isIn("Polygon", "MultiPolygon");
+
+        // O bbox da área é a união dos setores e contém o bbox do setor.
+        assertThat(map.bbox().minLon()).isLessThanOrEqualTo(map.sectors().getFirst().bbox().minLon());
+        assertThat(map.bbox().maxLat()).isGreaterThanOrEqualTo(
+                map.sectors().getFirst().bbox().maxLat());
+        assertThat(map.bbox().minLon()).isCloseTo(-35.030, within(1e-6));
+        assertThat(map.bbox().maxLon()).isCloseTo(-35.009, within(1e-6));
+
+        // O polígono simplificado continua válido para o desenho.
+        assertThat(jdbcTemplate.queryForObject("""
+                        SELECT ST_IsValid(geometry)
+                          FROM beach_sectors
+                         WHERE external_id = ?
+                        """, Boolean.class, PREFIX + "1")).isTrue();
+    }
+
+    @Test
+    void etagIsStableUntilAnotherBatchIsApplied() {
+        importFile(kml(
+                feature("1", "Praia Perto", "Setor Único", "Aracaju", null, -35.010, -10.010)));
+        UUID beachId = jdbcTemplate.queryForObject(
+                "SELECT id FROM beaches WHERE external_id = ?", UUID.class, PREFIX + "area:1");
+
+        String first = queryService.etag(beachId);
+        assertThat(queryService.etag(beachId)).isEqualTo(first);
+
+        // Um lote aplicado recarrega a projeção: a geometria pode ter mudado.
+        importFile(kml(
+                feature("1", "Praia Perto", "Setor Único", "Aracaju", null, -35.010, -10.010),
+                feature("2", "Praia Nova", "Setor Único", "Aracaju", null, -35.020, -10.020)));
+
+        assertThat(queryService.etag(beachId)).isNotEqualTo(first);
+    }
+
+    @Test
+    void theSameEtagNeverAnswersForAnotherArea() {
+        importFile(kml(
+                feature("1", "Praia Perto", "Setor Único", "Aracaju", null, -35.010, -10.010),
+                feature("2", "Praia Nova", "Setor Único", "Aracaju", null, -35.020, -10.020)));
+        UUID first = jdbcTemplate.queryForObject(
+                "SELECT id FROM beaches WHERE external_id = ?", UUID.class, PREFIX + "area:1");
+        UUID second = jdbcTemplate.queryForObject(
+                "SELECT id FROM beaches WHERE external_id = ?", UUID.class, PREFIX + "area:2");
+
+        assertThat(queryService.etag(first)).isNotEqualTo(queryService.etag(second));
     }
 
     private void importFile(String file) {
