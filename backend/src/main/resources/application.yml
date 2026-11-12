@@ -142,6 +142,16 @@ maraberto:
       # despacho sem o importador de mapeamento. Desligado por padrão e
       # recusado no perfil `prod`.
       enabled: ${OPERATIONS_DEV_SEED:false}
+  occupancy:
+    # Janela móvel do indicador anônimo (RF10/RN06): abaixo da amostra mínima
+    # a API responde "dados insuficientes" em vez de expor a contagem.
+    window: ${OCCUPANCY_WINDOW:PT15M}
+    minimum-sample: ${OCCUPANCY_MINIMUM_SAMPLE:5}
+    moderate-threshold: ${OCCUPANCY_MODERATE_THRESHOLD:10}
+    high-threshold: ${OCCUPANCY_HIGH_THRESHOLD:25}
+    extreme-threshold: ${OCCUPANCY_EXTREME_THRESHOLD:50}
+    # Expurgo das amostras na própria escrita: não guardamos trilha.
+    retention: ${OCCUPANCY_RETENTION:PT24H}
   beaches:
     import:
       # Caminho usado quando o endpoint recebe só `state` (importação assistida)
