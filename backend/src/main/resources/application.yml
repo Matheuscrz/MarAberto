@@ -58,7 +58,7 @@ maraberto:
     # Teto de distância da notificação (metros). O raio do posto/base pode ser
     # menor, nunca maior: um cadastro errado não pode chamar quem está longe
     # demais. Fora do teto, o chamado vai para a coordenação.
-    max-radius-m: ${DISPATCH_MAX_RADIUS_M:5000}
+    max-radius-m: ${DISPATCH_MAX_RADIUS_M:15000}
     # Idade a partir da qual a última posição do plantão é considerada velha.
     position-stale-after: ${DISPATCH_POSITION_STALE_AFTER:PT30M}
     # Teto de segurança por rodada. Todos os plantões dentro do raio são
@@ -74,6 +74,21 @@ maraberto:
     # este intervalo pode ser largo sem deixar o SOS chamar quem saiu.
     shift-sweep-interval: ${DISPATCH_SHIFT_SWEEP_INTERVAL:PT10M}
     shift-sweep-initial-delay: ${DISPATCH_SHIFT_SWEEP_INITIAL_DELAY:PT2M}
+    escalation:
+      # Escada de escalonamento (metros), na ordem em que os anéis são abertos
+      # quando ninguém assume o chamado. O anel é absoluto: ignora o raio
+      # cadastrado do posto/base, porque nesse momento o que importa é quem
+      # consegue chegar. Esgotada a escada, a coordenação é acionada (RN03).
+      rings: ${DISPATCH_ESCALATION_RINGS:5000,7000,10000,12000,15000,20000}
+      # Tempo para o console tocar, o guarda-vidas olhar e assumir antes de
+      # acordar mais gente (RF21/RF42 fixam 20 s como padrão). Ampliar antes
+      # disso só adiciona quem chegaria depois.
+      delay: ${DISPATCH_ESCALATION_DELAY:PT20S}
+      # O intervalo é curto porque o anel é a resposta a "ninguém assumiu";
+      # sem chamado vencido a consulta usa índice parcial e volta vazia.
+      sweep-interval: ${DISPATCH_ESCALATION_SWEEP_INTERVAL:PT10S}
+      sweep-initial-delay: ${DISPATCH_ESCALATION_SWEEP_INITIAL_DELAY:PT15S}
+      batch-size: ${DISPATCH_ESCALATION_BATCH_SIZE:20}
   emergency:
     outbox:
       # Sweep de recuperação da outbox: intervalo curto porque o SOS tem

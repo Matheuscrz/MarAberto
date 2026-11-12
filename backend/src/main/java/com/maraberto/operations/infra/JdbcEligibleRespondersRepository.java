@@ -5,8 +5,10 @@ import com.maraberto.operations.api.EligibleRespondersPort;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -81,6 +83,41 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
               AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point,
                              LEAST(COALESCE(b.coverage_radius_m, :defaultRadiusMeters),
                                    :maxRadiusMeters))
+            ORDER BY distance_m
+            LIMIT :maxResults
+            """;
+
+    private static final String RING_SQL = """
+            WITH sos AS (
+                SELECT CAST(ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326) AS geography) AS point
+            )
+            SELECT s.user_id, s.id AS shift_session_id, s.post_id, s.mobile_base_id,
+                   ST_Distance(COALESCE(s.last_position, p.location), sos.point) AS distance_m,
+                   (s.last_position_at IS NULL OR s.last_position_at < :staleBefore)
+                       AS position_stale
+            FROM lifeguard_posts p
+            JOIN sos ON TRUE
+            JOIN shift_sessions s ON s.post_id = p.id AND s.ended_at IS NULL
+            JOIN operational_users u ON u.id = s.user_id AND u.active
+            WHERE p.active
+              AND s.last_seen_at >= :aliveSince
+              -- Anel absoluto: o raio cadastrado do posto não entra aqui. Ele já
+              -- foi usado no round 1; a escada existe justamente para ir além.
+              AND ST_DWithin(COALESCE(s.last_position, p.location), sos.point, :ringMeters)
+              AND NOT (s.user_id = ANY (CAST(:excluded AS uuid[])))
+            UNION ALL
+            SELECT s.user_id, s.id AS shift_session_id, s.post_id, s.mobile_base_id,
+                   ST_Distance(COALESCE(s.last_position, b.location), sos.point) AS distance_m,
+                   (s.last_position_at IS NULL OR s.last_position_at < :staleBefore)
+                       AS position_stale
+            FROM mobile_bases b
+            JOIN sos ON TRUE
+            JOIN shift_sessions s ON s.mobile_base_id = b.id AND s.ended_at IS NULL
+            JOIN operational_users u ON u.id = s.user_id AND u.active
+            WHERE b.active
+              AND s.last_seen_at >= :aliveSince
+              AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point, :ringMeters)
+              AND NOT (s.user_id = ANY (CAST(:excluded AS uuid[])))
             ORDER BY distance_m
             LIMIT :maxResults
             """;
@@ -162,6 +199,36 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
                 NEAREST_SQL,
                 commonParameters(latitude, longitude).addValue("fallbackResults", fallbackRecipients),
                 this::mapRow);
+    }
+
+    @Override
+    public List<EligibleResponder> findWithinRing(
+            double latitude,
+            double longitude,
+            int radiusMeters,
+            Collection<UUID> excludedUserIds) {
+        if (maxRecipients <= 0 || radiusMeters <= 0) {
+            return List.of();
+        }
+        MapSqlParameterSource parameters = commonParameters(latitude, longitude)
+                .addValue("ringMeters", radiusMeters)
+                .addValue("excluded", toArrayLiteral(excludedUserIds))
+                .addValue("maxResults", maxRecipients);
+        return jdbc.query(RING_SQL, parameters, this::mapRow);
+    }
+
+    /**
+     * Literal de array do Postgres (`{a,b}` ou `{}`). Um `IN (:lista)` com a
+     * lista vazia quebraria a consulta, e o array resolve o caso sem montar SQL
+     * dinâmico — o plano continua o mesmo e o filtro por usuário é por chave.
+     */
+    private static String toArrayLiteral(Collection<UUID> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return "{}";
+        }
+        return userIds.stream()
+                .map(UUID::toString)
+                .collect(Collectors.joining(",", "{", "}"));
     }
 
     private MapSqlParameterSource commonParameters(double latitude, double longitude) {

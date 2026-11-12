@@ -25,7 +25,11 @@ public abstract class PostgisIntegrationTest {
                     .asCompatibleSubstituteFor("postgres"))
             .withDatabaseName("maraberto")
             .withUsername("maraberto")
-            .withPassword("maraberto");
+            .withPassword("maraberto")
+            // Cada classe de teste tem o seu contexto Spring (e o seu pool
+            // Hikari) sobre este mesmo Postgres. Com ~10 contextos o limite
+            // padrão de 100 conexões estoura e o Flyway não consegue conectar.
+            .withCommand("postgres", "-c", "max_connections=300");
 
     static {
         POSTGRES.start();
