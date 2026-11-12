@@ -131,6 +131,17 @@ maraberto:
       # despacho sem o importador de mapeamento. Desligado por padrão e
       # recusado no perfil `prod`.
       enabled: ${OPERATIONS_DEV_SEED:false}
+  beaches:
+    import:
+      # Caminho usado quando o endpoint recebe só `state` (importação assistida)
+      # e pelo seed. O upload multipart tem prioridade.
+      file: ${BATHING_AREAS_IMPORT_FILE:}
+    dev-seed:
+      # Importa o KML real de Sergipe quando `beaches` está vazia. Desligado por
+      # padrão e recusado no perfil `prod`.
+      enabled: ${BATHING_AREAS_DEV_SEED:false}
+      file: ${BATHING_AREAS_SEED_FILE:docs/kml/Areas_Banho_Sergipe.kml}
+      state: ${BATHING_AREAS_SEED_STATE:SE}
 
 server:
   port: 8080

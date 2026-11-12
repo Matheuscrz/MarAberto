@@ -69,6 +69,8 @@ public class SecurityConfig {
                         .requestMatchers("/ws/**").permitAll()
                         // Áreas operacionais por papel.
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/management/**")
+                        .hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/operations/**").hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/dispatch/**")
                         .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")

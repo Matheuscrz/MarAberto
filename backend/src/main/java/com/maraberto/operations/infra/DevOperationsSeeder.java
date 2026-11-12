@@ -61,7 +61,7 @@ public class DevOperationsSeeder implements ApplicationRunner {
         jdbc.update("""
                         INSERT INTO beaches (id, name, municipality, state_code, boundary)
                         VALUES (?, 'Praia de Pajuçara', 'Maceió', 'AL',
-                                ST_GeomFromText(?, 4326))
+                                ST_Multi(ST_GeomFromText(?, 4326)))
                         """,
                 beachId, BEACH_BOUNDARY);
 

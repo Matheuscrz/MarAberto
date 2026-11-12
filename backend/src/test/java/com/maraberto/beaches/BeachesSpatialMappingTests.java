@@ -16,6 +16,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.MultiPolygon;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.Polygon;
 import org.locationtech.jts.geom.PrecisionModel;
@@ -43,7 +44,9 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
                 "SELECT count(*) FROM pg_extension WHERE extname = 'postgis'", Integer.class))
                 .isEqualTo(1);
 
-        assertThat(tables()).contains("beaches", "lifeguard_posts", "mobile_bases", "critical_zones");
+        assertThat(tables()).contains(
+                "beaches", "beach_sectors", "import_batches", "lifeguard_posts",
+                "mobile_bases", "critical_zones");
 
         assertThat(jdbcTemplate.queryForList("""
                 SELECT indexname
@@ -56,7 +59,9 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
                         "idx_lifeguard_posts_location",
                         "idx_mobile_bases_location",
                         "idx_critical_zones_geometry",
-                        "idx_emergency_calls_location");
+                        "idx_emergency_calls_location",
+                        "idx_sector_geom",
+                        "idx_beach_map_features_geom");
 
         assertThat(jdbcTemplate.queryForList("""
                 SELECT conname
@@ -77,7 +82,7 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
         beach.setName("Praia de Teste");
         beach.setMunicipality("Aracaju");
         beach.setStateCode("SE");
-        beach.setBoundary(polygon(-35.700, -10.000, 0.010));
+        beach.setBoundary(multiPolygon(-35.700, -10.000, 0.010));
         entityManager.persist(beach);
 
         LifeguardPost post = new LifeguardPost();
@@ -118,7 +123,7 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
 
         Beach loadedBeach = entityManager.find(Beach.class, beach.getId());
         assertThat(loadedBeach.getBoundary().getSRID()).isEqualTo(4326);
-        assertThat(loadedBeach.getBoundary().getGeometryType()).isEqualTo("Polygon");
+        assertThat(loadedBeach.getBoundary().getGeometryType()).isEqualTo("MultiPolygon");
 
         LifeguardPost loadedPost = entityManager.find(LifeguardPost.class, post.getId());
         assertThat(loadedPost.getLocation().getSRID()).isEqualTo(4326);
@@ -148,7 +153,7 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
                 .isEqualTo(4326);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT ST_GeometryType(boundary) FROM beaches WHERE id = ?", String.class, beach.getId()))
-                .isEqualTo("ST_Polygon");
+                .isEqualTo("ST_MultiPolygon");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT ST_SRID(location::geometry) FROM lifeguard_posts WHERE id = ?",
                 Integer.class, post.getId()))
@@ -193,6 +198,12 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
                   FROM information_schema.tables
                  WHERE table_schema = 'public'
                 """, String.class);
+    }
+
+    private static MultiPolygon multiPolygon(double minX, double minY, double size) {
+        return GEOMETRY_FACTORY.createMultiPolygon(new Polygon[] {
+                polygon(minX, minY, size)
+        });
     }
 
     private static Polygon polygon(double minX, double minY, double size) {
