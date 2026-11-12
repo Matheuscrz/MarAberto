@@ -246,6 +246,35 @@ web/src/
 
 A guarda de rota no cliente é **só experiência de uso**; a autorização real é do servidor (13.2).
 
+### 6.2 Empacotamento mobile (Capacitor, ADR-019)
+
+O app Android/iOS é o **mesmo `web/` empacotado em WebView com Capacitor** — não há fork nem segunda base de UI. Browser, PWA instalada e app nativo compartilham as telas, as regras e o cliente HTTP; o projeto Flutter em `mobile/` está **congelado** e não é referência vigente (ADR-019).
+
+```
+web/
+├── capacitor.config.ts       # appId org.maraberto.app, webDir "dist"
+├── .env.capacitor.example    # VITE_API_BASE_URL absoluto e HTTPS no build nativo
+├── android/                  # projeto nativo (versionado; build/ e assets copiados ignorados)
+├── ios/                      # gerado só em macOS com Xcode
+└── dist/                     # saída do Vite, copiada pelo `cap sync`
+```
+
+**O que muda no nativo e não pode ser esquecido:**
+
+| Tema | Navegador/PWA | App Capacitor |
+| --- | --- | --- |
+| Origem | mesma origem + proxy `/api` | `https://localhost` (Android) / `capacitor://localhost` (iOS): `VITE_API_BASE_URL` **absoluto e HTTPS** |
+| Sessão | cookie `HttpOnly; Secure; SameSite=Strict` na mesma origem | `CapacitorHttp` + `CapacitorCookies` (jar nativo), mantendo o cookie; nunca token em storage |
+| Offline | service worker + `offline.html` | bundle local; **service worker não existe** no WKWebView |
+| Alerta do SOS | popup + sirene + `showNotification` via SW | popup + sirene + **notificação nativa** (`local-notifications`; push com app fechado na ADR-018, item 6) |
+| GPS / câmera / links | APIs do navegador | GPS por `@capacitor/geolocation`; `tel:193` e rota no Maps abertos pelo `Bridge` (sem plugin; câmera pendente) |
+| CSP | Nginx (`web/nginx.conf`) | `<meta http-equiv="Content-Security-Policy">` no `index.html` |
+| Backup | — | `android:allowBackup="false"` (o storage do WebView não vai para o backup) |
+
+**Regra de código:** nenhuma feature importa `@capacitor/*` diretamente. Detecção de plataforma e adaptadores ficam em `shared/lib/platform.ts` (plataforma) e `shared/lib/native.ts` (plugins: GPS, notificação e keep-awake), com a implementação web como padrão em `shared/lib/geolocation.ts` e `shared/lib/pwa.ts` — assim o PWA continua funcionando sem plugin e as fronteiras da ADR-015 seguem válidas.
+
+**Build:** `cd web && npm run cap:sync` (equivale a `npm run build:app` + `npx cap sync android`); o APK/AAB sai do Android Studio (`npm run cap:open`) ou de `web/android/gradlew assembleDebug|assembleRelease` (JDK 21 + Android SDK com platform 36). O APK **debug** já é gerado com `JAVA_HOME` no Temurin 21 e `sdk.dir` em `web/android/local.properties`; o release exige keystore. O build nativo usa `--mode capacitor`: exige `VITE_API_BASE_URL` absoluto em HTTPS (validado pelo `vite.config.ts`), injeta a CSP por `<meta>` e desliga o service worker. `cap add ios` e o build iOS exigem macOS + Xcode. Detalhes e o procedimento passo a passo ficam em `docs/Implementation.md`, Etapa 8B.
+
 ---
 
 ## 7. Modelo de dados
@@ -528,7 +557,7 @@ LEFT JOIN critical_zones z
 
 ### 7.5 Plantões elegíveis a um SOS (distância em metros)
 
-Elegibilidade = **posto/base ativo** + **plantão aberto** (`shift_sessions.ended_at IS NULL`) + **dentro do raio de cobertura**. A distância é medida a partir da **posição do plantão** (`shift_sessions.last_position`), com a posição da estrutura como fallback. A regra é **notificar todos** os plantões no raio — não uma amostra dos mais próximos. Duas consultas (fixos e móveis), unidas:
+Elegibilidade = **posto/base ativo** + **plantão aberto e vivo** (`shift_sessions.ended_at IS NULL` e `last_seen_at` dentro do lease) + **dentro do raio de cobertura**, limitado ao **teto de distância da instalação**. A distância é medida a partir da **posição do plantão** (`shift_sessions.last_position`), com a posição da estrutura como fallback. A regra é **notificar todos** os plantões no raio — não uma amostra dos mais próximos. Duas consultas (fixos e móveis), unidas:
 
 ```sql
 WITH sos AS (
@@ -545,8 +574,10 @@ JOIN sos ON TRUE
 JOIN shift_sessions s ON s.post_id = p.id AND s.ended_at IS NULL
 JOIN operational_users u ON u.id = s.user_id AND u.active
 WHERE p.active
+  AND s.last_seen_at >= :alive_since                    -- lease do plantão
   AND ST_DWithin(COALESCE(s.last_position, p.location), sos.point,
-                 COALESCE(p.coverage_radius_m, :default_coverage_radius_m))
+                 LEAST(COALESCE(p.coverage_radius_m, :default_coverage_radius_m),
+                       :max_radius_m))                  -- teto de 5 km
 
 UNION ALL
 
@@ -558,8 +589,10 @@ JOIN sos ON TRUE
 JOIN shift_sessions s ON s.mobile_base_id = b.id AND s.ended_at IS NULL
 JOIN operational_users u ON u.id = s.user_id AND u.active
 WHERE b.active
+  AND s.last_seen_at >= :alive_since
   AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point,
-                 COALESCE(b.coverage_radius_m, :default_coverage_radius_m))
+                 LEAST(COALESCE(b.coverage_radius_m, :default_coverage_radius_m),
+                       :max_radius_m))
 
 ORDER BY distance_m
 LIMIT :max_recipients;                                                -- teto de 50
@@ -568,7 +601,24 @@ LIMIT :max_recipients;                                                -- teto de
 - **Medir pela estrutura é bug de produto, não otimização.** O posto é um cadastro; o guarda-vidas está onde o plantão diz que está. Antes da correção, um plantão em campo a poucos metros do chamado era despachado com a distância do posto cadastrado (207 km no caso real que originou a regra) e aparecia como "mais próximo" para quem estava longe.
 - **`last_position` vence `p.location`/`b.location`.** Sem posição reportada (plantão recém-aberto, ou posto fixo em que ninguém atualizou), a estrutura é o fallback — e o console mostra o aviso de que a distância vem dela.
 - **Sem prefiltro espacial da estrutura.** Nenhum `ST_DWithin` constante sobre `p.location`/`b.location`: ele descartaria justamente o plantão distante do posto e perto do chamado. O conjunto varrido é o de plantões abertos (índices parciais da `V8`) com a estrutura por chave primária; com centenas de plantões abertos o custo é menor do que decidir pelo posto e errar a distância. Não existe mais `maraberto.dispatch.search-radius-m`.
-- `coverage_radius_m` é **por posto/base** (ex.: 1 km em posto urbano, 3 km em trecho isolado). A coluna existe desde a `V8`; quando nula, vale `maraberto.dispatch.default-coverage-radius-m` (2 km por padrão). O raio continua sendo da estrutura: quem se desloca leva a cobertura do posto/base a que está vinculado.
+- `coverage_radius_m` é **por posto/base** (ex.: 1 km em posto urbano, 3 km em trecho isolado). A coluna existe desde a `V8`; quando nula, vale `maraberto.dispatch.default-coverage-radius-m` (2 km por padrão). O raio continua sendo da estrutura: quem se desloca leva a cobertura do posto/base a que está vinculado, mas nunca além do teto da instalação.
+- **Teto de distância (`maraberto.dispatch.max-radius-m`, 15 km).** O raio efetivo do despacho inicial é `LEAST(raio da estrutura, teto)`. O cadastro pode pedir **menos**, nunca mais: um raio errado (10 km, 20 km) deixaria de ser um detalhe de configuração e passaria a chamar quem não chega a tempo — e um alerta que nunca é atendível ensina o operador a ignorar o próximo. O **KNN de fallback também é limitado pelo teto**: mais longe que isso, o chamado vai para a coordenação (RN03), não para o vizinho mais distante.
+- **Plantão é um *lease*.** `last_seen_at` é renovado pelo console a cada 5 min enquanto aberto e visível (posição quando há GPS, batimento `POST …/current/heartbeat` quando não há). O filtro `last_seen_at >= :alive_since` (15 min) entra **na consulta**, então um app fechado à força deixa de ser elegível imediatamente, sem depender de job. O `ShiftIdleExpiryJob` só carimba `ended_at`/`ended_reason = 'IDLE_TIMEOUT'` com intervalo largo (10 min, índice parcial da `V9`), porque corrigir o estado é obrigação da consulta, não do agendador.
+- **Um chamado, um atendente.** O ack vence por CAS e **cancela os demais despachos na mesma transação**; o frame `CANCELLED` fecha popup, sirene e notificação dos perdedores logo após o commit. Dois guarda-vidas saindo para o mesmo banhista é desperdício e risco (o posto fica descoberto); apoio extra é pedido pelo rádio, fora do sistema.
+- **Escada de anéis (V10).** Sem ack em `escalation.delay` (20 s, RF21/RF42), o chamado é reaberto para anéis absolutos — `5, 7, 10, 12, 15, 20 km` por padrão. O anel **ignora o raio cadastrado** do posto/base: nesse momento a pergunta é "quem consegue chegar". Quem já recebeu o chamado, em qualquer rodada, é excluído; anel vazio abre o seguinte na mesma passada; escada esgotada aciona a coordenação (RN03) e encerra (`next_escalation_at = NULL`).
+
+```sql
+-- V10 (aplicada): estado durável da escada + fila do job
+ALTER TABLE emergency_calls
+    ADD COLUMN escalation_step    SMALLINT NOT NULL DEFAULT 0,
+    ADD COLUMN next_escalation_at TIMESTAMPTZ;
+
+CREATE INDEX idx_emergency_calls_escalation
+    ON emergency_calls (next_escalation_at)
+    WHERE status = 'DISPATCHED' AND next_escalation_at IS NOT NULL;
+```
+
+O job reivindica `DISPATCHED` com prazo vencido por `FOR UPDATE SKIP LOCKED` (batch de 20), uma transação curta por lote; a consulta do anel é a mesma da §7.5 com `ST_DWithin(..., :ringMeters)` e `NOT (s.user_id = ANY (:excluded))`. Reinício de aplicação não reabre anel: o passo consumido está na linha do chamado.
 - **`position_stale` é sinal, não descarte.** Nas **duas** ramificações fica `stale` quando não há posição reportada (`last_position_at IS NULL`) **ou** quando ela é mais velha que `maraberto.dispatch.position-stale-after` (padrão 30 min). "Nunca reportou" também é stale porque a distância, nesse caso, é a do cadastro da estrutura — exatamente o caso em que dizer "de você" mentiria (o 196,4 km real era um plantão aberto sem `last_position`). O console rotula a distância como "da sua unidade" quando `position_stale` e "de você" quando não.
 - **`max-recipients` é teto de segurança, não seleção.** O padrão é 50 justamente para uma instalação inteira dentro de um raio mal configurado não gerar fan-out absurdo. Não use esse valor para "escolher os 3 primeiros": todos os plantões no raio são notificados.
 - `shift_sessions` tem algumas centenas de linhas abertas por instalação: a consulta usa o índice parcial de plantão aberto; **não** criar GiST em `last_position` sem um `EXPLAIN` que mostre varredura dominante (§7.6).
@@ -584,6 +634,8 @@ LIMIT :max_recipients;                                                -- teto de
 - **Cache com Redis** para leituras quentes (GeoJSON, contexto da praia, bandeira vigente), em _cache-aside_ com chaves versionadas (`geo:beaches:v{n}`), TTL e invalidação por eventos (`BeachChanged`, `RiskZoneChanged`, `FlagChanged`). Proteger contra _stampede_ (single-flight/lock curto) e prever _fallback_ local se o Redis cair. **Nunca** tornar o cache fonte da verdade para SOS, ack ou escrita; o banco decide.
 - **Idempotência** em toda escrita sujeita a retry/duplo toque: `client_request_id` único no SOS, `Idempotency-Key` nos endpoints de escrita, constraints únicas + `INSERT ... ON CONFLICT`, consumidores de evento idempotentes e deduplicação no Outbox. A operação repetida deve devolver o mesmo resultado, não duplicar efeitos.
 - Medir antes e depois com `EXPLAIN (ANALYZE, BUFFERS)`; índices GiST/B-tree, views, cache e materializações só entram com consulta real e ganho que justifique.
+
+**Escala e troca de persistência.** O envelope de capacidade do caminho crítico do SOS (chamados/s, plantões abertos, linhas por chamado, volume anual), os gargalos em ordem de probabilidade (consulta de elegibilidade não indexável por `COALESCE`, fan-out de entrega, contenção de pool, crescimento sem retenção) e os **gatilhos numéricos** para escalar verticalmente, particionar, usar Redis ou trocar por NoSQL/Kafka estão em `docs/adr/020-escala-e-persistencia-do-caminho-critico-do-sos.md`. Nada entra sem `EXPLAIN`/`pg_stat_statements`/k6 que o justifique.
 
 ### 7.7 Ingestão de delimitações de praias e setores (QGIS, KML e GeoJSON)
 
@@ -770,8 +822,9 @@ CREATE INDEX idx_shift_scope       ON shift_sessions (beach_id, beach_sector_id,
 - No código atual a tabela de usuários é `operational_users` (`V6`); o DDL acima usa `app_users`, que é o nome do modelo-alvo (§7.3).
 - **A `V8` materializa esta tabela** junto de `coverage_radius_m` e do dispatch por destinatário (§7.13). Sem plantão aberto não há como saber "quem está perto", então esta é a primeira dependência do despacho do SOS. O ciclo está implementado em `operations` (`GET /api/v1/dispatch/shifts/targets`, `POST /api/v1/dispatch/shifts`, `GET /api/v1/dispatch/shifts/current`, `PUT /api/v1/dispatch/shifts/current/position`, `POST /api/v1/dispatch/shifts/current/close`).
 - **Só estrutura ativa é destino de plantão.** `GET /api/v1/dispatch/shifts/targets` devolve postos fixos (com praia) e bases móveis ativos, com a posição e o raio de cobertura; o console só permite abrir plantão nessa lista. Plantão em posto/base inativo continuaria no banco e sumiria da seleção do SOS sem aviso.
-- **Check-in/check-out explícito:** o operador inicia e encerra o plantão; o encerramento remove a posição da visão da coordenação (o histórico fica só como duração, sem trajeto).
-- **Atualização da posição:** no início do plantão (GPS do aparelho, com ajuste manual), sob ação explícita ("atualizar minha localização") e por renovação a cada 5 min **enquanto o console está aberto e visível**, com `position_accuracy_m`. Sem _background geolocation_, sem `watchPosition` e sem persistência de coordenada no navegador — a renovação existe para a base móvel não envelhecer além de `position-stale-after` (30 min).
+- **Check-in/check-out explícito:** o operador inicia e encerra o plantão; o encerramento remove a posição da visão da coordenação (o histórico fica só como duração, sem trajeto). O `ended_reason` (`MANUAL`, `IDLE_TIMEOUT`, `LOGOUT`) separa o turno encerrado pelo próprio operador do que caiu sozinho, porque os dois casos significam coisas diferentes para a coordenação.
+- **Plantão sem sinal de vida cai (`V9`).** `last_seen_at` funciona como *lease*: o console renova a cada 5 min enquanto está aberto e visível (`POST /api/v1/dispatch/shifts/current/heartbeat`, `204`, sem payload, ou a própria atualização de posição) e a elegibilidade do SOS ignora plantão cujo último sinal passou de 15 min. A expiração é **preguiçosa** — avaliada na consulta e na leitura do plantão —, e o `ShiftIdleExpiryJob` apenas carimba `ended_at`/`ended_reason` a cada 10 min nas linhas vencidas (índice parcial `idx_shift_open_last_seen`). Fechar o app à força, desligar o aparelho ou perder rede **encerra o turno**, que é o comportamento correto: um console fechado não vê o alerta (medido no emulador: app minimizado ou tela bloqueada não toca nem notifica) e um "plantão fantasma" continuaria sendo escolhido pelo PostGIS. O único custo é um batimento minúsculo a cada 5 minutos por console aberto.
+- **Atualização da posição:** no início do plantão (GPS do aparelho, com ajuste manual), sob ação explícita ("atualizar minha localização") e por renovação a cada 5 min **enquanto o console está aberto e visível**, com `position_accuracy_m`. Sem _background geolocation_, sem `watchPosition` e sem persistência de coordenada no navegador — a renovação existe para a base móvel não envelhecer além de `position-stale-after` (30 min) e é, ao mesmo tempo, o sinal de vida do turno (posição e lease na mesma requisição, com jitter para não sincronizar consoles). Aba escondida não envia nada; se ficar escondida além do lease, o turno cai — e ao voltar o console revalida o plantão e avisa "encerrado por inatividade" em vez de mostrar um turno que não recebe mais chamados.
 - **A posição do plantão é o ponto do despacho.** Vale para posto fixo e base móvel: o raio de cobertura é da estrutura, mas a distância medida é a de `last_position` (fallback: posição do posto/base). Um guarda-vidas em campo com o posto cadastrado a 200 km precisa ser escolhido e medido pela posição em que está, não pela ficha da estrutura (§7.5).
 - **Privacidade:** `last_position` é dado sensível (RN17) — visível apenas à coordenação do escopo, nunca em listagem pública, log, cache, métrica ou exportação aberta. A posição do posto/base é pública; a do operador não.
 - **Painel:** uma consulta por escopo agrega plantões abertos + última posição + contadores do dia (ocorrências por origem/status, sinalizações, pendências CIOSP). Contadores usam índices parciais (`occurred_at`, `status`) e podem virar _view_ de leitura; não usar _view materializada_ para SOS/plantão, que precisam ser frescos.
@@ -872,7 +925,7 @@ São **duas decisões diferentes**, e misturá-las é a origem da maior parte do
 | Quem deve ser notificado neste chamado?     | **PostGIS** (verdade única, por chamado)               | `emergency_dispatches` por destinatário |
 | Como a mensagem chega até essa pessoa?      | Transporte (STOMP, Web Push, RabbitMQ opcional)         | porta `SosNotifierPort` em `realtime`  |
 | Quem assumiu o chamado?                     | Banco, por _compare-and-set_                            | `emergency_calls` + `emergency_dispatches` |
-| Quem é notificado se ninguém assumir?       | Banco, por job de escalonamento (round 2)               | índice parcial `idx_emergency_calls_open` |
+| Quem é notificado se ninguém assumir?       | Banco, por escada de anéis (5→20 km, `V10`)             | `emergency_calls.escalation_step` + índice parcial `idx_emergency_calls_escalation` |
 
 **Regra dura:** o broker **não** filtra geografia. Routing key por geohash/célula erra a fronteira da célula, não acompanha raio por posto, não sabe que a base móvel se deslocou e não tem KNN de fallback (ADR-018). O filtro espacial fica em um lugar só: a consulta da §7.5, dentro da transação do SOS.
 
@@ -923,7 +976,7 @@ O `NOT VALID` da constraint de destinatário é deliberado: a `V3` já está apl
 - **Distância atual, não a da abertura.** O `distance_m` do despacho é a foto do instante do SOS; depois do ack o guarda-vidas se desloca. Por isso `/calls/assigned` também devolve `currentDistanceMeters` (`ST_Distance(sh.last_position, c.location)` da **última posição do plantão** até o ponto do banhista), `currentPositionAt` e `currentPositionStale` (mesmo `maraberto.dispatch.position-stale-after`). O console reconcilia de 10 em 10 s e mostra a distância em destaque ("Distância agora"), com a hora da posição — é o que permite decidir entre deslocamento **a pé ou de veículo**. Sem posição no plantão, a distância da abertura é o fallback explícito ("na abertura do chamado"); posição desatualizada é avisada, nunca apresentada como "de você".
 - **Coordenada só em rota autenticada e só por gesto.** O frame STOMP, o log, a outbox e a notificação continuam sem coordenada; o ponto chega por `/calls` e `/calls/assigned` (destinatário + papel) e só sai do navegador para o app de mapas quando o operador toca em "Abrir rota". O console avisa isso na própria ficha.
 - **Abandonar o atendimento não é ack.** Ainda não há transição para `RESOLVED`/`FALSE_ALARM` a partir do console; o atendimento em curso permanece na mesa até a feature de ocorrências concluí-la. Não existe endpoint para "sumir" com o chamado.
-- **Escalonamento no banco, não no broker.** Job `@Scheduled` + ShedLock, `FOR UPDATE SKIP LOCKED` sobre `idx_emergency_calls_open`: `DISPATCHED` sem ack por N segundos (padrão 20 s) → round 2 (raio maior, postos de apoio e coordenação) → `EmergencyCallEscalated`. Mensagem com _delay_ no Rabbit seria estado invisível: não aparece no painel, não sobrevive a _restart_ limpo e não é auditável.
+- **Escalonamento no banco, não no broker.** `SosEscalationJob` (`@Scheduled`, 10 s) reivindica por `FOR UPDATE SKIP LOCKED` sobre `idx_emergency_calls_escalation`: `DISPATCHED` com `next_escalation_at <= NOW()` abre o próximo anel que encontrar alguém — 5, 7, 10, 12, 15 e 20 km por padrão — e, esgotada a escada, aciona a coordenação. O `SKIP LOCKED` já resolve múltiplas instâncias; não há timer em memória nem ShedLock. Mensagem com _delay_ no Rabbit seria estado invisível: não aparece no painel, não sobrevive a _restart_ e não é auditável.
 - **Canais redundantes e independentes:** destino STOMP por usuário, Web Push e _polling_ de reconciliação (`GET /api/v1/dispatch/calls` a cada 10 s). Qualquer um sozinho tem de entregar; **nenhum** é fonte da verdade.
 - **Autenticação do WebSocket:** o JWT é validado no frame `CONNECT` (`StompAuthenticationInterceptor`, com `identity.api.AccessTokenVerifier`) e a entrega é por usuário. O cliente assina `/user/queue/sos`; o servidor publica em `/queue/sos` via `convertAndSendToUser`. O tópico aberto `/topic/operational.emergency.calls` foi **removido** — sem autorização no socket, "notificar só os próximos" é cosmético.
 - **Porta, não acoplamento:** `realtime.api.SosNotifierPort` com adaptadores `StompSosNotifier` (padrão) e `AmqpSosNotifier` (perfil `rabbit`). O `emergency` não importa `realtime` além da porta, e o `@Externalized` do Spring Modulith **não** é usado no SOS (a outbox cifrada própria já é o registro de publicação; ter as duas duplicaria a semântica).
@@ -939,7 +992,9 @@ O `NOT VALID` da constraint de destinatário é deliberado: a `V3` já está apl
 | Consumidor          | ack manual, prefetch baixo, idempotente por `dispatchId`, retry com TTL e DLQ | Reprocessamento seguro e falha visível                                     |
 | Contingência        | Rabbit fora → evento `PENDING` + sweep; STOMP direto e polling seguem        | O broker é perfil opcional (ADR-004): nenhum canal pode ser obrigatório     |
 
-- **Estado da implementação (2026-11-11):** passos 1–4 concluídos — `V8` aplicada (`shift_sessions`, `coverage_radius_m`, coluna gerada + GiST, dispatch por destinatário), consulta de elegíveis em `operations.infra.JdbcEligibleRespondersRepository` (todos os plantões no raio, com a **posição do plantão** decidindo a distância e a estrutura só como fallback; KNN de fallback; `position_stale` para posto e base móvel, inclusive quando nunca reportaram), despacho na transação do SOS com um evento de outbox por destinatário, STOMP autenticado por JWT no `CONNECT` e ack por CAS com cancelamento dos demais. No frontend, o console do operador (`/operador`) consome `GET /api/v1/dispatch/calls`, assume por `POST …/ack` (tratando `409`/`403`), assina `/user/queue/sos` por STOMP, reconcilia por _polling_ de 10 s e abre **popup, sirene e notificação do sistema** ao receber o despacho; o chamado assumido continua na mesa em "Em atendimento por você" (`GET …/calls/assigned`) com rota até o banhista e **distância agora** (calculada da última posição do plantão, com hora da posição, para decidir entre a pé e veículo), e o check-in de plantão exige a posição do aparelho (sem ela o despacho mede pelo cadastro da estrutura). Faltam: perfil `rabbit` com confirms/DLQ, Web Push com o app fechado, job de escalonamento (round 2), métricas, sonda e k6, e a conclusão do atendimento (`RESOLVED`) pela ocorrência. Testes de elegibilidade: `SosDispatchEligibilityTests`; ack e atendimento em curso: `EmergencyDispatchAckTests`.
+- **Teto de distância da notificação (2026-11-11):** `maraberto.dispatch.max-radius-m` (**15 km**) limita o raio efetivo de qualquer posto/base no despacho inicial (`LEAST(raio, teto)`) e também o KNN de fallback. Fora do teto, o chamado vai para a coordenação em vez de acordar um guarda-vidas que não chega a tempo.
+- **Escalonamento por anéis (2026-11-11, `V10`):** quando ninguém assume em 20 s, o chamado é reaberto para anéis de 5, 7, 10, 12 e 20 km — todos configuráveis em `maraberto.dispatch.escalation.rings`; anéis vazios são pulados, quem já recebeu não é reavisado e o fim da escada aciona a coordenação. A decisão continua no banco (`escalation_step`/`next_escalation_at`); o job só pergunta "quem ainda não foi avisado dentro deste anel?".
+- **Estado da implementação (2026-11-11):** passos 1–4 e 6 concluídos — `V8` aplicada (`shift_sessions`, `coverage_radius_m`, coluna gerada + GiST, dispatch por destinatário), consulta de elegíveis em `operations.infra.JdbcEligibleRespondersRepository` (todos os plantões no raio, com a **posição do plantão** decidindo a distância e a estrutura só como fallback; KNN de fallback; `position_stale` para posto e base móvel, inclusive quando nunca reportaram), despacho na transação do SOS com um evento de outbox por destinatário, STOMP autenticado por JWT no `CONNECT` e ack por CAS com cancelamento dos demais. No frontend, o console do operador (`/operador`) consome `GET /api/v1/dispatch/calls`, assume por `POST …/ack` (tratando `409`/`403`), assina `/user/queue/sos` por STOMP, reconcilia por _polling_ de 10 s e abre **popup, sirene e notificação do sistema** ao receber o despacho; o chamado assumido continua na mesa em "Em atendimento por você" (`GET …/calls/assigned`) com rota até o banhista e **distância agora** (calculada da última posição do plantão, com hora da posição, para decidir entre a pé e veículo), e o check-in de plantão exige a posição do aparelho (sem ela o despacho mede pelo cadastro da estrutura). Falta: perfil `rabbit` com confirms/DLQ, Web Push com o app fechado, métricas, sonda e k6, e a conclusão do atendimento (`RESOLVED`) pela ocorrência. Escalonamento por anéis implementado na `V10` (`SosEscalationTests`). Testes de elegibilidade: `SosDispatchEligibilityTests`; ack e atendimento em curso: `EmergencyDispatchAckTests`.
 - **Ordem de implementação:** (1) `V8` com `shift_sessions`, `coverage_radius_m`, coluna gerada + GiST e dispatch por destinatário — **feito**; (2) consulta de elegíveis com `EXPLAIN (ANALYZE, BUFFERS)` no PR — **feito**; (3) dispatch na transação + fan-out STOMP autenticado, **sem Rabbit** — **feito**; (4) ack por CAS e cancelamento — **feito**; (5) perfil `rabbit` com confirms e Testcontainers; (6) Web Push e escalonamento; (7) métricas, sonda e k6. Cada passo entra com a documentação no mesmo PR. Detalhes e alternativas na [ADR-018](adr/018-selecao-de-destinatarios-e-entrega-do-sos.md).
 - **Métricas do despacho:** `sos_time_to_notify_seconds` (do commit à notificação), `sos_unacked_current`, `sos_dispatches_by_round_total`, `sos_dispatch_without_recipient_total` (fallback acionado) e, no perfil `rabbit`, profundidade de DLQ e taxa de retry.
 
@@ -985,7 +1040,7 @@ sequenceDiagram
 1. **Persistir antes de notificar.** O 201 só volta depois do commit. Se o app cair em seguida, o Outbox republica o evento na reinicialização.
 2. **Idempotência.** `client_request_id` evita SOS duplicado por duplo toque ou retry de rede; `dispatchId` evita alerta duplicado no console.
 3. **Ack por _compare-and-set_.** `UPDATE emergency_calls SET status='ACKNOWLEDGED', assigned_post_id=?, version=version+1 WHERE id=? AND status='DISPATCHED'` — o primeiro posto a assumir vence; os demais recebem "já assumido" e o evento `sos.cancel`. Sem lock longo, sem corrida.
-4. **Escalonamento durável.** Job (com ShedLock para múltiplas instâncias) consulta o índice parcial `idx_emergency_calls_open`. Sem dependência de timer em memória nem de fila com _delay_.
+4. **Escalonamento durável.** `SosEscalationJob` consulta o índice parcial `idx_emergency_calls_escalation` com `FOR UPDATE SKIP LOCKED` (concorrência entre instâncias resolvida no banco). Sem dependência de timer em memória nem de fila com _delay_.
 5. **Canais redundantes.** WebSocket, Web Push e _polling de reconciliação_ (`GET /operations/sos/open` a cada 10 s no console). Qualquer um sozinho entrega.
 6. **Cliente honesto.** Se o POST não for confirmado em ~5 s, o app mostra **"Não foi possível enviar — ligue 193"** com botão de chamada. Nunca exibir "socorro a caminho" sem ack.
 7. **Anti-abuso.** Redis (token bucket) limita SOS por usuário/dispositivo; a geofence marca chamados fora da praia (+ margem) para triagem e priorização — sem bloquear o envio.
@@ -1486,6 +1541,7 @@ MarAberto/
 | Mapa                | MapLibre GL JS + PMTiles                                                           | Tiles próprios do recorte regional.                                                                                                 |
 | Clima               | `WeatherProvider` + OpenWeather                                                    | Chave `OPENWEATHER_API_KEY` opcional por instalação; chamadas somente no backend e respostas em cache.                              |
 | Frontend            | React + TypeScript + Vite + Tailwind, PWA com service worker **manual versionado** | Um app, estrutura _feature-based_ (6.1); áreas `/operador`, `/gestao` e `/admin` em _chunks_ lazy.                                  |
+| App mobile          | **Capacitor 8** sobre o mesmo build do `web/` (ADR-019)                            | Android agora; iOS em macOS. `android/` dentro de `web/`; `mobile/` (Flutter) congelado. Plugins só onde a tela precisa.            |
 | Busca               | PostgreSQL `pg_trgm` atrás de `SearchPort`                                         | OpenSearch opcional (ADR-014).                                                                                                      |
 | Tempo real          | Spring WebSocket (STOMP) + Web Push (VAPID)                                        | Redis para fan-out.                                                                                                                 |
 | Jobs                | `@Scheduled` + ShedLock                                                            | Maré, escalonamento, expiração.                                                                                                     |

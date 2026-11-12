@@ -12,6 +12,19 @@ export const DEFAULT_MAP_CENTER: [number, number] = import.meta.env
   ? (JSON.parse(import.meta.env.VITE_MAP_DEFAULT_CENTER) as [number, number])
   : [-51.9253, -14.235]; // Centro do Brasil como fallback neutro
 
+/**
+ * Basemap de demonstração (ADR-005).
+ *
+ * <p>Enquanto não houver PMTiles próprios, o estilo usa tiles raster do
+ * OpenStreetMap. A origem precisa estar liberada em `img-src`/`connect-src` da
+ * CSP (Nginx e build nativo) — por isso ela sai de uma variável única, para o
+ * estilo e as CSPs não divergirem. Em produção, aposente esta origem e sirva
+ * PMTiles do próprio órgão.
+ */
+export const DEMO_TILE_URL =
+  (import.meta.env.VITE_DEMO_TILE_URL as string | undefined) ??
+  "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+
 export const DEFAULT_MAP_BOUNDS:
   | [[number, number], [number, number]]
   | undefined = import.meta.env.VITE_MAP_BOUNDS
@@ -60,7 +73,7 @@ export function buildMapStyle(pmtilesUrl?: string | null): StyleSpecification {
     sources: {
       "osm-tiles": {
         type: "raster",
-        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tiles: [DEMO_TILE_URL],
         tileSize: 256,
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',

@@ -130,9 +130,14 @@ export interface ShiftSnapshot {
   readonly mobileBaseId: string | null;
   readonly startedAt: string;
   readonly endedAt: string | null;
+  /** `MANUAL` (o operador encerrou), `IDLE_TIMEOUT` (sem sinal) ou `LOGOUT`. */
+  readonly endedReason: ShiftEndReason | null;
   readonly lastPositionAt: string | null;
   readonly lastPositionAccuracyMeters: number | null;
 }
+
+/** Motivo do encerramento do plantão (`GET/POST /dispatch/shifts/current`). */
+export type ShiftEndReason = "MANUAL" | "IDLE_TIMEOUT" | "LOGOUT";
 
 /** Posto fixo ou base móvel ativo (`GET /api/v1/dispatch/shifts/targets`). */
 export type ShiftTargetKind = "POST" | "MOBILE_BASE";

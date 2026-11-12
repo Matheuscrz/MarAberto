@@ -130,6 +130,36 @@ class SosDispatchEligibilityTests extends PostgisIntegrationTest {
     }
 
     @Test
+    void ignoresCoverageRadiusAboveTheInstallationCap() throws Exception {
+        // Posto a ~18 km com raio cadastrado de 25 km. Sem o teto da instalação
+        // o operador seria chamado para um atendimento que não consegue fazer:
+        // o raio do cadastro pode ser menor que o teto (15 km), nunca maior.
+        UUID userId = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
+        UUID postId = EmergencyTestData.createPost(
+                jdbcTemplate, LATITUDE + 0.1620, LONGITUDE, 25_000);
+        EmergencyTestData.openPostShift(jdbcTemplate, userId, postId);
+
+        UUID callId = createCall(LATITUDE, LONGITUDE);
+
+        assertThat(recipientsOf(callId)).doesNotContain(userId);
+    }
+
+    @Test
+    void nearestFallbackDoesNotReachBeyondTheCap() throws Exception {
+        // Único plantão a ~18 km, com raio de 100 m: nem pelo raio, nem pelo KNN
+        // (limitado ao teto de 15 km). Longe demais para notificar — quem assume
+        // é a coordenação (RN03).
+        UUID userId = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
+        UUID postId = EmergencyTestData.createPost(
+                jdbcTemplate, LATITUDE + 0.1620, LONGITUDE, 100);
+        EmergencyTestData.openPostShift(jdbcTemplate, userId, postId);
+
+        UUID callId = createCall(LATITUDE, LONGITUDE);
+
+        assertThat(recipientsOf(callId)).doesNotContain(userId);
+    }
+
+    @Test
     void marksMobileBasePositionAsStaleWhenItWasNotReportedRecently() throws Exception {
         UUID userId = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
         UUID baseId = EmergencyTestData.createMobileBase(

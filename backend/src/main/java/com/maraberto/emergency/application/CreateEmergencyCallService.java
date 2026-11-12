@@ -1,24 +1,14 @@
 package com.maraberto.emergency.application;
 
-import com.maraberto.emergency.api.EmergencyCallDispatched;
 import com.maraberto.emergency.domain.EmergencyCall;
 import com.maraberto.emergency.domain.EmergencyCallStatus;
-import com.maraberto.emergency.domain.EmergencyDispatch;
-import com.maraberto.emergency.domain.EmergencyDispatchStatus;
-import com.maraberto.emergency.domain.EmergencyOutboxEvent;
 import com.maraberto.emergency.infra.EmergencyCallRepository;
-import com.maraberto.emergency.infra.EmergencyDispatchRepository;
-import com.maraberto.emergency.infra.EmergencyOutboxEventRepository;
 import com.maraberto.operations.api.EligibleResponder;
-import com.maraberto.shared.security.crypto.SensitiveDataProtector;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +20,10 @@ import org.springframework.transaction.annotation.Transactional;
  * houver plantão aberto, o chamado continua salvo e a coordenação é acionada
  * (RN03). A seleção roda em transação separada justamente para que um erro nela
  * não aborte a transação do SOS.
+ *
+ * <p>O chamado já nasce com o prazo do primeiro anel de escalonamento. Se
+ * ninguém assumir dentro dele, {@link SosEscalationService} amplia o raio — o
+ * despacho inicial continua sendo o do raio de cobertura do posto/base.
  */
 @Service
 public class CreateEmergencyCallService {
@@ -37,28 +31,19 @@ public class CreateEmergencyCallService {
     private static final Logger log = LoggerFactory.getLogger(CreateEmergencyCallService.class);
 
     private final EmergencyCallRepository callRepository;
-    private final EmergencyDispatchRepository dispatchRepository;
-    private final EmergencyOutboxEventRepository outboxRepository;
     private final DispatchRecipientResolver recipientResolver;
-    private final EmergencyOutboxSerializer outboxSerializer;
-    private final SensitiveDataProtector sensitiveDataProtector;
-    private final ApplicationEventPublisher eventPublisher;
+    private final SosDispatchNotifier notifier;
+    private final SosEscalationPolicy escalationPolicy;
 
     public CreateEmergencyCallService(
             EmergencyCallRepository callRepository,
-            EmergencyDispatchRepository dispatchRepository,
-            EmergencyOutboxEventRepository outboxRepository,
             DispatchRecipientResolver recipientResolver,
-            EmergencyOutboxSerializer outboxSerializer,
-            SensitiveDataProtector sensitiveDataProtector,
-            ApplicationEventPublisher eventPublisher) {
+            SosDispatchNotifier notifier,
+            SosEscalationPolicy escalationPolicy) {
         this.callRepository = callRepository;
-        this.dispatchRepository = dispatchRepository;
-        this.outboxRepository = outboxRepository;
         this.recipientResolver = recipientResolver;
-        this.outboxSerializer = outboxSerializer;
-        this.sensitiveDataProtector = sensitiveDataProtector;
-        this.eventPublisher = eventPublisher;
+        this.notifier = notifier;
+        this.escalationPolicy = escalationPolicy;
     }
 
     @Transactional
@@ -85,50 +70,14 @@ public class CreateEmergencyCallService {
             log.warn("SOS {} registrado sem destinatário: nenhum plantão aberto nem coordenação ativa",
                     saved.getId());
         }
-        recipients.forEach(recipient -> dispatchTo(saved, recipient, occurredAt));
+        notifier.notify(saved.getId(), recipients, 1, occurredAt);
 
-        return saved;
-    }
-
-    private void dispatchTo(EmergencyCall call, EligibleResponder recipient, Instant occurredAt) {
-        EmergencyDispatch dispatch = new EmergencyDispatch();
-        dispatch.setEmergencyCallId(call.getId());
-        dispatch.setRound((short) 1);
-        dispatch.setRecipientUserId(recipient.userId());
-        dispatch.setRecipientPostId(recipient.postId());
-        dispatch.setRecipientBaseId(recipient.baseId());
-        dispatch.setDistanceMeters(toDistance(recipient.distanceMeters()));
-        dispatch.setPositionStale(recipient.positionStale());
-        dispatch.setStatus(EmergencyDispatchStatus.PENDING);
-        dispatch = dispatchRepository.save(dispatch);
-
-        EmergencyCallDispatched event = new EmergencyCallDispatched(
-                call.getId(),
-                dispatch.getId(),
-                recipient.userId(),
-                recipient.postId(),
-                recipient.baseId(),
-                1,
-                occurredAt);
-
-        EmergencyOutboxEvent outboxEvent = new EmergencyOutboxEvent();
-        outboxEvent.setAggregateId(call.getId());
-        outboxEvent.setEventType(EmergencyCallDispatched.class.getName());
-        outboxEvent.setPayload(sensitiveDataProtector.encrypt(
-                outboxSerializer.toJson(event), SensitiveDataProtector.AAD_EMERGENCY_OUTBOX));
-        outboxEvent.setStatus(EmergencyOutboxEvent.OutboxStatus.PENDING);
-        outboxRepository.save(outboxEvent);
-
-        // Acorda o publicador depois do commit. Se a publicação falhar, o sweep
-        // periódico reenvia — a chamada do SOS já está garantida no banco.
-        eventPublisher.publishEvent(new EmergencyOutboxEventQueued(outboxEvent.getId()));
-    }
-
-    private static BigDecimal toDistance(Double distanceMeters) {
-        if (distanceMeters == null) {
-            return null;
+        // Se ninguém assumir, a escada abre o primeiro anel. Sem anéis
+        // configurados o chamado fica só com a coordenação (RN03).
+        if (escalationPolicy.enabled()) {
+            saved.setNextEscalationAt(escalationPolicy.deadlineFrom(occurredAt));
         }
-        return BigDecimal.valueOf(distanceMeters).setScale(1, RoundingMode.HALF_UP);
+        return saved;
     }
 
     @Schema(name = "CreateEmergencyCallCommand", description = "Comando interno para criação idempotente de um SOS")

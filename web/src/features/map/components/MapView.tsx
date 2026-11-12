@@ -25,6 +25,10 @@ import {
   type MarkerHandles,
 } from "@/features/map/lib/marker-element";
 import type { MapMarker } from "@/features/map/types";
+import {
+  GeolocationError,
+  getDevicePosition,
+} from "@/shared/lib/geolocation";
 
 export interface MapViewProps {
   /** Marcadores já resolvidos pelo app: o mapa não conhece praia/posto. */
@@ -344,35 +348,33 @@ export function MapView({
     });
   }, [location, ready]);
 
-  const locate = () => {
+  const locate = async () => {
     if (!mapRef.current || !ready) return;
-    if (!("geolocation" in navigator)) {
-      setLocateError("Este navegador não oferece localização.");
-      return;
-    }
     setLocating(true);
     setLocateError(null);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocating(false);
-        setLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracyMeters:
-            Number.isFinite(position.coords.accuracy) &&
-            position.coords.accuracy > 0
-              ? position.coords.accuracy
-              : undefined,
-        });
-      },
-      () => {
-        setLocating(false);
-        setLocateError(
-          "Não foi possível obter a localização. Verifique a permissão.",
-        );
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
-    );
+    try {
+      const position = await getDevicePosition({
+        enableHighAccuracy: true,
+        timeout: 10_000,
+        maximumAge: 60_000,
+      });
+      setLocation({
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracyMeters:
+          Number.isFinite(position.accuracyMeters) && position.accuracyMeters > 0
+            ? position.accuracyMeters
+            : undefined,
+      });
+    } catch (error) {
+      setLocateError(
+        error instanceof GeolocationError
+          ? error.message
+          : "Não foi possível obter a localização. Verifique a permissão.",
+      );
+    } finally {
+      setLocating(false);
+    }
   };
 
   if (noWebGL) {

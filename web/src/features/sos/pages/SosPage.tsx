@@ -13,6 +13,11 @@ import {
 import { Card, PageHeader } from "@/shared/components/Card";
 import { ApiError } from "@/shared/lib/api-client";
 import { createEmergencyCall } from "@/features/sos/api/emergency-calls";
+import {
+  GeolocationError,
+  getDevicePosition,
+  type GeolocationFailure,
+} from "@/shared/lib/geolocation";
 import { newRequestId } from "@/shared/lib/id";
 import { formatAccuracy } from "@/shared/lib/format";
 import { safeProblemDetail, sanitizeText } from "@/shared/lib/sanitize";
@@ -29,29 +34,16 @@ const GEO_OPTIONS: PositionOptions = {
   maximumAge: 0,
 };
 
-const PERMISSION_DENIED = 1;
-const POSITION_UNAVAILABLE = 2;
-const TIMEOUT = 3;
-
-function isGeolocationError(value: unknown): value is GeolocationPositionError {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "code" in value &&
-    typeof (value as { code?: unknown }).code === "number"
-  );
-}
-
-function describeGeolocationError(code: number): string {
-  switch (code) {
-    case PERMISSION_DENIED:
+function describeGeolocationFailure(reason: GeolocationFailure): string {
+  switch (reason) {
+    case "unsupported":
+      return "Este navegador não oferece localização. Ligue 193 e informe o local.";
+    case "denied":
       return "Permissão de localização negada. Libere o acesso no navegador ou ligue 193.";
-    case POSITION_UNAVAILABLE:
+    case "unavailable":
       return "Não foi possível obter sua localização agora. Ligue 193 e descreva o ponto de referência.";
-    case TIMEOUT:
+    case "timeout":
       return "A localização demorou demais para responder. Tente novamente ou ligue 193.";
-    default:
-      return "Falha ao obter a localização. Ligue 193 e informe onde você está.";
   }
 }
 
@@ -64,40 +56,25 @@ export function SosPage() {
   const requestIdRef = useRef<string | null>(null);
 
   const locate = useCallback(async () => {
-    if (!("geolocation" in navigator)) {
-      setPhase("error");
-      setMessage(
-        "Este navegador não oferece localização. Ligue 193 e informe o local.",
-      );
-      return;
-    }
     setPhase("locating");
     setMessage(null);
     try {
-      const position = await new Promise<GeolocationPosition>(
-        (resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(
-            resolve,
-            reject,
-            GEO_OPTIONS,
-          );
-        },
-      );
+      const position = await getDevicePosition(GEO_OPTIONS);
       const parsed = parseCoordinates({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
+        latitude: position.latitude,
+        longitude: position.longitude,
         accuracyMeters:
-          Number.isFinite(position.coords.accuracy) &&
-          position.coords.accuracy > 0
-            ? Math.min(position.coords.accuracy, 100000)
+          Number.isFinite(position.accuracyMeters) &&
+          position.accuracyMeters > 0
+            ? Math.min(position.accuracyMeters, 100000)
             : undefined,
       });
       setLocation(parsed);
       setPhase("ready");
     } catch (error) {
       setPhase("error");
-      if (isGeolocationError(error)) {
-        setMessage(describeGeolocationError(error.code));
+      if (error instanceof GeolocationError) {
+        setMessage(describeGeolocationFailure(error.reason));
       } else if (error instanceof ZodError) {
         setMessage(
           "A localização recebida é inválida. Ligue 193 e informe o local.",

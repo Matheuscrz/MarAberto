@@ -2,6 +2,8 @@ package com.maraberto.operations.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -51,6 +53,18 @@ public class ShiftSession {
     @Column(name = "ended_at")
     private Instant endedAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ended_reason", length = 16)
+    private ShiftEndReason endedReason;
+
+    /**
+     * Último sinal de vida do console. É o que mantém o plantão aberto: sem
+     * sinal dentro de {@code maraberto.dispatch.shift-idle-timeout}, o job de
+     * inatividade encerra o turno (ADR-018).
+     */
+    @Column(name = "last_seen_at", nullable = false)
+    private Instant lastSeenAt;
+
     @JdbcTypeCode(SqlTypes.GEOGRAPHY)
     @Column(name = "last_position", columnDefinition = "geography(Point,4326)")
     private Point lastPosition;
@@ -73,16 +87,26 @@ public class ShiftSession {
         return endedAt == null;
     }
 
-    public void end(Instant when) {
+    /** Marca sinal de vida do console (abertura, posição ou leitura do plantão). */
+    public void touch(Instant when) {
+        if (endedAt != null) {
+            return;
+        }
+        this.lastSeenAt = when;
+    }
+
+    public void end(Instant when, ShiftEndReason reason) {
         if (endedAt != null) {
             return;
         }
         this.endedAt = when.isBefore(startedAt) ? startedAt : when;
+        this.endedReason = reason;
     }
 
     public void moveTo(Point position, Instant when, Double accuracyMeters) {
         this.lastPosition = position;
         this.lastPositionAt = when;
         this.lastPositionAccuracyMeters = accuracyMeters;
+        this.lastSeenAt = when;
     }
 }

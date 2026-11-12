@@ -49,6 +49,22 @@ public class EmergencyCall {
     private Instant acknowledgedAt;
 
     /**
+     * Anéis de escalonamento já consumidos. Zero enquanto só o despacho
+     * inicial (round 1) foi feito; cada abertura de anel amplia o raio e
+     * incrementa o contador (ADR-018).
+     */
+    @Column(name = "escalation_step", nullable = false)
+    private short escalationStep;
+
+    /**
+     * Próximo horário de abertura de anel. {@code null} encerra o
+     * escalonamento do chamado — porque alguém assumiu, porque a escada
+     * esgotou ou porque a instalação não configurou anéis.
+     */
+    @Column(name = "next_escalation_at")
+    private Instant nextEscalationAt;
+
+    /**
      * Versão usada pelo ack por compare-and-set. Não é optimistic locking do
      * Hibernate: a transição de estado é feita por {@code UPDATE ... WHERE
      * status = 'DISPATCHED'}, que não depende do objeto em memória.

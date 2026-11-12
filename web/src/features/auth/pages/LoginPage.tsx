@@ -13,7 +13,6 @@ import {
   Lock,
   ShieldCheck,
   User,
-  Waves,
 } from "lucide-react";
 import { ApiError } from "@/shared/lib/api-client";
 import { loginRequest } from "@/features/auth/api";
@@ -92,9 +91,12 @@ export function LoginPage() {
     <div className="flex min-h-dvh flex-col bg-ocean-950 text-white">
       <header className="flex items-center justify-between px-4 py-4 sm:px-8">
         <Link to="/" className="flex items-center gap-2">
-          <span className="grid size-9 place-items-center rounded-xl bg-white/10">
-            <Waves aria-hidden="true" className="size-5 text-white" />
-          </span>
+          <img
+            src="/brand/mark-96.png"
+            alt=""
+            aria-hidden="true"
+            className="size-9 rounded-xl"
+          />
           <span className="text-base font-black tracking-tight">MarAberto</span>
         </Link>
         <Link

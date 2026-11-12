@@ -8,6 +8,10 @@ import {
   Send,
 } from "lucide-react";
 import { PageHeader } from "@/shared/components/Card";
+import {
+  GeolocationError,
+  getDevicePosition,
+} from "@/shared/lib/geolocation";
 import { formatAccuracy, formatDateTime } from "@/shared/lib/format";
 import { newRequestId } from "@/shared/lib/id";
 import { beaches } from "@/features/beaches";
@@ -66,29 +70,27 @@ export function OperatorOccurrencesPage() {
     );
   }, [occurrences]);
 
-  const useMyLocation = () => {
+  const useMyLocation = async () => {
     setGeoMessage(null);
-    if (!("geolocation" in navigator)) {
-      setGeoMessage("Este navegador não expõe a localização.");
-      return;
+    try {
+      const position = await getDevicePosition({
+        enableHighAccuracy: true,
+        timeout: 10_000,
+        maximumAge: 0,
+      });
+      setPosition({
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracyMeters: position.accuracyMeters,
+      });
+      setGeoMessage("Coordenada do atendimento preenchida com o GPS atual.");
+    } catch (error) {
+      setGeoMessage(
+        error instanceof GeolocationError
+          ? error.message
+          : "Não foi possível obter a localização. Use a praia + ponto de referência.",
+      );
     }
-
-    navigator.geolocation.getCurrentPosition(
-      (result) => {
-        setPosition({
-          latitude: result.coords.latitude,
-          longitude: result.coords.longitude,
-          accuracyMeters: result.coords.accuracy,
-        });
-        setGeoMessage("Coordenada do atendimento preenchida com o GPS atual.");
-      },
-      () => {
-        setGeoMessage(
-          "Não foi possível obter a localização. Use a praia + ponto de referência.",
-        );
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-    );
   };
 
   const handleSubmit = (event: React.FormEvent) => {

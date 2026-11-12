@@ -22,6 +22,19 @@ public interface EmergencyDispatchRepository extends JpaRepository<EmergencyDisp
             Collection<com.maraberto.emergency.domain.EmergencyDispatchStatus> statuses);
 
     /**
+     * Operadores que já receberam este chamado, em qualquer rodada. É o conjunto
+     * de exclusão do escalonamento: abrir um anel não pode reavisar quem já
+     * está com o alerta na tela nem repetir a notificação da coordenação.
+     */
+    @Query(value = """
+            SELECT DISTINCT recipient_user_id
+            FROM emergency_dispatches
+            WHERE emergency_call_id = :callId
+              AND recipient_user_id IS NOT NULL
+            """, nativeQuery = true)
+    List<UUID> findNotifiedUserIds(@Param("callId") UUID callId);
+
+    /**
      * Cancela os despachos perdedores do ack. Não toca no vencedor nem em quem
      * já tinha assumido.
      */

@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ArrowLeft, LogOut, Waves } from "lucide-react";
+import { ArrowLeft, LogOut } from "lucide-react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import {
   DEMO_AUTH_ENABLED,
@@ -8,6 +8,7 @@ import {
   useAuthSession,
   useLogout,
 } from "@/features/auth";
+import { closeShiftIfOpen } from "@/features/operator";
 
 export interface AreaNavItem {
   readonly to: string;
@@ -32,14 +33,30 @@ export function AreaShell({ title, subtitle, nav }: AreaShellProps) {
   const user = useAuthSession((state) => state.user);
   const { logout, pending } = useLogout();
 
+  /**
+   * Sair da conta encerra o plantão na hora. Não dá para esperar o *lease*
+   * expirar: o turno é do operador, não do aparelho, e quem saiu não deve
+   * receber chamado. Falha aqui não trava a saída — o servidor encerra por
+   * inatividade de qualquer forma.
+   */
+  const handleLogout = async () => {
+    if (user && user.role !== "ADMIN") {
+      await closeShiftIfOpen();
+    }
+    await logout();
+  };
+
   return (
     <div className="min-h-dvh bg-ocean-50 text-ocean-950">
       <header className="border-b border-ocean-900/10 bg-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2.5">
-            <span className="grid size-9 place-items-center rounded-xl bg-ocean-950 text-white">
-              <Waves aria-hidden="true" className="size-5" />
-            </span>
+            <img
+              src="/brand/mark-96.png"
+              alt=""
+              aria-hidden="true"
+              className="size-9 rounded-xl"
+            />
             <div>
               <p className="text-[11px] font-bold uppercase tracking-wider text-ocean-500">
                 {user ? ROLE_AREA_LABEL[user.role] : "MarAberto"}
@@ -80,7 +97,7 @@ export function AreaShell({ title, subtitle, nav }: AreaShellProps) {
             <button
               type="button"
               onClick={() => {
-                logout();
+                void handleLogout();
               }}
               disabled={pending}
               className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-ocean-950 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-ocean-900 disabled:opacity-60"

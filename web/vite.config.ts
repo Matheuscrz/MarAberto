@@ -1,7 +1,7 @@
 import { fileURLToPath, URL } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 
 /**
  * Configuração do Vite.
@@ -11,41 +11,149 @@ import { defineConfig } from 'vite';
  * ambiente de produção). `/ws` precisa de `ws: true` para o upgrade do STOMP
  * do console do operador. Os cabeçalhos de segurança completos, incluindo a CSP,
  * ficam no Nginx (`nginx.conf`), que serve o build de produção.
+ *
+ * `--mode capacitor` gera o bundle que o Capacitor copia para o app (ADR-019).
+ * Nesse modo a API precisa ser absoluta (o WebView roda em `https://localhost`)
+ * e a CSP vai por `<meta>`, porque no app não existe Nginx.
  */
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
+
+const NATIVE_MODE = 'capacitor';
+
+/**
+ * Basemap de demonstração enquanto não houver PMTiles próprios (ADR-005).
+ * Precisa ser a mesma URL de `VITE_DEMO_TILE_URL` em `features/map/lib/map-style.ts`;
+ * o padrão só existe aqui para o build nativo não depender de `.env.capacitor`.
+ */
+const DEFAULT_DEMO_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+/**
+ * Origem de uma URL de tiles com `{z}`/`{x}`/`{y}`. `null` quando a URL é
+ * inválida, para a CSP não quebrar o build por um valor malformado.
+ */
+function tileOrigin(tileUrl: string): string | null {
+  try {
+    return new URL(
+      tileUrl.replace('{z}', '0').replace('{x}', '0').replace('{y}', '0'),
+    ).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * CSP do app empacotado.
+ *
+ * Espelha a política do Nginx (mesmas diretivas e origens), acrescentando a
+ * origem da API/WebSocket e as dos tiles (PMTiles e/ou basemap de demonstração).
+ * O MapLibre busca tiles raster por `fetch`, então a origem entra em
+ * `connect-src` **e** em `img-src` (o mesmo recurso também é desenhado como
+ * imagem). `frame-ancestors` não é aplicável em `<meta>` e fica de fora.
+ */
+function nativeCspPlugin(
+  apiBaseUrl: string,
+  pmtilesUrl: string,
+  demoTileUrl: string,
+): Plugin {
+  const api = new URL(apiBaseUrl);
+  const connect = new Set<string>([
+    "'self'",
+    api.origin,
+    `${api.protocol === 'https:' ? 'wss' : 'ws'}://${api.host}`,
+  ]);
+  const img = new Set<string>(["'self'", 'data:', 'blob:']);
+  if (pmtilesUrl) {
+    connect.add(new URL(pmtilesUrl).origin);
+  }
+  const tiles = tileOrigin(demoTileUrl);
+  if (tiles) {
+    connect.add(tiles);
+    img.add(tiles);
+  }
+
+  const policy = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    `img-src ${[...img].join(' ')}`,
+    "font-src 'self'",
+    `connect-src ${[...connect].join(' ')}`,
+    'frame-src https://www.youtube-nocookie.com',
+    "media-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+  ].join('; ');
+
+  return {
+    name: 'maraberto:native-csp',
+    transformIndexHtml(html) {
+      return html.replace(
+        '</head>',
+        `    <meta http-equiv="Content-Security-Policy" content="${policy}" />\n  </head>`,
+      );
     },
-  },
-  server: {
-    port: 3000,
-    strictPort: true,
-    headers: {
-      'X-Content-Type-Options': 'nosniff',
-      'X-Frame-Options': 'DENY',
-      'Referrer-Policy': 'strict-origin-when-cross-origin',
-      'Permissions-Policy': 'geolocation=(self), camera=(), microphone=()',
-    },
-    proxy: {
-      '/api': {
-        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080',
-        changeOrigin: true,
+  };
+}
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), 'VITE_');
+  const native = mode === NATIVE_MODE;
+  const apiBaseUrl = (env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+
+  if (native && !/^https:\/\/[^/]+/.test(apiBaseUrl)) {
+    throw new Error(
+      'No build do app (--mode capacitor), VITE_API_BASE_URL precisa ser uma URL absoluta https:// do backend. ' +
+        'Copie `.env.capacitor.example` para `.env.capacitor` e ajuste o host.',
+    );
+  }
+
+  return {
+    plugins: [
+      react(),
+      tailwindcss(),
+      native
+        ? nativeCspPlugin(
+            apiBaseUrl,
+            env.VITE_PMTILES_URL ?? '',
+            env.VITE_DEMO_TILE_URL || DEFAULT_DEMO_TILE_URL,
+          )
+        : null,
+    ],
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
-      // Console do operador: STOMP sobre WebSocket, JWT no frame CONNECT.
-      '/ws': {
-        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080',
-        changeOrigin: true,
-        ws: true,
+    },
+    server: {
+      port: 3000,
+      strictPort: true,
+      headers: {
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Permissions-Policy': 'geolocation=(self), camera=(), microphone=()',
+      },
+      proxy: {
+        '/api': {
+          target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080',
+          changeOrigin: true,
+        },
+        // Console do operador: STOMP sobre WebSocket, JWT no frame CONNECT.
+        '/ws': {
+          target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080',
+          changeOrigin: true,
+          ws: true,
+        },
       },
     },
-  },
-  preview: {
-    port: 3000,
-  },
-  build: {
-    target: 'es2022',
-    sourcemap: false,
-  },
+    preview: {
+      port: 3000,
+    },
+    build: {
+      target: 'es2022',
+      sourcemap: false,
+    },
+  };
 });

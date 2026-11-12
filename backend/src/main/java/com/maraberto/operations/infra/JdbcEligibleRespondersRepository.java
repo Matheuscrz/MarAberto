@@ -5,8 +5,10 @@ import com.maraberto.operations.api.EligibleRespondersPort;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -58,11 +60,16 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             JOIN shift_sessions s ON s.post_id = p.id AND s.ended_at IS NULL
             JOIN operational_users u ON u.id = s.user_id AND u.active
             WHERE p.active
+              -- Lease do plantão: app fechado à força não recebe chamado.
+              AND s.last_seen_at >= :aliveSince
               -- O prefiltro do GiST não pode entrar aqui: um posto distante com o
               -- operador em campo perto do chamado ficaria de fora. O conjunto
               -- varrido é o de plantões abertos (índice parcial da V8).
+              -- `LEAST` aplica o teto da instalação: um raio cadastrado errado
+              -- (ou muito generoso) não pode chamar quem está longe demais.
               AND ST_DWithin(COALESCE(s.last_position, p.location), sos.point,
-                             COALESCE(p.coverage_radius_m, :defaultRadiusMeters))
+                             LEAST(COALESCE(p.coverage_radius_m, :defaultRadiusMeters),
+                                   :maxRadiusMeters))
             UNION ALL
             SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
                    ST_Distance(COALESCE(s.last_position, b.location), sos.point) AS distance_m,
@@ -72,8 +79,45 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             JOIN shift_sessions s ON s.mobile_base_id = b.id AND s.ended_at IS NULL
             JOIN operational_users u ON u.id = s.user_id AND u.active
             WHERE b.active
+              AND s.last_seen_at >= :aliveSince
               AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point,
-                             COALESCE(b.coverage_radius_m, :defaultRadiusMeters))
+                             LEAST(COALESCE(b.coverage_radius_m, :defaultRadiusMeters),
+                                   :maxRadiusMeters))
+            ORDER BY distance_m
+            LIMIT :maxResults
+            """;
+
+    private static final String RING_SQL = """
+            WITH sos AS (
+                SELECT CAST(ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326) AS geography) AS point
+            )
+            SELECT s.user_id, s.id AS shift_session_id, s.post_id, s.mobile_base_id,
+                   ST_Distance(COALESCE(s.last_position, p.location), sos.point) AS distance_m,
+                   (s.last_position_at IS NULL OR s.last_position_at < :staleBefore)
+                       AS position_stale
+            FROM lifeguard_posts p
+            JOIN sos ON TRUE
+            JOIN shift_sessions s ON s.post_id = p.id AND s.ended_at IS NULL
+            JOIN operational_users u ON u.id = s.user_id AND u.active
+            WHERE p.active
+              AND s.last_seen_at >= :aliveSince
+              -- Anel absoluto: o raio cadastrado do posto não entra aqui. Ele já
+              -- foi usado no round 1; a escada existe justamente para ir além.
+              AND ST_DWithin(COALESCE(s.last_position, p.location), sos.point, :ringMeters)
+              AND NOT (s.user_id = ANY (CAST(:excluded AS uuid[])))
+            UNION ALL
+            SELECT s.user_id, s.id AS shift_session_id, s.post_id, s.mobile_base_id,
+                   ST_Distance(COALESCE(s.last_position, b.location), sos.point) AS distance_m,
+                   (s.last_position_at IS NULL OR s.last_position_at < :staleBefore)
+                       AS position_stale
+            FROM mobile_bases b
+            JOIN sos ON TRUE
+            JOIN shift_sessions s ON s.mobile_base_id = b.id AND s.ended_at IS NULL
+            JOIN operational_users u ON u.id = s.user_id AND u.active
+            WHERE b.active
+              AND s.last_seen_at >= :aliveSince
+              AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point, :ringMeters)
+              AND NOT (s.user_id = ANY (CAST(:excluded AS uuid[])))
             ORDER BY distance_m
             LIMIT :maxResults
             """;
@@ -91,7 +135,10 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             JOIN lifeguard_posts p ON p.id = s.post_id AND p.active
             JOIN operational_users u ON u.id = s.user_id AND u.active
             WHERE s.ended_at IS NULL
+              AND s.last_seen_at >= :aliveSince
               AND s.post_id IS NOT NULL
+              -- Fora do teto não é "vizinho": a coordenação assume o chamado.
+              AND ST_DWithin(COALESCE(s.last_position, p.location), sos.point, :maxRadiusMeters)
             UNION ALL
             SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
                    ST_Distance(COALESCE(s.last_position, b.location), sos.point) AS distance_m,
@@ -101,7 +148,9 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             JOIN mobile_bases b ON b.id = s.mobile_base_id AND b.active
             JOIN operational_users u ON u.id = s.user_id AND u.active
             WHERE s.ended_at IS NULL
+              AND s.last_seen_at >= :aliveSince
               AND s.mobile_base_id IS NOT NULL
+              AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point, :maxRadiusMeters)
             ORDER BY distance_m
             LIMIT :fallbackResults
             """;
@@ -110,19 +159,25 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
     private final int defaultRadiusMeters;
     private final int maxRecipients;
     private final int fallbackRecipients;
+    private final int maxRadiusMeters;
     private final Duration positionStaleAfter;
+    private final Duration shiftIdleTimeout;
 
     public JdbcEligibleRespondersRepository(
             NamedParameterJdbcTemplate jdbc,
             @Value("${maraberto.dispatch.default-coverage-radius-m:2000}") int defaultRadiusMeters,
             @Value("${maraberto.dispatch.max-recipients:50}") int maxRecipients,
             @Value("${maraberto.dispatch.fallback-recipients:3}") int fallbackRecipients,
-            @Value("${maraberto.dispatch.position-stale-after:PT30M}") Duration positionStaleAfter) {
+            @Value("${maraberto.dispatch.max-radius-m:5000}") int maxRadiusMeters,
+            @Value("${maraberto.dispatch.position-stale-after:PT30M}") Duration positionStaleAfter,
+            @Value("${maraberto.dispatch.shift-idle-timeout:PT15M}") Duration shiftIdleTimeout) {
         this.jdbc = jdbc;
         this.defaultRadiusMeters = defaultRadiusMeters;
         this.maxRecipients = maxRecipients;
         this.fallbackRecipients = fallbackRecipients;
+        this.maxRadiusMeters = maxRadiusMeters;
         this.positionStaleAfter = positionStaleAfter;
+        this.shiftIdleTimeout = shiftIdleTimeout;
     }
 
     @Override
@@ -146,14 +201,46 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
                 this::mapRow);
     }
 
+    @Override
+    public List<EligibleResponder> findWithinRing(
+            double latitude,
+            double longitude,
+            int radiusMeters,
+            Collection<UUID> excludedUserIds) {
+        if (maxRecipients <= 0 || radiusMeters <= 0) {
+            return List.of();
+        }
+        MapSqlParameterSource parameters = commonParameters(latitude, longitude)
+                .addValue("ringMeters", radiusMeters)
+                .addValue("excluded", toArrayLiteral(excludedUserIds))
+                .addValue("maxResults", maxRecipients);
+        return jdbc.query(RING_SQL, parameters, this::mapRow);
+    }
+
+    /**
+     * Literal de array do Postgres (`{a,b}` ou `{}`). Um `IN (:lista)` com a
+     * lista vazia quebraria a consulta, e o array resolve o caso sem montar SQL
+     * dinâmico — o plano continua o mesmo e o filtro por usuário é por chave.
+     */
+    private static String toArrayLiteral(Collection<UUID> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return "{}";
+        }
+        return userIds.stream()
+                .map(UUID::toString)
+                .collect(Collectors.joining(",", "{", "}"));
+    }
+
     private MapSqlParameterSource commonParameters(double latitude, double longitude) {
         return new MapSqlParameterSource()
                 .addValue("latitude", latitude)
                 .addValue("longitude", longitude)
                 .addValue("defaultRadiusMeters", defaultRadiusMeters)
+                .addValue("maxRadiusMeters", maxRadiusMeters)
                 // O driver não infere o tipo de Instant; OffsetDateTime vira
                 // TIMESTAMPTZ sem depender do timezone da sessão.
-                .addValue("staleBefore", OffsetDateTime.now(ZoneOffset.UTC).minus(positionStaleAfter));
+                .addValue("staleBefore", OffsetDateTime.now(ZoneOffset.UTC).minus(positionStaleAfter))
+                .addValue("aliveSince", OffsetDateTime.now(ZoneOffset.UTC).minus(shiftIdleTimeout));
     }
 
     private EligibleResponder mapRow(java.sql.ResultSet rs, int rowNumber) throws java.sql.SQLException {

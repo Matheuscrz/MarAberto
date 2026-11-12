@@ -11,13 +11,38 @@
  * detalhe continua vindo da rota autenticada.
  */
 
+import {
+  nativeAllowSleep,
+  nativeCancelNotification,
+  nativeKeepAwake,
+  nativeNotificationPermission,
+  nativeRequestNotificationPermission,
+  nativeShowNotification,
+  sosNotificationId,
+  type NativePermission,
+} from "@/shared/lib/native";
+import { isNativeApp } from "@/shared/lib/platform";
+
 export type AlertPermission = "unsupported" | "default" | "granted" | "denied";
+
+/** O plugin responde `prompt`; a UI trata como `default`. */
+function toAlertPermission(permission: NativePermission): AlertPermission {
+  return permission === "prompt" ? "default" : permission;
+}
 
 type AudioContextConstructor = typeof AudioContext;
 
 const ALARM_CYCLE_MS = 1_500;
 
 let audioContext: AudioContext | null = null;
+
+/**
+ * Permissão de notificação do app empacotado.
+ *
+ * <p>No WebView não existe `Notification.permission` síncrono; o valor é
+ * preenchido quando o canal é armado e lido pelo restante do console.
+ */
+let nativePermission: AlertPermission = "default";
 
 function audioContextConstructor(): AudioContextConstructor | undefined {
   if (typeof window === "undefined") {
@@ -81,6 +106,12 @@ export function isAlertAudioReady(): boolean {
 }
 
 export function readAlertPermission(): AlertPermission {
+  // No app não existe `Notification` do navegador; a permissão é do plugin e
+  // só pode ser consultada de forma assíncrona. O valor em cache é atualizado
+  // ao armar o canal (`armSosAlerts`).
+  if (isNativeApp()) {
+    return nativePermission;
+  }
   if (typeof window === "undefined" || !("Notification" in window)) {
     return "unsupported";
   }
@@ -89,6 +120,24 @@ export function readAlertPermission(): AlertPermission {
 
 /** Pede permissão de notificação. Só tem efeito dentro de um gesto do usuário. */
 export async function requestAlertPermission(): Promise<AlertPermission> {
+  if (isNativeApp()) {
+    const current = toAlertPermission(
+      await nativeNotificationPermission().catch(() => "denied" as const),
+    );
+    if (current !== "default") {
+      nativePermission = current;
+      return current;
+    }
+    try {
+      nativePermission = toAlertPermission(
+        await nativeRequestNotificationPermission(),
+      );
+    } catch {
+      nativePermission = "denied";
+    }
+    return nativePermission;
+  }
+
   const current = readAlertPermission();
   if (current !== "default") {
     return current;
@@ -212,12 +261,30 @@ const NOTIFICATION_TITLE = "SOS na sua área";
 export async function showSosNotification(
   input: SosNotificationInput,
 ): Promise<void> {
-  if (readAlertPermission() !== "granted") {
+  const permission = isNativeApp()
+    ? await nativeNotificationPermission().catch(() => "denied" as const)
+    : readAlertPermission();
+  if (permission !== "granted") {
     return;
   }
   const body = input.distanceLabel
     ? `Banhista a ${input.distanceLabel}. Abra a mesa para assumir o chamado.`
     : "Banhista pediu ajuda. Abra a mesa para assumir o chamado.";
+
+  if (isNativeApp()) {
+    try {
+      await nativeShowNotification({
+        id: sosNotificationId(input.callId),
+        title: NOTIFICATION_TITLE,
+        body,
+        data: { url: "/operador" },
+      });
+    } catch {
+      // Plugin indisponível: resta o popup e a sirene.
+    }
+    return;
+  }
+
   const options: NotificationOptions & { renotify: boolean } = {
     body,
     tag: `sos-${input.callId}`,
@@ -251,6 +318,14 @@ export async function showSosNotification(
 
 /** Fecha a notificação daquele chamado, se ainda estiver na central. */
 export async function closeSosNotification(callId: string): Promise<void> {
+  if (isNativeApp()) {
+    try {
+      await nativeCancelNotification(sosNotificationId(callId));
+    } catch {
+      // Notificação já dispensada pelo sistema.
+    }
+    return;
+  }
   if (typeof window === "undefined" || !("Notification" in window)) {
     return;
   }
@@ -279,6 +354,10 @@ let wakeLock: WakeLockSentinelLike | null = null;
  * o popup nem o som.
  */
 export async function keepScreenAwake(): Promise<void> {
+  if (isNativeApp()) {
+    await nativeKeepAwake();
+    return;
+  }
   if (typeof navigator === "undefined" || wakeLock) {
     return;
   }
@@ -294,6 +373,10 @@ export async function keepScreenAwake(): Promise<void> {
 }
 
 export async function releaseScreenAwake(): Promise<void> {
+  if (isNativeApp()) {
+    await nativeAllowSleep();
+    return;
+  }
   const current = wakeLock;
   wakeLock = null;
   try {

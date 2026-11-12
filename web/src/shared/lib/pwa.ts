@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
+import { isNativeApp } from '@/shared/lib/platform';
 
+/*
+ * No app Capacitor o service worker não existe (WKWebView no iOS) ou não é
+ * confiável (WebView do Android): o bundle já é local e o alerta do SOS usa
+ * notificação nativa. Registrar ali só produziria erro silencioso.
+ */
 export function registerServiceWorker(): void {
-  if (!('serviceWorker' in navigator) || import.meta.env.DEV) {
+  if (isNativeApp() || !('serviceWorker' in navigator) || import.meta.env.DEV) {
     return;
   }
   window.addEventListener('load', () => {
