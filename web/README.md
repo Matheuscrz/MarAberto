@@ -155,8 +155,8 @@ O projeto nativo já está gerado, sincroniza e gera **APK debug**
    alerta; o chamado aparece ao voltar ao app. Resolver com push FCM de prioridade alta +
    `fullScreenIntent` (ADR-018 item 6) ou foreground service de plantão.
 
-Detalhes e checklist completo em `docs/Implementation.md` (Etapa 8B) e
-`docs/adr/019-app-mobile-com-capacitor.md`.
+Detalhes e checklist completo em `docs/adr/019-app-mobile-com-capacitor.md`
+e em `docs/Architecture.md` §6.1–§6.2.
 
 ### Testar o app no emulador Android
 

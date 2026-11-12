@@ -159,7 +159,7 @@ Implementados com **Spring Modulith**: cada módulo é um pacote de topo; só a 
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------- |
 | `identity`    | Cadastro, OTP, CPF (cifrado), login, tokens, MFA (TOTP), papéis, convite de operacionais.                                           | `UserRegistered`, `OperatorInvited`                                            | —                                                    |
 | `region`      | Configuração da instalação, importação de _Region Pack_.                                                                            | `RegionConfigChanged`                                                          | —                                                    |
-| `beaches`     | Praias, zonas de risco permanentes e semipermanentes, fichas, GeoJSON público.                                                      | `BeachChanged`, `RiskZoneChanged`                                              | `RegionConfigChanged`                                |
+| `beaches`     | Áreas de banho (praia, rio, barragem), setores, zonas de risco permanentes e semipermanentes, fichas, GeoJSON público.              | `BeachChanged`, `SectorChanged`, `RiskZoneChanged`                             | `RegionConfigChanged`                                |
 | `operations`  | Postos, plantões, bandeiramento, demarcação de correntes.                                                                           | `ShiftStarted`, `ShiftEnded`, `FlagChanged`, `RipCurrentMarked`, `PostChanged` | —                                                    |
 | `emergency`   | SOS: criação, despacho, ack, escalonamento, ciclo de vida.                                                                          | `EmergencyCallCreated`, `…Acknowledged`, `…Escalated`, `…Resolved`             | —                                                    |
 | `occurrences` | Ocorrências: abertas a partir do SOS ou registradas manualmente (193/externas), desfecho, fila e ficha de transcrição para o CIOSP. | `OccurrenceOpened`, `OccurrenceClosed`, `OccurrenceCiospRegistered`            | `EmergencyCallCreated`, `…Acknowledged`, `…Resolved` |
@@ -242,6 +242,7 @@ web/src/
 | `/login`                                                | público                   | `auth`                                    |
 | `/operador/**`                                          | `LIFEGUARD` (e acima)     | `operator`, `occurrences`                 |
 | `/gestao/**`                                            | `COORDINATOR` (e `ADMIN`) | `management`, `occurrences`               |
+| `/gestao/importar`                                      | `COORDINATOR` (e `ADMIN`) | `management` — **primeira aba do perfil** |
 | `/admin/**`                                             | `ADMIN`                   | `admin`                                   |
 
 A guarda de rota no cliente é **só experiência de uso**; a autorização real é do servidor (13.2).
@@ -273,7 +274,7 @@ web/
 
 **Regra de código:** nenhuma feature importa `@capacitor/*` diretamente. Detecção de plataforma e adaptadores ficam em `shared/lib/platform.ts` (plataforma) e `shared/lib/native.ts` (plugins: GPS, notificação e keep-awake), com a implementação web como padrão em `shared/lib/geolocation.ts` e `shared/lib/pwa.ts` — assim o PWA continua funcionando sem plugin e as fronteiras da ADR-015 seguem válidas.
 
-**Build:** `cd web && npm run cap:sync` (equivale a `npm run build:app` + `npx cap sync android`); o APK/AAB sai do Android Studio (`npm run cap:open`) ou de `web/android/gradlew assembleDebug|assembleRelease` (JDK 21 + Android SDK com platform 36). O APK **debug** já é gerado com `JAVA_HOME` no Temurin 21 e `sdk.dir` em `web/android/local.properties`; o release exige keystore. O build nativo usa `--mode capacitor`: exige `VITE_API_BASE_URL` absoluto em HTTPS (validado pelo `vite.config.ts`), injeta a CSP por `<meta>` e desliga o service worker. `cap add ios` e o build iOS exigem macOS + Xcode. Detalhes e o procedimento passo a passo ficam em `docs/Implementation.md`, Etapa 8B.
+**Build:** `cd web && npm run cap:sync` (equivale a `npm run build:app` + `npx cap sync android`); o APK/AAB sai do Android Studio (`npm run cap:open`) ou de `web/android/gradlew assembleDebug|assembleRelease` (JDK 21 + Android SDK com platform 36). O APK **debug** já é gerado com `JAVA_HOME` no Temurin 21 e `sdk.dir` em `web/android/local.properties`; o release exige keystore. O build nativo usa `--mode capacitor`: exige `VITE_API_BASE_URL` absoluto em HTTPS (validado pelo `vite.config.ts`), injeta a CSP por `<meta>` e desliga o service worker. `cap add ios` e o build iOS exigem macOS + Xcode. Detalhes e o procedimento passo a passo ficam na ADR-019.
 
 ---
 
@@ -637,40 +638,44 @@ O job reivindica `DISPATCHED` com prazo vencido por `FOR UPDATE SKIP LOCKED` (ba
 
 **Escala e troca de persistência.** O envelope de capacidade do caminho crítico do SOS (chamados/s, plantões abertos, linhas por chamado, volume anual), os gargalos em ordem de probabilidade (consulta de elegibilidade não indexável por `COALESCE`, fan-out de entrega, contenção de pool, crescimento sem retenção) e os **gatilhos numéricos** para escalar verticalmente, particionar, usar Redis ou trocar por NoSQL/Kafka estão em `docs/adr/020-escala-e-persistencia-do-caminho-critico-do-sos.md`. Nada entra sem `EXPLAIN`/`pg_stat_statements`/k6 que o justifique.
 
-### 7.7 Ingestão de delimitações de praias e setores (QGIS, KML e GeoJSON)
+### 7.7 Ingestão de áreas de banho e setores (QGIS, KML e GeoJSON)
 
 - **Fonte operacional:** QGIS em EPSG:4326, com a geometria validada antes de exportar. KML/KMZ serve para interoperabilidade; **GeoJSON (RFC 7946)** é o formato canônico do Region Pack e do importador (ADR-016).
-- **KML não é lido pelo backend em produção.** Converter KML/KMZ para GeoJSON com `ogr2ogr` (GDAL) ou exportar direto do QGIS no pipeline de importação; evita acoplar o runtime a GeoTools/parsers XML pesados.
-- **Pipeline:** QGIS → KML/GeoJSON → validação → importador → PostGIS. Reprojetar para 4326, forçar 2D, garantir `Polygon`/`MultiPolygon`, aplicar `ST_IsValid`/`ST_MakeValid`, rejeitar geometria vazia ou auto-intersectada e conferir sobreposição entre praias/setores.
-- **Camadas e contrato mínimo:** `beaches` (polígono), `beach_sectors` (polígono + `beach_external_id`), `lifeguard_posts` (ponto + tipo) e `critical_zones` (polígono + risco/persistência). Toda feição tem `external_id` estável, `name` e, quando aplicável, `source`.
-- **Setor é a unidade operacional.** Plantão, bandeira, ocorrência, sinalização e ocupação podem referenciar `beach_sector_id`; o escopo de autorização pode ser por setor. O setor herda a praia quando não informado e a soma dos setores não precisa cobrir 100 % da praia.
+- **KML não é lido no caminho de produção.** O leitor de KML existe apenas na **ferramenta de importação** do módulo `beaches` (seed de desenvolvimento opt-in e `POST /api/v1/management/bathing-areas/import`, da coordenação, com `dry-run` padrão). Ele é namespace-aware e desliga DTD/entidades externas (XXE). Para produção em escala, o pipeline continua convertendo KML/KMZ para GeoJSON com `ogr2ogr` (GDAL) ou exportando direto do QGIS, sem acoplar o runtime do SOS a parsers XML.
+- **Pipeline:** QGIS → KML/GeoJSON → validação → importador → PostGIS. Reprojetar para 4326, forçar 2D, garantir `Polygon`/`MultiPolygon`, aplicar `ST_IsValid`/`ST_MakeValid`, rejeitar geometria vazia ou auto-intersectada e conferir sobreposição entre áreas/setores.
+- **Área de banho, não só praia (ADR-021).** `beaches` é a **área de banho** (praia, rio, barragem, lagoa) e tem `kind` (`BEACH` padrão, `RIVER`, `DAM`, `LAGOON`, `OTHER`). O nome físico da tabela foi mantido para não quebrar as FKs de postos, zonas, plantões e ocorrências; o conceito está no `package-info`/JavaDoc e no `kind`.
+- **Camadas e contrato mínimo:** `beaches` (`MultiPolygon` + `kind`), `beach_sectors` (`MultiPolygon` + `beach_id`), `lifeguard_posts` (ponto + tipo) e `critical_zones` (`MultiPolygon` + risco/persistência). Toda feição tem `external_id` estável, `name` (anulável no setor), `source` e proveniência.
+- **Setor é a unidade operacional.** Plantão, bandeira, ocorrência, sinalização e ocupação podem referenciar `beach_sector_id`; o escopo de autorização pode ser por setor. **Cada feição do mapeamento é um setor**, inclusive quando não tem nome (`Setor = "-"`): `beach_sectors.name` é anulável e a UI mostra "Setor N" pela `display_order`. A soma dos setores não precisa cobrir 100 % da área; o polígono da área é a **união** dos setores.
+- **Chave natural e idempotência.** Nome de área não é único ("Prainha da Orla" existe em Canindé, Propriá e Neópolis, e homônimos podem ocorrer em estados diferentes): a chave é (`state_code`, `municipio`, `praia` normalizada). **Nome de setor também não é identidade** — dois setores da mesma praia podem ter o mesmo nome; o que os distingue é o `external_id` da origem e a `display_order`. O `external_id` do setor deriva do id estável da origem com o prefixo da UF (`<uf>-areas-banho:<id>`), porque o `id` é único só dentro do arquivo; a reimportação é upsert por `external_id`. A UF vem do parâmetro `state` do envio quando o KML não traz `Estado` (divergência entre os dois é rejeitada). `source_metadata JSONB` guarda o que é proveniência e não estado vivo (por exemplo, `Num. de Oc`, a contagem histórica do arquivo).
 - **Precisão:** guardar a geometria completa no banco; simplificar apenas a cópia enviada ao cliente (`ST_SimplifyPreserveTopology`) e nunca alterar o dado de origem por causa do payload.
-- **Importação idempotente** por `external_id` (upsert por camada), versionada e auditada, com dados em `region-packs/<uf>/`. `dry-run` obrigatório, relatório de aceitos/rejeitados e remoção de feição **nunca** automática. Não usar SQL manual em produção.
-- **Proveniência:** registrar fonte, versão/data e responsável (`source`, `source_version`, `imported_at`, `imported_by`); validar contra a delimitação oficial (Marinha/DHN ou município). A delimitação do órgão é operacional e não substitui a oficial.
+- **Importação idempotente** por `external_id` (upsert por camada), versionada e auditada, com dados em `region-packs/<uf>/`. `dry-run` obrigatório, relatório de aceitos/rejeitados, execução registrada em `import_batches` (`source_version` = hash do arquivo) e remoção de feição **nunca** automática. Não usar SQL manual em produção.
+- **Atualização do mapa (reimportação).** O mesmo endpoint faz carga e atualização: o QGIS é reexportado e o arquivo novo é enviado. O upsert por `external_id` **preserva o UUID** da área/setor (FKs de postos, zonas, plantões e ocorrências continuam válidas). Modos: `UPSERT` (padrão; cria/atualiza, nunca remove) e `SYNC` (opt-in; feição ausente vira `active=false`, *soft delete* reversível). O relatório classifica `created`/`updated`/`unchanged`/`missing`/`rejected` e compara `geometry_hash` (WKB normalizado + SHA-256) com os campos de origem, escrevendo só o que mudou. **Arquivo idêntico ao do último lote aplicado faz curto-circuito:** o parser e a validação continuam rodando, mas nada é reescrito nem entra na auditoria. `dryRun=true` é o padrão; aplicar exige `dryRun=false&confirm=true`. Tudo em uma transação por lote — falha não deixa mapa parcial — e ao aplicar publica `BeachChanged`/`SectorChanged` para invalidar GeoJSON/cache. O fluxo desta fatia é **síncrono** (resposta com o relatório); a fila de importação entra quando houver volume/concorrência medidos.
+- **Projeção de leitura do mapa.** `beach_map_features` é uma view materializada (`AREA` + `SECTOR`, `active` preservado) com índice único e GiST; depois do commit de cada lote aplicado, `REFRESH MATERIALIZED VIEW CONCURRENTLY` roda fora da transação (`@TransactionalEventListener(AFTER_COMMIT)`) para não bloquear leituras. O GeoJSON público lê a view, não o KML.
+- **Proveniência:** registrar fonte, versão/data e responsável (`source`, `source_version`, `imported_at`, `imported_by`, `source_metadata`); validar contra a delimitação oficial (Marinha/DHN ou município). A delimitação do órgão é operacional e não substitui a oficial.
 
 ```sql
 CREATE TABLE beach_sectors (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    beach_id      UUID NOT NULL REFERENCES beaches(id),
-    external_id   VARCHAR(120) NOT NULL,
-    name          TEXT NOT NULL,
-    kind          VARCHAR(20),                    -- NORTH, SOUTH, CENTRAL, OTHER
-    display_order INT NOT NULL DEFAULT 0,
-    geometry      geometry(Polygon, 4326) NOT NULL,
-    source        VARCHAR(80),
-    source_version VARCHAR(40),
-    imported_at   TIMESTAMPTZ,
-    imported_by   UUID REFERENCES app_users(id),
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_sector_external UNIQUE (external_id),
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    beach_id       UUID NOT NULL REFERENCES beaches(id),
+    external_id    VARCHAR(160) NOT NULL,         -- <uf>-areas-banho:<id> da origem
+    name           TEXT,                          -- anulável e repetível: é rótulo, não identidade
+    display_order  INT NOT NULL DEFAULT 0,
+    geometry       geometry(MultiPolygon, 4326) NOT NULL,
+    source         VARCHAR(80),
+    source_version VARCHAR(64),
+    source_metadata JSONB,
+    imported_at    TIMESTAMPTZ,
+    imported_by    UUID REFERENCES operational_users(id),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_sector_external UNIQUE (external_id),  -- nunca (beach_id, name)
     CONSTRAINT chk_sector_geom   CHECK (ST_IsValid(geometry))
 );
 CREATE INDEX idx_sector_beach ON beach_sectors (beach_id);
 CREATE INDEX idx_sector_geom  ON beach_sectors USING GIST (geometry);
 ```
 
-- **Conversão de KML (offline):** `ogr2ogr -f GeoJSON -t_srs EPSG:4326 sectors.geojson sectors.kml`; o importador recebe GeoJSON e rejeita feições fora de praia, `external_id` duplicado ou geometria inválida.
+- **Conversão de KML (offline):** `ogr2ogr -f GeoJSON -t_srs EPSG:4326 sectors.geojson sectors.kml`; o importador recebe GeoJSON e rejeita feições fora de área, `external_id` duplicado ou geometria inválida. A ferramenta aceita KML no desenvolvimento e em importação assistida, com o mesmo contrato de feições.
 - **Cache/busca:** a importação publica `BeachChanged`/`SectorChanged`; a projeção de busca e o GeoJSON público (Redis) são invalidados por evento, nunca por TTL curto.
 - **Privacidade:** geometria de praia/setor é pública; coordenada de ocorrência e posição de operador **não** entram no GeoJSON público.
 
@@ -1292,6 +1297,7 @@ Registro, login e papéis vivem **dentro do sistema** (módulo `identity`), sem 
 | Acompanhar o trabalho em campo (`/gestao`)            |    ✘    |    ✘     |          ✘          |               ✔               |           ✔            |
 | Painel tático e histórico                             |    ✘    |    ✘     |          ✘          |               ✔               |           ✔            |
 | CMS de conteúdo; gestão de praias/zonas               |    ✘    |    ✘     |          ✘          |               ✔               |           ✔            |
+| Importar/atualizar o mapa de áreas de banho (KML)     |    ✘    |    ✘     |          ✘          |        ✔ (primeira aba)       |   ✘ (só usuários)      |
 | Gestão de usuários e configuração regional (`/admin`) |    ✘    |    ✘     |          ✘          | ativar/desativar guarda-vidas | ✔ (cadastra e convida) |
 
 Autorização por **papel + escopo** (posto/praia) validada no servidor, nunca só no cliente.
