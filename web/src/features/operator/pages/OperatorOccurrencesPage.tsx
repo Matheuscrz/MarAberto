@@ -14,7 +14,7 @@ import {
 } from "@/shared/lib/geolocation";
 import { formatAccuracy, formatDateTime } from "@/shared/lib/format";
 import { newRequestId } from "@/shared/lib/id";
-import { beaches } from "@/features/beaches";
+import { useNearbyBeaches } from "@/features/beaches";
 import type {
   OccurrenceNature,
   OccurrenceOrigin,
@@ -49,13 +49,18 @@ export function OperatorOccurrencesPage() {
   const [nature, setNature] = useState<OccurrenceNature>("RESCUE");
   const [outcome, setOutcome] = useState<OccurrenceOutcome>("RESOLVED");
   const [occurredAt, setOccurredAt] = useState(toLocalInput(new Date()));
-  const [beachId, setBeachId] = useState(beaches[0]?.id ?? "");
+  const [beachId, setBeachId] = useState("");
   const [sector, setSector] = useState("");
   const [reference, setReference] = useState("");
   const [summary, setSummary] = useState("");
   const [protocol, setProtocol] = useState("");
   const [position, setPosition] = useState<Position | null>(null);
   const [geoMessage, setGeoMessage] = useState<string | null>(null);
+
+  // A ocorrência é registrada sobre uma área do mapeamento real, num raio de
+  // até 30 km: o guarda-vidas escolhe entre o que está perto dele agora.
+  const { beaches } = useNearbyBeaches();
+  const effectiveBeachId = beachId || beaches[0]?.id || "";
 
   const counts = useMemo(() => {
     return occurrences.reduce(
@@ -95,7 +100,7 @@ export function OperatorOccurrencesPage() {
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    const beach = beaches.find((item) => item.id === beachId);
+    const beach = beaches.find((item) => item.id === effectiveBeachId);
     if (!beach || !summary.trim()) return;
 
     const isClosedWithoutCiosp =
@@ -230,10 +235,14 @@ export function OperatorOccurrencesPage() {
           <label className="block text-xs font-semibold text-ocean-800">
             Praia
             <select
-              value={beachId}
+              value={effectiveBeachId}
               onChange={(event) => setBeachId(event.target.value)}
-              className="mt-1 h-9 w-full rounded-lg border border-ocean-200 bg-white px-3 text-xs font-normal focus:border-ocean-600 focus:outline-none"
+              disabled={beaches.length === 0}
+              className="mt-1 h-9 w-full rounded-lg border border-ocean-200 bg-white px-3 text-xs font-normal focus:border-ocean-600 focus:outline-none disabled:bg-ocean-50"
             >
+              {beaches.length === 0 ? (
+                <option value="">Nenhuma praia num raio de 30 km</option>
+              ) : null}
               {beaches.map((beach) => (
                 <option key={beach.id} value={beach.id}>
                   {beach.name}

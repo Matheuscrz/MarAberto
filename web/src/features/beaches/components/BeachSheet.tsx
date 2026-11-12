@@ -1,18 +1,23 @@
-import { useRef } from 'react';
-import { Link } from 'react-router-dom';
-import { ChevronDown, MapPin } from 'lucide-react';
-import { FlagBadge, RiskBadge } from '@/shared/components/Badges';
-import { formatOccupancy } from '@/shared/lib/format';
-import { sanitizeText } from '@/shared/lib/sanitize';
-import type { Beach } from "@/features/beaches/types";
-import { useOverlay } from '@/shared/lib/overlay';
+import { useRef } from "react";
+import { Link } from "react-router-dom";
+import { ChevronDown, MapPin, Navigation, Waves } from "lucide-react";
+import { BEACH_KIND_LABEL, type Beach } from "@/features/beaches";
+import { formatDistance } from "@/shared/lib/format";
+import { sanitizeText } from "@/shared/lib/sanitize";
+import { useOverlay } from "@/shared/lib/overlay";
 
 /**
- * Ficha rápida da praia sobre o mapa (RF02): bandeira, risco, ocupação e as
- * orientações de cada zona. O toque em uma zona já amarela? Incentive o
- * guarda-vidas e o 193.
+ * Ficha rápida da área de banho sobre o mapa: tipo, município e quantos setores
+ * o mapeamento traz. Bandeira, risco e ocupação entram quando essas camadas
+ * existirem; o polígono importado não os fornece.
  */
-export function BeachSheet({ beach, onClose }: { beach: Beach; onClose: () => void }) {
+export function BeachSheet({
+  beach,
+  onClose,
+}: {
+  beach: Beach;
+  onClose: () => void;
+}) {
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Foco inicial, Escape/Tab e retorno de foco quando a ficha fecha.
@@ -29,10 +34,12 @@ export function BeachSheet({ beach, onClose }: { beach: Beach; onClose: () => vo
       >
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h2 className="text-xl font-black text-ocean-950">{sanitizeText(beach.name)}</h2>
+            <h2 className="text-xl font-black text-ocean-950">
+              {sanitizeText(beach.name)}
+            </h2>
             <p className="mt-0.5 flex items-center gap-1 text-sm text-ocean-600">
               <MapPin aria-hidden="true" className="size-3.5" />
-              {sanitizeText(beach.municipality)} — {sanitizeText(beach.state)}
+              {[beach.municipality, beach.state].filter(Boolean).join(" — ")}
             </p>
           </div>
           <button
@@ -46,34 +53,32 @@ export function BeachSheet({ beach, onClose }: { beach: Beach; onClose: () => vo
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <FlagBadge flag={beach.flag} />
-          <RiskBadge level={beach.riskLevel} />
+          <span className="inline-flex rounded-full bg-ocean-50 px-3 py-1 text-xs font-bold text-ocean-800">
+            {BEACH_KIND_LABEL[beach.kind]}
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-ocean-50 px-3 py-1 text-xs font-bold text-ocean-800">
+            <Waves aria-hidden="true" className="size-3.5" />
+            {beach.sectorCount === 1
+              ? "1 setor"
+              : `${beach.sectorCount} setores`}
+          </span>
         </div>
 
         <dl className="mt-3 grid grid-cols-2 gap-2 rounded-xl border border-ocean-200 bg-ocean-50 p-3 text-sm">
           <div>
-            <dt className="text-ocean-500">Ocupação estimada</dt>
-            <dd className="font-bold text-ocean-950">{formatOccupancy(beach.occupancyPercent)}</dd>
+            <dt className="text-ocean-500">Distância</dt>
+            <dd className="flex items-center gap-1 font-bold text-ocean-950">
+              <Navigation aria-hidden="true" className="size-3.5" />
+              {formatDistance(beach.distanceMeters)}
+            </dd>
           </div>
           <div>
-            <dt className="text-ocean-500">Riscos mapeados</dt>
-            <dd className="font-bold text-ocean-950">{beach.risks.length}</dd>
+            <dt className="text-ocean-500">Coordenadas</dt>
+            <dd className="font-mono text-xs font-bold text-ocean-950">
+              {beach.latitude.toFixed(3)}, {beach.longitude.toFixed(3)}
+            </dd>
           </div>
         </dl>
-
-        <ul className="mt-3 grid gap-2">
-          {beach.risks.map((risk) => (
-            <li key={risk.id} className="rounded-xl border border-ocean-200 bg-white p-3">
-              <p className="text-sm font-black text-coral-800">{sanitizeText(risk.label, 80)}</p>
-              <p className="mt-1 text-sm text-ocean-700">{sanitizeText(risk.description, 220)}</p>
-              <ul className="mt-2 list-disc pl-4 text-xs text-ocean-700">
-                {risk.guidance.map((item) => (
-                  <li key={item}>{sanitizeText(item, 140)}</li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
 
         <Link
           to={`/praias/${beach.id}`}

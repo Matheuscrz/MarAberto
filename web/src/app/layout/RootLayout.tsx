@@ -24,7 +24,8 @@ import { OfflineBanner } from "@/app/layout/OfflineBanner";
 import { InstallPrompt } from "@/app/layout/InstallPrompt";
 import { homePathForRole, useCurrentUser } from "@/features/auth";
 import { SosFab } from "@/features/sos";
-import { BeachSheet, beaches, riskZonesOf } from "@/features/beaches";
+import { BeachSheet, riskZonesOf, useNearbyBeaches } from "@/features/beaches";
+import type { Beach, BeachesOutletContext } from "@/features/beaches";
 import { SignalSheet, beachFlagSignals } from "@/features/signals";
 import { StationSheet, lifeguardStations } from "@/features/stations";
 import { MapLegend, type MapMarker } from "@/features/map";
@@ -59,9 +60,9 @@ const quickTabs = [
   { to: "/sobre", label: "Sobre", icon: Info },
 ];
 
-export interface HomeOutletContext {
+export interface HomeOutletContext extends BeachesOutletContext {
   readonly query: string;
-  readonly onSelectBeach: (beachId: string) => void;
+  readonly onSelectBeach: (beach: Beach) => void;
 }
 
 export function RootLayout() {
@@ -78,6 +79,9 @@ export function RootLayout() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // As praias vêm da importação do mapa, restritas a 30 km da posição atual.
+  const nearby = useNearbyBeaches();
 
   const isPanelExpanded = !isHome || searchOpen;
 
@@ -108,13 +112,16 @@ export function RootLayout() {
     [],
   );
 
-  const riskZones = useMemo(() => riskZonesOf(beaches), []);
+  const riskZones = useMemo(
+    () => riskZonesOf(nearby.beaches),
+    [nearby.beaches],
+  );
 
   const selectedBeach = useMemo(() => {
     if (!selectedMarkerId?.startsWith(BEACH_PREFIX)) return null;
     const id = selectedMarkerId.slice(BEACH_PREFIX.length);
-    return beaches.find((beach) => beach.id === id) ?? null;
-  }, [selectedMarkerId]);
+    return nearby.beaches.find((beach) => beach.id === id) ?? null;
+  }, [nearby.beaches, selectedMarkerId]);
 
   const selectedSignal = useMemo(() => {
     if (!selectedMarkerId?.startsWith(SIGNAL_PREFIX)) return null;
@@ -131,12 +138,16 @@ export function RootLayout() {
   const outletContext = useMemo<HomeOutletContext>(
     () => ({
       query: searchQuery,
-      onSelectBeach: (beachId) => {
-        setSelectedMarkerId(`${BEACH_PREFIX}${beachId}`);
+      beaches: nearby.beaches,
+      status: nearby.status,
+      message: nearby.message,
+      onRetryLocation: nearby.retry,
+      onSelectBeach: (beach) => {
+        setSelectedMarkerId(`${BEACH_PREFIX}${beach.id}`);
         setSearchOpen(false);
       },
     }),
-    [searchQuery],
+    [searchQuery, nearby.beaches, nearby.status, nearby.message, nearby.retry],
   );
 
   const handleClosePanel = () => {

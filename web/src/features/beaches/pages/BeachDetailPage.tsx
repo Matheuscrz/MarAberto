@@ -1,32 +1,131 @@
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
-  Clock,
   MapPin,
   Phone,
-  ShieldAlert,
+  RefreshCw,
   Siren,
   Waves,
 } from "lucide-react";
 import { Card, PageHeader } from "@/shared/components/Card";
-import { FlagBadge, RiskBadge } from "@/shared/components/Badges";
+import { ApiError } from "@/shared/lib/api-client";
+import {
+  getDevicePosition,
+} from "@/shared/lib/geolocation";
 import { DEMO_DATA_NOTICE } from "@/shared/lib/notices";
-import { findBeach } from "@/features/beaches/api/demo-beaches";
-import { formatDateTime, formatOccupancy } from "@/shared/lib/format";
+import { beachErrorMessage, fetchBeachDetail } from "@/features/beaches/api/beaches";
+import {
+  fetchOccupancy,
+  recordOccupancySample,
+  type OccupancyEstimate,
+  type OccupancyLevel,
+} from "@/features/beaches/api/occupancy";
+import {
+  BEACH_KIND_LABEL,
+  sectorLabel,
+  type BeachDetail,
+} from "@/features/beaches";
 import { sanitizeText } from "@/shared/lib/sanitize";
 import { NotFoundCard } from "@/shared/components/NotFoundCard";
 
 /**
- * Detalhe da praia dentro do painel flutuante do mapa: mesma linguagem
- * compacta das demais telas (cards de `rounded-2xl`, textos curtos).
+ * Ficha da área de banho importada do KML: tipo, município e setores na ordem
+ * do mapeamento. Bandeira, risco e ocupação são camadas próprias e aparecem
+ * aqui quando existirem — o polígono sozinho não inventa esses dados.
  */
 export function BeachDetailPage() {
   const { beachId } = useParams<{ beachId: string }>();
-  const beach = findBeach(beachId);
+  const [detail, setDetail] = useState<BeachDetail | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [occupancy, setOccupancy] = useState<{
+    beachId: string;
+    estimate: OccupancyEstimate | null;
+  } | null>(null);
 
-  if (!beach) {
+  useEffect(() => {
+    if (!beachId) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const loaded = await fetchBeachDetail(beachId);
+        if (cancelled) return;
+        setDetail(loaded);
+
+        // Ocupação: a posição só serve para registrar a presença no setor e é
+        // descartada pelo servidor. Sem permissão, a faixa atual ainda é lida.
+        const position = await getDevicePosition({
+          enableHighAccuracy: false,
+          timeout: 6_000,
+          maximumAge: 300_000,
+        }).catch(() => null);
+        if (position) {
+          await recordOccupancySample(position).catch(() => undefined);
+        }
+
+        const estimate = await fetchOccupancy(beachId).catch(() => null);
+        if (!cancelled) setOccupancy({ beachId, estimate });
+      } catch (caught) {
+        if (!cancelled) setError(caught);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [beachId, attempt]);
+
+  if (!beachId) {
     return <NotFoundCard />;
   }
+
+  if (error instanceof ApiError && error.status === 404) {
+    return <NotFoundCard />;
+  }
+
+  if (error) {
+    return (
+      <div className="grid gap-3">
+        <Link
+          to="/praias"
+          className="inline-flex w-fit items-center gap-1 text-xs font-bold text-ocean-700 transition hover:text-ocean-900"
+        >
+          <ArrowLeft aria-hidden="true" className="size-3.5" />
+          Voltar para praias
+        </Link>
+        <Card className="border-dashed bg-ocean-50/40 text-center">
+          <p className="text-sm font-bold text-ocean-950">
+            Não foi possível abrir a praia
+          </p>
+          <p className="mt-1 text-xs text-ocean-700">{beachErrorMessage(error)}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setAttempt((value) => value + 1);
+            }}
+            className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-ocean-300 bg-white px-3 text-xs font-bold text-ocean-900 hover:bg-ocean-50"
+          >
+            <RefreshCw aria-hidden="true" className="size-3.5" />
+            Tentar de novo
+          </button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <output className="block py-8 text-center text-sm font-semibold text-ocean-600">
+        Carregando a praia
+      </output>
+    );
+  }
+
+  const currentOccupancy =
+    occupancy?.beachId === detail.id ? occupancy.estimate : null;
 
   return (
     <div className="grid gap-3">
@@ -39,118 +138,96 @@ export function BeachDetailPage() {
       </Link>
 
       <PageHeader
-        title={beach.name}
-        subtitle={`${beach.municipality} — ${beach.state}`}
-        actions={<RiskBadge level={beach.riskLevel} />}
+        title={sanitizeText(detail.name, 120)}
+        subtitle={[detail.municipality, detail.state]
+          .filter(Boolean)
+          .join(" — ")}
+        actions={
+          <span className="rounded-full bg-ocean-50 px-2.5 py-1 text-[11px] font-bold text-ocean-700">
+            {BEACH_KIND_LABEL[detail.kind]}
+          </span>
+        }
       />
 
       <Card>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <FlagBadge flag={beach.flag} />
-          <span className="flex items-center gap-1 text-[11px] text-ocean-600">
-            <Clock aria-hidden="true" className="size-3.5" />
-            Atualizado em {formatDateTime(beach.updatedAt)}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ocean-600">
+          <span className="flex items-center gap-1">
+            <MapPin aria-hidden="true" className="size-3.5" />
+            {detail.sectorCount === 1
+              ? "1 setor mapeado"
+              : `${detail.sectorCount} setores mapeados`}
+          </span>
+          <span className="font-mono">
+            {detail.latitude.toFixed(4)}, {detail.longitude.toFixed(4)}
           </span>
         </div>
-
         <p className="mt-2 text-xs leading-relaxed text-ocean-700">
-          {sanitizeText(beach.description, 600)}
+          Área de banho delimitada pelo mapeamento do CBM. Cada setor é uma
+          parte operacional da mesma praia, rio ou barragem.
         </p>
 
-        <dl className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-ocean-200 bg-ocean-50 p-2.5 text-center">
+        <dl className="mt-3 grid grid-cols-2 gap-2 rounded-xl border border-ocean-200 bg-ocean-50 p-2.5 text-center">
           <div>
             <dt className="text-[10px] font-bold uppercase text-ocean-500">
-              Ocupação
+              Ocupação estimada
             </dt>
             <dd className="text-sm font-black text-ocean-950">
-              {formatOccupancy(beach.occupancyPercent)}
+              {occupancyLabel(currentOccupancy)}
             </dd>
           </div>
           <div>
             <dt className="text-[10px] font-bold uppercase text-ocean-500">
-              Riscos
+              Janela
             </dt>
             <dd className="text-sm font-black text-ocean-950">
-              {beach.risks.length}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[10px] font-bold uppercase text-ocean-500">
-              Coordenadas
-            </dt>
-            <dd className="font-mono text-[11px] font-bold text-ocean-950">
-              {beach.latitude.toFixed(3)}, {beach.longitude.toFixed(3)}
+              {currentOccupancy ? `${currentOccupancy.windowMinutes} min` : "—"}
             </dd>
           </div>
         </dl>
+        <p className="mt-1.5 text-[11px] leading-snug text-ocean-600">
+          Estimativa anônima de aparelhos com o app aberto na área. Abaixo da
+          amostra mínima mostramos "dados insuficientes" para proteger quem está
+          na praia.
+        </p>
       </Card>
 
-      <section aria-labelledby="riscos" className="grid gap-2.5">
+      <section aria-labelledby="setores" className="grid gap-2.5">
         <h2
-          id="riscos"
+          id="setores"
           className="flex items-center gap-1.5 text-sm font-black text-ocean-950"
         >
-          <ShieldAlert aria-hidden="true" className="size-4 text-coral-600" />
-          Zonas de risco
+          <Waves aria-hidden="true" className="size-4 text-ocean-600" />
+          Setores
         </h2>
 
-        {beach.risks.length === 0 ? (
+        {detail.sectors.length === 0 ? (
           <Card className="border-dashed bg-ocean-50/40 text-center">
             <p className="text-xs font-bold text-ocean-950">
-              Nenhuma zona de risco mapeada
+              Nenhum setor ativo
             </p>
             <p className="mt-1 text-[11px] text-ocean-700">
-              Siga a bandeira do posto e a orientação do guarda-vidas.
+              A área inteira vale como um único ponto de referência.
             </p>
           </Card>
         ) : (
           <ul className="grid gap-2.5">
-            {beach.risks.map((risk) => (
-              <li key={risk.id}>
+            {detail.sectors.map((sector) => (
+              <li key={sector.id}>
                 <Card>
-                  <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-black text-ocean-950">
-                      {sanitizeText(risk.label, 120)}
+                      {sanitizeText(sectorLabel(sector), 120)}
                     </h3>
-                    <RiskBadge level={risk.severity} />
+                    <span className="font-mono text-[10px] text-ocean-500">
+                      {sector.latitude.toFixed(4)}, {sector.longitude.toFixed(4)}
+                    </span>
                   </div>
-                  <p className="mt-1.5 text-xs text-ocean-700">
-                    {sanitizeText(risk.description, 500)}
-                  </p>
-                  <h4 className="mt-2.5 text-[10px] font-bold uppercase tracking-wide text-ocean-500">
-                    O que fazer
-                  </h4>
-                  <ul className="mt-1 grid gap-1 text-xs text-ocean-800">
-                    {risk.guidance.map((item) => (
-                      <li key={item} className="flex gap-1.5">
-                        <span aria-hidden="true" className="text-ocean-500">
-                          •
-                        </span>
-                        {sanitizeText(item, 240)}
-                      </li>
-                    ))}
-                  </ul>
                 </Card>
               </li>
             ))}
           </ul>
         )}
       </section>
-
-      <Card>
-        <h2 className="flex items-center gap-1.5 text-sm font-black text-ocean-950">
-          <Waves aria-hidden="true" className="size-4 text-ocean-600" />
-          Estrutura
-        </h2>
-        <ul className="mt-1.5 grid gap-1 text-xs text-ocean-800">
-          {beach.facilities.map((facility) => (
-            <li key={facility} className="flex items-center gap-1.5">
-              <MapPin aria-hidden="true" className="size-3.5 text-ocean-500" />
-              {sanitizeText(facility, 80)}
-            </li>
-          ))}
-        </ul>
-      </Card>
 
       <Card className="border-coral-200 bg-coral-50">
         <h2 className="text-sm font-black text-coral-950">
@@ -182,4 +259,21 @@ export function BeachDetailPage() {
       <p className="text-[11px] text-ocean-600">{DEMO_DATA_NOTICE}</p>
     </div>
   );
+}
+
+const OCCUPANCY_LABEL: Record<OccupancyLevel, string> = {
+  LOW: "Baixa",
+  MODERATE: "Moderada",
+  HIGH: "Alta",
+  EXTREME: "Muito alta",
+};
+
+function occupancyLabel(estimate: OccupancyEstimate | null): string {
+  if (!estimate) {
+    return "—";
+  }
+  if (estimate.status === "INSUFFICIENT" || !estimate.level) {
+    return "Dados insuficientes";
+  }
+  return OCCUPANCY_LABEL[estimate.level];
 }
