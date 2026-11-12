@@ -650,7 +650,9 @@ O job reivindica `DISPATCHED` com prazo vencido por `FOR UPDATE SKIP LOCKED` (ba
 - **Precisão:** guardar a geometria completa no banco; simplificar apenas a cópia enviada ao cliente (`ST_SimplifyPreserveTopology`) e nunca alterar o dado de origem por causa do payload.
 - **Importação idempotente** por `external_id` (upsert por camada), versionada e auditada, com dados em `region-packs/<uf>/`. `dry-run` obrigatório, relatório de aceitos/rejeitados, execução registrada em `import_batches` (`source_version` = hash do arquivo) e remoção de feição **nunca** automática. Não usar SQL manual em produção.
 - **Atualização do mapa (reimportação).** O mesmo endpoint faz carga e atualização: o QGIS é reexportado e o arquivo novo é enviado. O upsert por `external_id` **preserva o UUID** da área/setor (FKs de postos, zonas, plantões e ocorrências continuam válidas). Modos: `UPSERT` (padrão; cria/atualiza, nunca remove) e `SYNC` (opt-in; feição ausente vira `active=false`, *soft delete* reversível). O relatório classifica `created`/`updated`/`unchanged`/`missing`/`rejected` e compara `geometry_hash` (WKB normalizado + SHA-256) com os campos de origem, escrevendo só o que mudou. **Arquivo idêntico ao do último lote aplicado faz curto-circuito:** o parser e a validação continuam rodando, mas nada é reescrito nem entra na auditoria. `dryRun=true` é o padrão; aplicar exige `dryRun=false&confirm=true`. Tudo em uma transação por lote — falha não deixa mapa parcial — e ao aplicar publica `BeachChanged`/`SectorChanged` para invalidar GeoJSON/cache. O fluxo desta fatia é **síncrono** (resposta com o relatório); a fila de importação entra quando houver volume/concorrência medidos.
-- **Projeção de leitura do mapa.** `beach_map_features` é uma view materializada (`AREA` + `SECTOR`, `active` preservado) com índice único e GiST; depois do commit de cada lote aplicado, `REFRESH MATERIALIZED VIEW CONCURRENTLY` roda fora da transação (`@TransactionalEventListener(AFTER_COMMIT)`) para não bloquear leituras. O GeoJSON público lê a view, não o KML.
+- **Projeção de leitura do mapa.** `beach_map_features` é uma view materializada (`AREA` + `SECTOR`, `active` preservado) com índice único e GiST; depois do commit de cada lote aplicado, `REFRESH MATERIALIZED VIEW CONCURRENTLY` roda fora da transação (`@TransactionalEventListener(AFTER_COMMIT)`) para não bloquear leituras. O GeoJSON público e a lista de praias leem a view, não o KML.
+- **Arquivamento do arquivo aplicado.** Todo lote **aplicado** (nunca o `dry-run`) envia os bytes originais ao storage de objetos (`V12`, ADR-016): `S3ObjectStorage` sobre o Garage, chave endereçada pelo conteúdo em `<prefixo>/<UF>/<sha256>.kml` (padrão `bathing-areas/SE/<sha256>.kml`). A chave fica em `import_batches.source_storage_key`; reenviar o mesmo arquivo reusa o mesmo objeto em vez de acumular cópias. O envio é **best-effort**: se o storage estiver fora, a importação continua e a coluna fica nula — perder o mapa correto é pior do que ficar sem a cópia de auditoria.
+- **Leitura pública por proximidade (RF01).** `GET /api/v1/beaches?lat=&lon=&radiusM=` devolve **apenas** as áreas ativas num raio de até **30 km** da posição informada, da mais próxima para a mais distante; `GET /api/v1/beaches/{id}` devolve a ficha com os setores na ordem do mapeamento. Sem posição não existe lista (não há "todas as praias do estado"). O filtro é `ST_DWithin(geometry::geography, ponto, raio)` sobre a projeção materializada, com o índice GiST de expressão da `V13`; a distância é medida até o polígono, então quem está dentro da área vê `0 m`. Erros em RFC 9457 (`localizacao-invalida` 400, `praia-nao-encontrada` 404).
 - **Proveniência:** registrar fonte, versão/data e responsável (`source`, `source_version`, `imported_at`, `imported_by`, `source_metadata`); validar contra a delimitação oficial (Marinha/DHN ou município). A delimitação do órgão é operacional e não substitui a oficial.
 
 ```sql
@@ -1090,11 +1092,13 @@ WHERE alert_type = :type
 
 ### 8.5 Ocupação (privacidade por desenho)
 
-1. O cliente baixa o GeoJSON das praias (cacheado, ETag) e **compara localmente** a posição com o polígono.
-2. Se estiver dentro e o app em primeiro plano, envia a cada ~5 min `POST /occupancy/heartbeat {beachId, token}`; `token` é aleatório, **gerado no dispositivo e rotacionado diariamente**.
-3. No servidor: `ZADD occ:{beachId} <agora> sha256(token + salt_do_dia)`; `ZREMRANGEBYSCORE` remove > 15 min; `ZCARD` dá a contagem.
-4. Nível = limiares por praia; abaixo da amostra mínima _k_ → "dados insuficientes".
-5. **Limitações assumidas:** o servidor não consegue verificar a posição enviada pelo cliente (o dado é indicativo, não pericial); o IP **não é registrado** nesses endpoints (configuração do Nginx).
+1. O cliente lê a posição **uma vez** ao abrir a ficha da praia (sem `watchPosition`) e envia `POST /api/v1/occupancy/samples {latitude, longitude, token}`; `token` é aleatório (`crypto.randomUUID()`), vive só na memória do módulo e é descartado ao recarregar o app — nada em `localStorage`/`sessionStorage`.
+2. O servidor resolve o **setor** que contém o ponto (`ST_Contains` em `beach_sectors`) e grava **apenas** `beach_id`, `sector_id`, `bucket_start` (janela de 15 min) e o **HMAC** do token (`BlindIndexer`, índice cego). A coordenada é descartada nessa mesma transação; não há coluna de posição, de IP nem histórico por aparelho. Ponto fora de setor mapeado → `204`, nada gravado.
+3. `UNIQUE (anonymous_token, sector_id, bucket_start)` com `ON CONFLICT DO NOTHING`: recarregar a tela ou um retry de rede não infla o contador.
+4. Estimativa = `count(DISTINCT anonymous_token)` do setor/área na janela móvel de 15 min (`maraberto.occupancy.window`); abaixo de `minimum-sample` (_k_ = 5) a resposta é `INSUFFICIENT` **sem nível**, para não permitir inferir quantas pessoas estão num setor vazio.
+5. Faixas calibráveis por instalação: `moderate` 10, `high` 25, `extreme` 50 amostras. A API devolve a faixa (`LOW`/`MODERATE`/`HIGH`/`EXTREME`) e a janela, nunca a contagem.
+6. Retenção curta: o expurgo (`delete ... where created_at < now() - 24 h`) roda **na própria escrita**, então a tabela não acumula trilha; nenhum job noturno é necessário.
+7. **Limitações assumidas:** o servidor não consegue verificar que o aparelho está mesmo na praia (o dado é indicativo, não pericial); aparelho sem o app aberto não conta; o IP não é registrado nesses endpoints (configuração do Nginx). A fonte da verdade é a tabela `occupancy_samples`, não o Redis — o indicador é barato o bastante para dispensar cache.
 
 ### 8.6 Upload de foto
 
@@ -1150,10 +1154,12 @@ sequenceDiagram
 | Dado                     | Onde                   | Chave / política                                | Invalidação                                           |
 | ------------------------ | ---------------------- | ----------------------------------------------- | ----------------------------------------------------- |
 | Praias e zonas (GeoJSON) | HTTP + Redis           | `geo:beaches:v{versão}`; `ETag`; `max-age=3600` | `BeachChanged`/`RiskZoneChanged` incrementa a versão. |
+| Lista de praias por proximidade | HTTP (60 s, `private`) + memória do processo | chave pela posição arredondada a 3 casas (~110 m) + raio; **posição nunca persiste nem é logada** | `BathingAreaMapChanged`/`BeachChanged` limpa o cache; TTL de 120 s como rede de segurança. |
+| Ficha da área e setores     | HTTP (60 s) + memória do processo | `detail:{beachId}`                                                                              | `BeachChanged` limpa o cache.                          |
 | Bandeira atual           | HTTP (30–60 s) + Redis | `flag:current:{beachId}`                        | `FlagChanged` (write-through).                        |
 | Maré do dia              | HTTP + Redis           | `tide:{station}:{yyyy-MM-dd}`, TTL ~24 h        | Reescrito na ingestão diária.                         |
 | Vídeos educativos        | HTTP + Redis           | `content:videos:v{n}`                           | `ContentChanged`.                                     |
-| Ocupação                 | Redis                  | `occ:{beachId}` (ZSET, janela 15 min)           | Expiração por janela.                                 |
+| Ocupação                 | PostgreSQL             | `occupancy_samples` (janela móvel de 15 min)    | Expurgo > 24 h na escrita; sem cache (barato e sensível). |
 | Rate limit               | Redis                  | `rl:{rota}:{sujeito}`                           | Janela do bucket.                                     |
 | Tiles do mapa            | Nginx/CDN              | arquivo PMTiles estático, `Range` requests      | Troca de arquivo versionado.                          |
 
@@ -1226,9 +1232,10 @@ Ambos entram via **externalização do Spring Modulith**, sem alterar o código 
 
 ## 12. Armazenamento de objetos
 
-- **Porta:** `ObjectStoragePort` (`presignPut`, `presignGet`, `delete`, `head`) implementada sobre o **cliente S3** (AWS SDK v2 ou equivalente).
+- **Porta:** `ObjectStoragePort` (`presignPut`, `presignGet`, `put`, `delete`, `head`) implementada sobre o **cliente S3** (AWS SDK v2 ou equivalente).
+- **Compatibilidade do cliente:** o SDK v2 assina o corpo em `aws-chunked` por padrão e o Garage responde `400 Invalid payload signature`; o cliente e o presigner desligam o *chunked encoding* (`chunkedEncodingEnabled(false)`) e só calculam checksum quando o serviço exige (`requestChecksumCalculation=WHEN_REQUIRED`). Sem isso todo upload falha mesmo com credencial correta — o que, por ser *best-effort*, apareceria só como "arquivo de auditoria ausente".
 - **Padrão do Compose:** **Garage** (S3-compatível, leve). **Alternativa:** bucket S3 de nuvem pública, ou SeaweedFS/Ceph RGW onde já exista.
-- **Buckets:** `media-public` (miniaturas/fotos aprovadas, leitura via URL assinada ou CDN) e `media-private` (originais pendentes).
+- **Buckets:** `media-public` (miniaturas/fotos aprovadas, leitura via URL assinada ou CDN) e `media-private` (originais pendentes). O mesmo `media-public` guarda o **arquivo aplicado da importação do mapa** em `bathing-areas/<UF>/<sha256>.kml` (chave por conteúdo; ADR-016), com a chave registrada em `import_batches.source_storage_key`.
 - **Política:** _lifecycle_ para expirar originais `PENDING`/`REJECTED`; versionamento desligado; criptografia em repouso quando disponível.
 - **Teste de contrato** da porta rodando contra Garage no CI, para evitar surpresas ao trocar de provedor.
 

@@ -163,6 +163,8 @@ docker compose down
 > 🔒 **Estas credenciais são exclusivamente para desenvolvimento local.** Nunca as utilize em produção. Veja as recomendações de implantação em [`Security.md`](Security.md).
 >
 > ℹ️ O armazenamento usa **Garage** no lugar do MinIO (ADR-006), porque a imagem CE do MinIO deixou de ser pública. A configuração fica em `deploy/garage/garage.toml`.
+>
+> 🗺️ O backend fala com o Garage por padrão (`STORAGE_PROVIDER=s3`): o KML **aplicado** na importação do mapa é arquivado em `media-public/bathing-areas/<UF>/<sha256>.kml` e a chave fica em `import_batches.source_storage_key`. Sem o Garage no ar a importação continua valendo — só o arquivo de auditoria fica de fora.
 
 ### 2. Rodar o Backend Spring Boot
 
@@ -173,6 +175,7 @@ cd backend
 
 - API REST disponível em: `http://localhost:8080/api/v1`
 - Documentação interativa Swagger/OpenAPI: `http://localhost:8080/swagger-ui/index.html`
+- Praias para o banhista: `GET /api/v1/beaches?lat=&lon=&radiusM=` (raio máximo de 30 km; sem posição não há lista) e `GET /api/v1/beaches/{id}` (ficha com setores). Ocupação anônima: `POST /api/v1/occupancy/samples` e `GET /api/v1/occupancy/beaches/{id}`.
 
 #### Contas de desenvolvimento (login real)
 

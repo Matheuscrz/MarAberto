@@ -25,13 +25,14 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 - **Sessão**: `/login` único e três áreas por papel; refresh em cookie
   `__Secure-maraberto_rt; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict` e access
   token **só em memória**.
-- **Estado**: backend com **120 testes** (`./gradlew clean check`); frontend com
+- **Estado**: backend com **132 testes** (`./gradlew clean check`); frontend com
   `npm run build` e `npm run lint` verdes; app Android (Capacitor 8) com APK debug gerado.
 
 ## Ler antes de trabalhar
 
-- `docs/Architecture.md` — §7.5/§7.6 (SOS e escala), §7.7 (importação), §7.8 (zonas
-  temporais), §7.12/§7.13 (geoindexação e despacho).
+- `docs/Architecture.md` — §7.5/§7.6 (SOS e escala), §7.7 (importação, arquivamento e
+  lista pública), §7.8 (zonas temporais), §7.12/§7.13 (geoindexação e despacho), §8.5
+  (ocupação) e §9 (cache).
 - `docs/Requirements.md` — RF/RN/RNF; **RF41** é a importação de mapeamento.
 - `docs/adr/` — ADRs 001–021. Mais usadas: 012 (dados sensíveis), 013 (ocorrências),
   016 (importação), 017/018 (SOS), 019 (Capacitor), 020 (escala), 021 (área de banho).
@@ -44,9 +45,11 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
   `identity`, `region`, `beaches`, `operations`, `emergency`, `safety`, `tides`,
   `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`.
   `ApplicationModules.verify()` (`ModularityTests`) protege as fronteiras.
-- Com fluxo implementado: `beaches` (entidades, importação KML e setores), `emergency`
-  (SOS completo até o ack), `identity` (login/RBAC/sessões) e `operations` (plantão e
-  elegibilidade do SOS). `media` e `realtime` têm portas; o resto é `package-info`.
+- Com fluxo implementado: `beaches` (entidades, importação KML e setores, arquivamento do
+  arquivo aplicado, API pública por proximidade), `emergency` (SOS completo até o ack),
+  `identity` (login/RBAC/sessões), `operations` (plantão e elegibilidade do SOS) e
+  `occupancy` (indicador anônimo por setor). `media` tem a porta `ObjectStoragePort`
+  (`stub`/`s3`); `realtime` tem porta; o resto é `package-info`.
 - **Nunca** importar de outro módulo fora da `api/` pública. `beaches` não importa
   `emergency`/`operations`; o SOS nunca espera a ocorrência.
 
@@ -58,12 +61,17 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 - Migrações em `backend/src/main/resources/db/migration/`: `V1` PostGIS e tabelas
   espaciais · `V2` zonas temporais · `V3` SOS · `V4` proteção de dados · `V5` outbox ·
   `V6`/`V7` identidade e sessões · `V8` despacho + plantão · `V9` lease do plantão ·
-  `V10` escalonamento em anéis · `V11` áreas de banho/setores/lotes de importação.
-  **Próxima livre: `V12`** (ocorrências).
+  `V10` escalonamento em anéis · `V11` áreas de banho/setores/lotes de importação ·
+  `V12` chave do arquivo arquivado do lote · `V13` índice geográfico da projeção do
+  mapa · `V14` amostras anônimas de ocupação.
+  **Próxima livre: `V15`** (ocorrências).
 - `application.yml` único. Chaves relevantes: `maraberto.dispatch.*` (raio padrão, teto
   `max-radius-m: 15000`, `position-stale-after: PT30M`, `shift-idle-timeout: PT15M`,
   `escalation.rings: 5000,7000,10000,12000,15000,20000` e `escalation.delay: PT20S`),
   `maraberto.emergency.outbox.*`, `maraberto.security.crypto.*`, `maraberto.security.jwt.*`,
+  `maraberto.storage.*` (provider `stub`/`s3`, endpoint/região/credenciais e `path-style`
+  do Garage), `maraberto.occupancy.*` (janela `PT15M`, `minimum-sample: 5`, limiares
+  `moderate/high/extreme`, retenção `PT24H`),
   seeds `maraberto.identity.dev-seed.enabled`, `maraberto.operations.dev-seed.enabled` e
   `maraberto.beaches.dev-seed.enabled` (este exige a tabela `beaches` vazia e recusa o
   perfil `prod`; `maraberto.beaches.import.file` atende a importação assistida).
@@ -125,11 +133,10 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 
 ## Fatia 1 — importador de áreas de banho (KML → PostGIS)
 
-**Status:** implementada no working tree (backend + testes + aba da gestão); falta o aval
-para commitar. Entregue: `KmlFeatureReader`, `BathingAreaImportService`,
-`BathingAreaRepository`, `V11`, endpoint da coordenação, seed de dev e
-`ImportMapPage` em `/gestao`. O fluxo é **síncrono** nesta fatia; a fila (Rabbit ou
-tabela de jobs) entra quando houver volume/concorrência medidos.
+**Status:** commitada (`1a795ea`, `1466485`, `cf58aa2`, `e08e3e2`). Entregue:
+`KmlFeatureReader`, `BathingAreaImportService`, `BathingAreaRepository`, `V11`, endpoint
+da coordenação, seed de dev e `ImportMapPage` em `/gestao`. O fluxo é **síncrono** nesta
+fatia; a fila (Rabbit ou tabela de jobs) entra quando houver volume/concorrência medidos.
 
 Objetivo: ler `docs/kml/Areas_Banho_Sergipe.kml`, converter as geometrias para
 `geometry(...,4326)` com JTS e persistir **idempotentemente** em `beaches`,
@@ -282,11 +289,62 @@ importador descobre o que é novo, o que mudou e o que sumiu.
   relatório em `dry-run` e só aplica após confirmar; a TI não tem essa aba.
 - `ModularityTests` verde e `beaches` sem importar `emergency`/`operations`.
 
+## Fatia 2 — mapa público real, arquivamento e ocupação
+
+**Status:** implementada no working tree (backend + testes + frontend); falta o aval para
+commitar. Substitui os dados mocados de praias pelos dados da importação.
+
+### Arquivamento do KML aplicado (`V12`)
+
+- Lote **aplicado** (nunca `dry-run`) envia os bytes originais ao storage de objetos via
+  `S3ObjectStorage` (`ObjectStoragePort`, provider `maraberto.storage.provider=s3`, padrão
+  no Compose). Chave por conteúdo: `<prefixo>/<UF>/<sha256>.kml` (padrão
+  `bathing-areas/SE/<sha256>.kml`), gravada em `import_batches.source_storage_key`.
+- Reenviar o mesmo arquivo reusa o mesmo objeto; **best-effort**: storage fora do ar não
+  bloqueia o mapa (coluna fica nula, aviso no log). Credenciais de exemplo do Garage são
+  recusadas no perfil `prod` (`S3StorageConfiguration`). Testes fixam `stub`.
+- **Gotcha do Garage:** o SDK v2 assina o corpo em `aws-chunked` por padrão e o Garage
+  responde `400 Invalid payload signature`. O cliente e o presigner usam
+  `chunkedEncodingEnabled(false)` e `requestChecksumCalculation=WHEN_REQUIRED`; sem isso
+  todo upload falha mesmo com credencial correta.
+
+### Lista pública por proximidade (RF01)
+
+- `GET /api/v1/beaches?lat=&lon=&radiusM=` — só as áreas ativas num raio de até
+  **30 000 m** (`radiusM` omitido = 30 km), da mais próxima para a mais distante; sem
+  posição não existe lista. `GET /api/v1/beaches/{id}` devolve a ficha com os setores na
+  ordem do mapeamento (`sectorLabel` mostra "Setor N" quando o nome é nulo).
+- Lê da projeção materializada `beach_map_features` (`feature_kind = 'AREA'`), com
+  `ST_DWithin(geometry::geography, ponto, raio)` sobre o índice GiST de expressão da
+  `V13`; distância em metros até o polígono. Erros em RFC 9457 (`localizacao-invalida`
+  400, `praia-nao-encontrada` 404). `SecurityConfig` já libera `GET /api/v1/beaches/**`.
+- Cache em memória (`BeachMapQueryService`): TTL de 120 s, chave pela posição arredondada
+  a 3 casas (~110 m) + raio, **nunca** persistida/logada, limpa por
+  `BathingAreaMapChanged`/`BeachChanged`; `Cache-Control: private, max-age=60`.
+- Frontend: `useNearbyBeaches` (leitura pontual de GPS, sem `watchPosition`),
+  `BeachesPage`/`BeachDetailPage`/`BeachSheet` consumindo a API; `demo-beaches.ts`
+  removido. Negar a permissão ou estar longe do litoral mostra estado explicado com
+  "Tentar de novo" — a tela não quebra.
+
+### Ocupação anônima (RF10/RN06/RNF04, `V14`)
+
+- `POST /api/v1/occupancy/samples {latitude, longitude, token}` resolve o **setor** que
+  contém o ponto (`ST_Contains`) e grava só `beach_id`, `sector_id`, `bucket_start`
+  (janela de 15 min) e o **HMAC** do token (`BlindIndexer`). A coordenada é descartada;
+  não há coluna de posição, IP nem histórico por aparelho. Fora de setor mapeado → `204`.
+- `UNIQUE (anonymous_token, sector_id, bucket_start)` + `ON CONFLICT DO NOTHING`:
+  recarregar a tela não infla. Estimativa = `count(DISTINCT token)` na janela móvel;
+  abaixo de `minimum-sample` (5) → `INSUFFICIENT` **sem nível** (protege praia vazia).
+  Retenção de 24 h com expurgo **na escrita**.
+- `GET /api/v1/occupancy/beaches/{id}` devolve `status`, `level` e `windowMinutes`, nunca
+  a contagem. Token do cliente é `crypto.getRandomValues` em memória do módulo (rotaciona
+  ao recarregar), nunca em storage web. `SecurityConfig` libera `/api/v1/occupancy/**`.
+
 ## Roadmap conhecido (curto)
 
-- `beaches` — Fatia 1 acima; depois CRUD/GeoJSON público, zonas `PERMANENT`/
-  `SEMI_PERMANENT` com filtro temporal e importação de postos/bases/zonas.
-- `occurrences` — `V12` (depois da `V11`), criação por evento do SOS + reconciliação,
+- `beaches` — Fatia 2 acima; depois zonas `PERMANENT`/`SEMI_PERMANENT` com filtro
+  temporal, GeoJSON público com ETag/Redis e importação de postos/bases/zonas.
+- `occurrences` — `V15` (depois da `V14`), criação por evento do SOS + reconciliação,
   193/`FIELD_ATTENDED` e ficha CIOSP (ADR-013).
 - `operations` — `rip_current_markings` para correntes efêmeras (RF13).
 - `region` — `installation_settings` e Region Pack.
