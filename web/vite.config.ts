@@ -20,28 +20,61 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 const NATIVE_MODE = 'capacitor';
 
 /**
+ * Basemap de demonstração enquanto não houver PMTiles próprios (ADR-005).
+ * Precisa ser a mesma URL de `VITE_DEMO_TILE_URL` em `features/map/lib/map-style.ts`;
+ * o padrão só existe aqui para o build nativo não depender de `.env.capacitor`.
+ */
+const DEFAULT_DEMO_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+/**
+ * Origem de uma URL de tiles com `{z}`/`{x}`/`{y}`. `null` quando a URL é
+ * inválida, para a CSP não quebrar o build por um valor malformado.
+ */
+function tileOrigin(tileUrl: string): string | null {
+  try {
+    return new URL(
+      tileUrl.replace('{z}', '0').replace('{x}', '0').replace('{y}', '0'),
+    ).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * CSP do app empacotado.
  *
  * Espelha a política do Nginx (mesmas diretivas e origens), acrescentando a
- * origem da API/WebSocket e, quando usado, a dos tiles PMTiles. `frame-ancestors`
- * não é aplicável em `<meta>` e fica de fora.
+ * origem da API/WebSocket e as dos tiles (PMTiles e/ou basemap de demonstração).
+ * O MapLibre busca tiles raster por `fetch`, então a origem entra em
+ * `connect-src` **e** em `img-src` (o mesmo recurso também é desenhado como
+ * imagem). `frame-ancestors` não é aplicável em `<meta>` e fica de fora.
  */
-function nativeCspPlugin(apiBaseUrl: string, pmtilesUrl: string): Plugin {
+function nativeCspPlugin(
+  apiBaseUrl: string,
+  pmtilesUrl: string,
+  demoTileUrl: string,
+): Plugin {
   const api = new URL(apiBaseUrl);
   const connect = new Set<string>([
     "'self'",
     api.origin,
     `${api.protocol === 'https:' ? 'wss' : 'ws'}://${api.host}`,
   ]);
+  const img = new Set<string>(["'self'", 'data:', 'blob:']);
   if (pmtilesUrl) {
     connect.add(new URL(pmtilesUrl).origin);
+  }
+  const tiles = tileOrigin(demoTileUrl);
+  if (tiles) {
+    connect.add(tiles);
+    img.add(tiles);
   }
 
   const policy = [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
-    "img-src 'self' data: blob:",
+    `img-src ${[...img].join(' ')}`,
     "font-src 'self'",
     `connect-src ${[...connect].join(' ')}`,
     'frame-src https://www.youtube-nocookie.com',
@@ -80,7 +113,13 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
-      native ? nativeCspPlugin(apiBaseUrl, env.VITE_PMTILES_URL ?? '') : null,
+      native
+        ? nativeCspPlugin(
+            apiBaseUrl,
+            env.VITE_PMTILES_URL ?? '',
+            env.VITE_DEMO_TILE_URL || DEFAULT_DEMO_TILE_URL,
+          )
+        : null,
     ],
     resolve: {
       alias: {
