@@ -52,6 +52,9 @@ const OperatorStationsPage = lazy(() =>
     default: m.OperatorStationsPage,
   })),
 );
+const ImportMapPage = lazy(() =>
+  import("@/features/management").then((m) => ({ default: m.ImportMapPage })),
+);
 const ManagementTeamPage = lazy(() =>
   import("@/features/management").then((m) => ({
     default: m.ManagementTeamPage,
@@ -118,7 +121,10 @@ export function AppRoutes() {
           </RequireRole>
         }
       >
-        <Route index element={withFallback(<ManagementTeamPage />)} />
+        {/* A importação é a primeira tela da coordenação (ADR-016). */}
+        <Route index element={withFallback(<ImportMapPage />)} />
+        <Route path="importar" element={withFallback(<ImportMapPage />)} />
+        <Route path="equipe" element={withFallback(<ManagementTeamPage />)} />
         <Route
           path="ocorrencias"
           element={withFallback(<ManagementOccurrencesPage />)}
