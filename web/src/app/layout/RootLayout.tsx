@@ -5,6 +5,7 @@ import {
   Outlet,
   useLocation,
   useNavigate,
+  useSearchParams,
 } from "react-router-dom";
 import {
   BookOpen,
@@ -24,11 +25,19 @@ import { OfflineBanner } from "@/app/layout/OfflineBanner";
 import { InstallPrompt } from "@/app/layout/InstallPrompt";
 import { homePathForRole, useCurrentUser } from "@/features/auth";
 import { SosFab } from "@/features/sos";
-import { BeachSheet, riskZonesOf, useNearbyBeaches } from "@/features/beaches";
+import {
+  BeachSheet,
+  areaShapes,
+  boundsTuple,
+  riskZonesOf,
+  sectorShapes,
+  useBeachMap,
+  useNearbyBeaches,
+} from "@/features/beaches";
 import type { Beach, BeachesOutletContext } from "@/features/beaches";
 import { SignalSheet, beachFlagSignals } from "@/features/signals";
 import { StationSheet, lifeguardStations } from "@/features/stations";
-import { MapLegend, type MapMarker } from "@/features/map";
+import { MapLegend, type MapFocus, type MapMarker } from "@/features/map";
 import { DEMO_DATA_NOTICE } from "@/shared/lib/notices";
 import { FLAG_COLORS } from "@/shared/lib/flags";
 
@@ -48,7 +57,6 @@ function MapFallback() {
   );
 }
 
-const BEACH_PREFIX = "beach:";
 const STATION_PREFIX = "station:";
 const SIGNAL_PREFIX = "signal:";
 
@@ -79,6 +87,10 @@ export function RootLayout() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const beachParam = searchParams.get("praia");
+  const sectorParam = searchParams.get("setor");
 
   // As praias vêm da importação do mapa, restritas a 30 km da posição atual.
   const nearby = useNearbyBeaches();
@@ -117,11 +129,16 @@ export function RootLayout() {
     [nearby.beaches],
   );
 
-  const selectedBeach = useMemo(() => {
-    if (!selectedMarkerId?.startsWith(BEACH_PREFIX)) return null;
-    const id = selectedMarkerId.slice(BEACH_PREFIX.length);
-    return nearby.beaches.find((beach) => beach.id === id) ?? null;
-  }, [nearby.beaches, selectedMarkerId]);
+  // A praia selecionada mora na URL (`?praia=<id>`), não em estado paralelo:
+  // o link "Ver no mapa" da ficha abre o mapa já enquadrado, sem efeito de
+  // sincronização entre URL e estado.
+  const selectedBeach = useMemo(
+    () => nearby.beaches.find((beach) => beach.id === beachParam) ?? null,
+    [nearby.beaches, beachParam],
+  );
+
+  // Setor só vale dentro de uma praia; o parâmetro solto é ignorado.
+  const selectedSectorId = beachParam ? sectorParam : null;
 
   const selectedSignal = useMemo(() => {
     if (!selectedMarkerId?.startsWith(SIGNAL_PREFIX)) return null;
@@ -135,19 +152,65 @@ export function RootLayout() {
     return lifeguardStations.find((station) => station.id === id) ?? null;
   }, [selectedMarkerId]);
 
+  // Geometria da praia selecionada: buscada uma vez por praia e desenhada pelo mapa.
+  const beachMapState = useBeachMap(selectedBeach?.id ?? null);
+  const beachMap = beachMapState.map;
+
+  // Setor atual só vale para a praia que contém a pessoa.
+  const currentSectorId = useMemo(() => {
+    if (!nearby.position || !beachMap) return null;
+    return nearby.position.beachId === beachMap.id
+      ? nearby.position.sectorId
+      : null;
+  }, [nearby.position, beachMap]);
+
+  const focus = useMemo<MapFocus | null>(() => {
+    if (!beachMap) return null;
+    const sector = selectedSectorId
+      ? beachMap.sectors.find((item) => item.id === selectedSectorId)
+      : undefined;
+    if (sector) {
+      return { bbox: boundsTuple(sector.bbox), kind: "SECTOR", id: sector.id };
+    }
+    return { bbox: boundsTuple(beachMap.bbox), kind: "BEACH", id: beachMap.id };
+  }, [beachMap, selectedSectorId]);
+
+  const beachArea = useMemo(() => areaShapes(beachMap), [beachMap]);
+  const beachSectors = useMemo(
+    () => sectorShapes(beachMap, selectedSectorId, currentSectorId),
+    [beachMap, selectedSectorId, currentSectorId],
+  );
+
+  const clearSelection = () => {
+    setSelectedMarkerId(null);
+    if (beachParam || sectorParam) {
+      setSearchParams({}, { replace: true });
+    }
+  };
+
   const outletContext = useMemo<HomeOutletContext>(
     () => ({
       query: searchQuery,
       beaches: nearby.beaches,
       status: nearby.status,
+      position: nearby.position,
       message: nearby.message,
       onRetryLocation: nearby.retry,
       onSelectBeach: (beach) => {
-        setSelectedMarkerId(`${BEACH_PREFIX}${beach.id}`);
+        setSelectedMarkerId(null);
         setSearchOpen(false);
+        setSearchParams({ praia: beach.id }, { replace: true });
       },
     }),
-    [searchQuery, nearby.beaches, nearby.status, nearby.message, nearby.retry],
+    [
+      searchQuery,
+      nearby.beaches,
+      nearby.status,
+      nearby.position,
+      nearby.message,
+      nearby.retry,
+      setSearchParams,
+    ],
   );
 
   const handleClosePanel = () => {
@@ -169,15 +232,23 @@ export function RootLayout() {
             markers={markers}
             selectedMarkerId={selectedMarkerId}
             onSelectMarker={(id) => {
-              setSelectedMarkerId(id);
               if (id) {
+                setSelectedMarkerId(id);
                 setSearchOpen(false);
+                if (beachParam || sectorParam) {
+                  setSearchParams({}, { replace: true });
+                }
+              } else {
+                clearSelection();
               }
             }}
             riskZones={riskZones}
             showRisks={showRisks}
             showMarkers={showMarkers}
             showGraticule={showGraticule}
+            beachArea={beachArea}
+            beachSectors={beachSectors}
+            focus={focus}
           />
         </Suspense>
       </div>
@@ -372,7 +443,12 @@ export function RootLayout() {
         {selectedBeach ? (
           <BeachSheet
             beach={selectedBeach}
-            onClose={() => setSelectedMarkerId(null)}
+            currentSectorLabel={
+              currentSectorId && nearby.position
+                ? nearby.position.sectorLabel
+                : null
+            }
+            onClose={clearSelection}
           />
         ) : null}
 

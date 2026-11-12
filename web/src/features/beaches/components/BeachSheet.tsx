@@ -1,6 +1,11 @@
 import { useRef } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, MapPin, Navigation, Waves } from "lucide-react";
+import {
+  ChevronDown,
+  MapPin,
+  Navigation,
+  Waves,
+} from "lucide-react";
 import { BEACH_KIND_LABEL, type Beach } from "@/features/beaches";
 import { formatDistance } from "@/shared/lib/format";
 import { sanitizeText } from "@/shared/lib/sanitize";
@@ -8,14 +13,16 @@ import { useOverlay } from "@/shared/lib/overlay";
 
 /**
  * Ficha rápida da área de banho sobre o mapa: tipo, município e quantos setores
- * o mapeamento traz. Bandeira, risco e ocupação entram quando essas camadas
- * existirem; o polígono importado não os fornece.
+ * o mapeamento traz. Quando a posição da pessoa cai na praia aberta, mostra em
+ * qual setor ela está.
  */
 export function BeachSheet({
   beach,
+  currentSectorLabel,
   onClose,
 }: {
   beach: Beach;
+  currentSectorLabel?: string | null;
   onClose: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -62,6 +69,12 @@ export function BeachSheet({
               ? "1 setor"
               : `${beach.sectorCount} setores`}
           </span>
+          {currentSectorLabel ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
+              <MapPin aria-hidden="true" className="size-3.5" />
+              Você está no {sanitizeText(currentSectorLabel, 60)}
+            </span>
+          ) : null}
         </div>
 
         <dl className="mt-3 grid grid-cols-2 gap-2 rounded-xl border border-ocean-200 bg-ocean-50 p-3 text-sm">

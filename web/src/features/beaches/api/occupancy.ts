@@ -4,11 +4,26 @@ import type { DevicePosition } from "@/shared/lib/geolocation";
 export type OccupancyLevel = "LOW" | "MODERATE" | "HIGH" | "EXTREME";
 export type OccupancyStatus = "INSUFFICIENT" | "ESTIMATE";
 
-export interface OccupancyEstimate {
+/** Faixa de um setor. O `INSUFFICIENT` é o esperado em setor com pouca gente. */
+export interface OccupancySector {
+  readonly sectorId: string;
+  readonly status: OccupancyStatus;
+  readonly level: OccupancyLevel | null;
+}
+
+/**
+ * Ocupação da área e dos setores.
+ *
+ * <p>A faixa da área é a união das amostras, **nunca** a soma dos setores:
+ * quem está na fronteira conta nos dois setores. Nunca derivar uma da outra no
+ * cliente.
+ */
+export interface BeachOccupancy {
   readonly beachId: string;
   readonly status: OccupancyStatus;
   readonly level: OccupancyLevel | null;
   readonly windowMinutes: number;
+  readonly sectors: readonly OccupancySector[];
 }
 
 /**
@@ -35,8 +50,8 @@ export async function recordOccupancySample(
 
 export async function fetchOccupancy(
   beachId: string,
-): Promise<OccupancyEstimate> {
-  return apiRequest<OccupancyEstimate>(
+): Promise<BeachOccupancy> {
+  return apiRequest<BeachOccupancy>(
     `/api/v1/occupancy/beaches/${encodeURIComponent(beachId)}`,
     {},
   );

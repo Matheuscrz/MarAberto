@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
-import { MapPin, Navigation, RefreshCw, Search } from "lucide-react";
+import { MapPin, MapPinned, Navigation, RefreshCw, Search } from "lucide-react";
 import { Card, PageHeader } from "@/shared/components/Card";
 import { BEACH_KIND_LABEL } from "@/features/beaches";
 import type { BeachKind } from "@/features/beaches";
@@ -18,7 +18,7 @@ const kindFilters: Array<{ value: BeachKind | "ALL"; label: string }> = [
 ];
 
 export function BeachesPage() {
-  const { beaches, status, message, onRetryLocation } =
+  const { beaches, status, position, message, onRetryLocation } =
     useOutletContext<BeachesOutletContext>();
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<BeachKind | "ALL">("ALL");
@@ -117,43 +117,62 @@ export function BeachesPage() {
 
       {filtered.length > 0 ? (
         <ul className="grid gap-3">
-          {filtered.map((beach) => (
-            <li key={beach.id}>
-              <Link
-                to={`/praias/${beach.id}`}
-                className="group block rounded-2xl focus-visible:outline-2"
-              >
-                <Card className="transition group-hover:border-ocean-300 group-hover:shadow-md">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <h2 className="text-base font-black text-ocean-950">
-                        {beach.name}
-                      </h2>
-                      <p className="flex items-center gap-1 text-xs text-ocean-600">
-                        <MapPin aria-hidden="true" className="size-3.5" />
-                        {[beach.municipality, beach.state]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
+          {filtered.map((beach) => {
+            const isHere = position?.beachId === beach.id;
+            return (
+              <li key={beach.id}>
+                <Card className="transition hover:border-ocean-300 hover:shadow-md">
+                  <Link
+                    to={`/praias/${beach.id}`}
+                    className="group block rounded-xl focus-visible:outline-2"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h2 className="text-base font-black text-ocean-950">
+                          {beach.name}
+                        </h2>
+                        <p className="flex items-center gap-1 text-xs text-ocean-600">
+                          <MapPin aria-hidden="true" className="size-3.5" />
+                          {[beach.municipality, beach.state]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-ocean-50 px-2.5 py-1 text-[11px] font-bold text-ocean-700">
+                        {BEACH_KIND_LABEL[beach.kind]}
+                      </span>
                     </div>
-                    <span className="rounded-full bg-ocean-50 px-2.5 py-1 text-[11px] font-bold text-ocean-700">
-                      {BEACH_KIND_LABEL[beach.kind]}
-                    </span>
-                  </div>
+
+                    {isHere ? (
+                      <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-900">
+                        <MapPinned aria-hidden="true" className="size-3.5" />
+                        Você está no {sanitizeText(position.sectorLabel, 60)}
+                      </p>
+                    ) : null}
+                  </Link>
+
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-ocean-600">
                     <span>
                       {beach.sectorCount === 1
                         ? "1 setor mapeado"
                         : `${beach.sectorCount} setores mapeados`}
+                      <span className="mx-1.5 text-ocean-300">·</span>
+                      <span className="font-semibold text-ocean-800">
+                        {formatDistance(beach.distanceMeters)}
+                      </span>
                     </span>
-                    <span className="font-semibold text-ocean-800">
-                      {formatDistance(beach.distanceMeters)}
-                    </span>
+                    <Link
+                      to={`/?praia=${beach.id}`}
+                      className="inline-flex min-h-8 items-center gap-1 rounded-xl border border-ocean-300 bg-white px-2.5 text-[11px] font-bold text-ocean-900 transition hover:bg-ocean-50"
+                    >
+                      <MapPinned aria-hidden="true" className="size-3.5" />
+                      Ver no mapa
+                    </Link>
                   </div>
                 </Card>
-              </Link>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>

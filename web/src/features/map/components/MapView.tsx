@@ -11,7 +11,7 @@ import {
   type GeoJSONSource,
 } from "maplibre-gl";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
-import type { FeatureCollection, Polygon } from "geojson";
+import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import {
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_BOUNDS,
@@ -24,7 +24,7 @@ import {
   updateMarkerElement,
   type MarkerHandles,
 } from "@/features/map/lib/marker-element";
-import type { MapMarker } from "@/features/map/types";
+import type { MapFocus, MapMarker } from "@/features/map/types";
 import {
   GeolocationError,
   getDevicePosition,
@@ -39,6 +39,12 @@ export interface MapViewProps {
   readonly showRisks: boolean;
   readonly showMarkers: boolean;
   readonly showGraticule: boolean;
+  /** Geometria da praia selecionada; `null` quando nada está selecionado. */
+  readonly beachArea: FeatureCollection<Polygon | MultiPolygon> | null;
+  /** Setores da praia selecionada, com as marcas de selecionado/atual. */
+  readonly beachSectors: FeatureCollection<Polygon | MultiPolygon> | null;
+  /** Pedido de enquadramento; nova identidade = novo pedido. */
+  readonly focus: MapFocus | null;
 }
 
 interface Located {
@@ -69,6 +75,11 @@ const EMPTY_ZONES: FeatureCollection<Polygon> = {
   features: [],
 };
 
+const EMPTY_SHAPES: FeatureCollection<Polygon | MultiPolygon> = {
+  type: "FeatureCollection",
+  features: [],
+};
+
 export function MapView({
   markers,
   selectedMarkerId,
@@ -77,6 +88,9 @@ export function MapView({
   showRisks,
   showMarkers,
   showGraticule,
+  beachArea,
+  beachSectors,
+  focus,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -173,6 +187,71 @@ export function MapView({
           },
         });
 
+        // Geometria da praia selecionada. Os dados chegam por `setData`; as
+        // camadas são criadas uma vez, junto com o mapa.
+        map.addSource("beach-area", { type: "geojson", data: EMPTY_SHAPES });
+        map.addLayer({
+          id: "beach-area-fill",
+          type: "fill",
+          source: "beach-area",
+          paint: { "fill-color": "#228aa8", "fill-opacity": 0.08 },
+        });
+        map.addLayer({
+          id: "beach-area-line",
+          type: "line",
+          source: "beach-area",
+          paint: {
+            "line-color": "#0d2836",
+            "line-width": 2.5,
+            "line-opacity": 0.75,
+          },
+        });
+
+        map.addSource("beach-sectors", { type: "geojson", data: EMPTY_SHAPES });
+        map.addLayer({
+          id: "beach-sector-fill",
+          type: "fill",
+          source: "beach-sectors",
+          paint: {
+            "fill-color": [
+              "case",
+              ["==", ["get", "current"], true],
+              "#e9a23b",
+              "#228aa8",
+            ],
+            "fill-opacity": [
+              "case",
+              ["==", ["get", "selected"], true],
+              0.32,
+              ["==", ["get", "current"], true],
+              0.2,
+              0.06,
+            ],
+          },
+        });
+        map.addLayer({
+          id: "beach-sector-line",
+          type: "line",
+          source: "beach-sectors",
+          paint: {
+            "line-color": [
+              "case",
+              ["==", ["get", "current"], true],
+              "#b45309",
+              ["==", ["get", "selected"], true],
+              "#0d2836",
+              "#228aa8",
+            ],
+            "line-width": [
+              "case",
+              ["==", ["get", "selected"], true],
+              2.5,
+              1.2,
+            ],
+            "line-opacity": 0.9,
+          },
+        });
+
         map.addSource("user", {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
@@ -242,6 +321,37 @@ export function MapView({
       showRisks ? "visible" : "none",
     );
   }, [ready, showRisks]);
+
+  // Geometria da praia selecionada: só troca o dado da fonte, sem recriar o mapa.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource("beach-area") as GeoJSONSource | undefined)?.setData(
+      beachArea ?? EMPTY_SHAPES,
+    );
+    (map.getSource("beach-sectors") as GeoJSONSource | undefined)?.setData(
+      beachSectors ?? EMPTY_SHAPES,
+    );
+  }, [ready, beachArea, beachSectors]);
+
+  // Enquadramento na área/setor: efeito na instância do mapa, nunca CSS.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !focus) return;
+
+    const southWest: [number, number] = [focus.bbox[0], focus.bbox[1]];
+    const northEast: [number, number] = [focus.bbox[2], focus.bbox[3]];
+    const viewport = map.getBounds();
+
+    // Quem já está com a área enquadrada não perde o zoom; só o destaque muda.
+    if (viewport.contains(southWest) && viewport.contains(northEast)) return;
+
+    map.fitBounds([southWest, northEast], {
+      padding: 48,
+      maxZoom: 16,
+      duration: 600,
+    });
+  }, [focus, ready]);
 
   useEffect(() => {
     const map = mapRef.current;

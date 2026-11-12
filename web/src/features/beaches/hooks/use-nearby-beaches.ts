@@ -7,13 +7,15 @@ import {
   beachErrorMessage,
   fetchNearbyBeaches,
 } from "@/features/beaches/api/beaches";
-import type { Beach } from "@/features/beaches/types";
+import type { Beach, BeachPosition } from "@/features/beaches/types";
 
 export type NearbyBeachesStatus = "locating" | "ready" | "empty" | "error";
 
 export interface NearbyBeachesState {
   readonly status: NearbyBeachesStatus;
   readonly beaches: readonly Beach[];
+  /** Área e setor que contêm a posição, ou `null` fora de área mapeada. */
+  readonly position: BeachPosition | null;
   readonly message: string | null;
 }
 
@@ -30,6 +32,7 @@ export interface BeachesOutletContext extends NearbyBeachesState {
 const INITIAL_STATE: NearbyBeachesState = {
   status: "locating",
   beaches: [],
+  position: null,
   message: null,
 };
 
@@ -54,13 +57,14 @@ export function useNearbyBeaches() {
           timeout: 8_000,
           maximumAge: 60_000,
         });
-        const beaches = await fetchNearbyBeaches(position);
+        const nearby = await fetchNearbyBeaches(position);
         if (cancelled) return;
         setState({
-          status: beaches.length > 0 ? "ready" : "empty",
-          beaches,
+          status: nearby.beaches.length > 0 ? "ready" : "empty",
+          beaches: nearby.beaches,
+          position: nearby.position,
           message:
-            beaches.length > 0
+            nearby.beaches.length > 0
               ? null
               : "Nenhuma praia mapeada num raio de 30 km da sua posição.",
         });
@@ -69,6 +73,7 @@ export function useNearbyBeaches() {
         setState({
           status: "error",
           beaches: [],
+          position: null,
           message:
             error instanceof GeolocationError
               ? error.message
