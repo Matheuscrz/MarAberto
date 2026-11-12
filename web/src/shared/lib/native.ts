@@ -2,6 +2,7 @@ import { CapacitorHttp } from '@capacitor/core';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { Geolocation } from '@capacitor/geolocation';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { SplashScreen } from '@capacitor/splash-screen';
 import { appPlatform } from '@/shared/lib/platform';
 
 /**
@@ -222,4 +223,21 @@ export async function nativeHttpRequest(
     data: response.data,
     url: response.url ?? input.url,
   };
+}
+
+/**
+ * Esconde o splash da marca quando o app terminou de montar.
+ *
+ * <p>O splash é configurado com `launchAutoHide: false` em
+ * `capacitor.config.ts` justamente para sair no momento certo: cobrindo o boot
+ * do WebView e a primeira renderização, não um tempo fixo. No navegador não há
+ * splash nativo, então a chamada é ignorada.
+ */
+export async function hideNativeSplash(fadeOutDuration = 150): Promise<void> {
+  if (appPlatform() === 'web') return;
+  try {
+    await SplashScreen.hide({ fadeOutDuration });
+  } catch {
+    // Melhor esforço: sem splash nativo disponível, não há o que esconder.
+  }
 }

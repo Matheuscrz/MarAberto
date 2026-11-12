@@ -4,6 +4,14 @@ import { Card, PageHeader } from "@/shared/components/Card";
 export function AboutPage() {
   return (
     <div className="grid gap-3">
+      <Card className="flex items-center justify-center py-6">
+        <img
+          src="/brand/logo-light.png"
+          alt="MarAberto — segurança balnear"
+          className="h-12 w-auto max-w-full"
+        />
+      </Card>
+
       <PageHeader
         title="Sobre o MarAberto"
         subtitle="Plataforma open-source de apoio à segurança balnear."

@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ArrowLeft, LogOut, Waves } from "lucide-react";
+import { ArrowLeft, LogOut } from "lucide-react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import {
   DEMO_AUTH_ENABLED,
@@ -37,9 +37,12 @@ export function AreaShell({ title, subtitle, nav }: AreaShellProps) {
       <header className="border-b border-ocean-900/10 bg-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2.5">
-            <span className="grid size-9 place-items-center rounded-xl bg-ocean-950 text-white">
-              <Waves aria-hidden="true" className="size-5" />
-            </span>
+            <img
+              src="/brand/mark-96.png"
+              alt=""
+              aria-hidden="true"
+              className="size-9 rounded-xl"
+            />
             <div>
               <p className="text-[11px] font-bold uppercase tracking-wider text-ocean-500">
                 {user ? ROLE_AREA_LABEL[user.role] : "MarAberto"}

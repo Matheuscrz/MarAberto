@@ -18,7 +18,6 @@ import {
   Search,
   Shield,
   Siren,
-  Waves,
   X,
 } from "lucide-react";
 import { OfflineBanner } from "@/app/layout/OfflineBanner";
@@ -296,9 +295,12 @@ export function RootLayout() {
                 onClick={() => setSearchOpen(false)}
                 className="flex items-center gap-2"
               >
-                <span className="grid size-7 place-items-center rounded-lg bg-ocean-950 text-white">
-                  <Waves aria-hidden="true" className="size-4" />
-                </span>
+                <img
+                  src="/brand/mark-96.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="size-7 rounded-lg"
+                />
                 <span className="text-sm font-black text-ocean-950">
                   MarAberto
                 </span>
