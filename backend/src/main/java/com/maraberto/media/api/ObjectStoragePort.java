@@ -31,6 +31,16 @@ public interface ObjectStoragePort {
     void delete(String bucket, String key);
 
     /**
+     * Envia os bytes diretamente do backend.
+     *
+     * <p>É o caminho de quem já recebeu o arquivo, como a importação do
+     * mapeamento: o KML chega por multipart e é arquivado para auditoria. Upload
+     * de usuário (foto, vídeo) continua por {@link #presignPut}, que não faz o
+     * conteúdo passar pelo backend.
+     */
+    ObjectMetadata put(String bucket, String key, String contentType, byte[] content);
+
+    /**
      * Consulta metadados do objeto, se ele existir.
      */
     Optional<ObjectMetadata> head(String bucket, String key);

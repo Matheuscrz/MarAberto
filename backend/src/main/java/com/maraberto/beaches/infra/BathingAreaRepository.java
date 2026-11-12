@@ -181,15 +181,15 @@ public class BathingAreaRepository {
     public void insertBatch(BatchWrite write) {
         jdbc.update("""
                         INSERT INTO import_batches
-                            (source_file, source_version, state_code, mode, dry_run, applied,
-                             created_count, updated_count, unchanged_count, missing_count,
-                             rejected_count, imported_by, report)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))
+                            (source_file, source_version, source_storage_key, state_code, mode,
+                             dry_run, applied, created_count, updated_count, unchanged_count,
+                             missing_count, rejected_count, imported_by, report)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))
                         """,
-                write.sourceFile(), write.sourceVersion(), write.stateCode(), write.mode(),
-                write.dryRun(), write.applied(), write.created(), write.updated(),
-                write.unchanged(), write.missing(), write.rejected(), write.importedBy(),
-                write.reportJson());
+                write.sourceFile(), write.sourceVersion(), write.sourceStorageKey(),
+                write.stateCode(), write.mode(), write.dryRun(), write.applied(),
+                write.created(), write.updated(), write.unchanged(), write.missing(),
+                write.rejected(), write.importedBy(), write.reportJson());
     }
 
     public boolean isEmpty() {
@@ -208,6 +208,25 @@ public class BathingAreaRepository {
                          LIMIT 1
                         """,
                 String.class, stateCode).stream().findFirst();
+    }
+
+    /**
+     * Completa a chave do arquivo nos lotes aplicados que ainda não a têm.
+     *
+     * <p>Vale para o lote gravado antes da coluna existir: reenviar o mesmo
+     * arquivo não muda o mapa, mas permite arquivar o original e amarrá-lo à
+     * execução que o aplicou.
+     */
+    public void fillMissingStorageKey(String stateCode, String sourceVersion, String storageKey) {
+        jdbc.update("""
+                        UPDATE import_batches
+                           SET source_storage_key = ?
+                         WHERE state_code = ?
+                           AND source_version = ?
+                           AND applied
+                           AND source_storage_key IS NULL
+                        """,
+                storageKey, stateCode, sourceVersion);
     }
 
     private static byte[] wkb(Geometry geometry) {
@@ -259,6 +278,8 @@ public class BathingAreaRepository {
     public record BatchWrite(
             String sourceFile,
             String sourceVersion,
+            /** Chave do KML no storage de objetos; {@code null} quando não arquivado. */
+            String sourceStorageKey,
             String stateCode,
             String mode,
             boolean dryRun,

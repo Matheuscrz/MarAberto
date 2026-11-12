@@ -53,6 +53,14 @@ public class StubObjectStorage implements ObjectStoragePort {
     }
 
     @Override
+    public ObjectMetadata put(String bucket, String key, String contentType, byte[] content) {
+        ObjectMetadata metadata = new ObjectMetadata(
+                bucket, key, content.length, contentType);
+        objects.put(objectKey(bucket, key), metadata);
+        return metadata;
+    }
+
+    @Override
     public Optional<ObjectMetadata> head(String bucket, String key) {
         return Optional.ofNullable(objects.get(objectKey(bucket, key)));
     }

@@ -47,7 +47,18 @@ spring:
 
 maraberto:
   storage:
-    provider: ${STORAGE_PROVIDER:stub}
+    # `stub` guarda só metadados em memória; `s3` fala com o Garage local
+    # (ADR-006). O padrão é o S3 de desenvolvimento, recusado no perfil `prod`
+    # quando as credenciais de exemplo ainda estiverem em uso.
+    provider: ${STORAGE_PROVIDER:s3}
+    s3:
+      endpoint: ${STORAGE_S3_ENDPOINT:http://localhost:9000}
+      region: ${STORAGE_S3_REGION:garage}
+      access-key: ${STORAGE_S3_ACCESS_KEY:maraberto-access-key}
+      secret-key: ${STORAGE_S3_SECRET_KEY:maraberto-secret-key}
+      # Garage e MinIO não resolvem o bucket por DNS: o caminho é
+      # `endpoint/bucket/chave`.
+      path-style: ${STORAGE_S3_PATH_STYLE:true}
   realtime:
     # Origens aceitas no handshake do WebSocket. Inclui localhost e 127.0.0.1
     # porque o navegador trata os dois como origens distintas no dev local.
@@ -136,6 +147,10 @@ maraberto:
       # Caminho usado quando o endpoint recebe só `state` (importação assistida)
       # e pelo seed. O upload multipart tem prioridade.
       file: ${BATHING_AREAS_IMPORT_FILE:}
+      # Arquivo original aplicado no storage de objetos (auditoria). A chave é
+      # endereçada pelo SHA-256 do conteúdo: `<prefix>/<UF>/<sha256>.kml`.
+      bucket: ${BATHING_AREAS_IMPORT_BUCKET:media-public}
+      prefix: ${BATHING_AREAS_IMPORT_PREFIX:bathing-areas}
     dev-seed:
       # Importa o KML real de Sergipe quando `beaches` está vazia. Desligado por
       # padrão e recusado no perfil `prod`.

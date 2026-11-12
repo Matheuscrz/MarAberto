@@ -47,6 +47,11 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
 
+    // Armazenamento de objetos S3-compatível (Garage) — ADR-006
+    implementation platform('software.amazon.awssdk:bom:2.58.0')
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:url-connection-client'
+
     // Geoespacial (PostGIS) e migrações de esquema
     implementation 'org.hibernate.orm:hibernate-spatial'
     implementation 'org.flywaydb:flyway-core'

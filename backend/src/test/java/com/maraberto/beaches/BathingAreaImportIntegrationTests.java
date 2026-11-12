@@ -10,6 +10,7 @@ import com.maraberto.beaches.application.FeatureChange;
 import com.maraberto.beaches.application.ImportMode;
 import com.maraberto.beaches.application.ImportRejectedException;
 import com.maraberto.beaches.application.ImportReport;
+import com.maraberto.media.api.ObjectStoragePort;
 import com.maraberto.support.PostgisIntegrationTest;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -42,6 +43,9 @@ class BathingAreaImportIntegrationTests extends PostgisIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectStoragePort storage;
 
     @BeforeEach
     @AfterEach
@@ -168,6 +172,71 @@ class BathingAreaImportIntegrationTests extends PostgisIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM import_batches WHERE state_code = 'SE'", Integer.class))
                 .isZero();
+    }
+
+    @Test
+    void archivesTheAppliedFileInObjectStorage() {
+        String file = kml(feature("8", "Praia do Arquivo", "Setor Único", "Estância", null,
+                -37.440, -11.260));
+
+        ImportReport report = importService.importKml(command(file, false, ImportMode.UPSERT));
+
+        // A chave é endereçada pelo conteúdo: reenviar o mesmo arquivo reusa o
+        // objeto em vez de acumular cópias.
+        String key = "bathing-areas/SE/" + report.sourceVersion() + ".kml";
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT source_storage_key FROM import_batches
+                 WHERE state_code = 'SE' AND applied
+                 ORDER BY imported_at DESC LIMIT 1
+                """, String.class))
+                .isEqualTo(key);
+        assertThat(storage.head("media-public", key))
+                .hasValueSatisfying(metadata -> {
+                    assertThat(metadata.contentType())
+                            .isEqualTo("application/vnd.google-earth.kml+xml");
+                    assertThat(metadata.sizeBytes()).isPositive();
+                });
+
+        storage.delete("media-public", key);
+    }
+
+    @Test
+    void dryRunDoesNotArchiveTheFile() {
+        String file = kml(feature("7", "Praia do Teste Seco", "Setor Único", "Itaporanga", null,
+                -37.310, -11.120));
+
+        ImportReport report = importService.importKml(command(file, true, ImportMode.UPSERT));
+
+        // Nada foi aplicado, então nada de arquivo de auditoria.
+        assertThat(storage.head("media-public", "bathing-areas/SE/" + report.sourceVersion() + ".kml"))
+                .isEmpty();
+    }
+
+    @Test
+    void reimportingAnIdenticalFileBackfillsTheArchiveKey() {
+        String file = kml(feature("6", "Praia Repetida", "Setor Único", "Lagarto", null,
+                -37.100, -10.900));
+        ImportReport first = importService.importKml(command(file, false, ImportMode.UPSERT));
+
+        // Simula o lote gravado antes de a coluna existir: mapa aplicado, sem
+        // chave do arquivo.
+        jdbcTemplate.update(
+                "UPDATE import_batches SET source_storage_key = NULL WHERE state_code = 'SE'");
+
+        ImportReport second = importService.importKml(command(file, false, ImportMode.UPSERT));
+
+        // O arquivo idêntico não reescreve o mapa, mas precisa ficar arquivado.
+        assertThat(second.applied()).isFalse();
+        assertThat(second.unchanged()).isEqualTo(1);
+        String key = "bathing-areas/SE/" + first.sourceVersion() + ".kml";
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT source_storage_key FROM import_batches
+                 WHERE state_code = 'SE' AND source_version = ?
+                """, String.class, first.sourceVersion()))
+                .isEqualTo(key);
+        assertThat(storage.head("media-public", key)).isPresent();
+
+        storage.delete("media-public", key);
     }
 
     @Test

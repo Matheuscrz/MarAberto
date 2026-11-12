@@ -13,6 +13,7 @@ import com.maraberto.beaches.infra.BathingAreaRepository.BatchWrite;
 import com.maraberto.beaches.infra.BathingAreaRepository.ExistingSector;
 import com.maraberto.beaches.infra.BathingAreaRepository.SectorRef;
 import com.maraberto.beaches.infra.BathingAreaRepository.SectorWrite;
+import com.maraberto.beaches.infra.KmlArchive;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -50,16 +51,19 @@ public class BathingAreaImportService {
 
     private final KmlFeatureReader reader;
     private final BathingAreaRepository repository;
+    private final KmlArchive archive;
     private final ApplicationEventPublisher events;
     private final ObjectMapper objectMapper;
 
     public BathingAreaImportService(
             KmlFeatureReader reader,
             BathingAreaRepository repository,
+            KmlArchive archive,
             ApplicationEventPublisher events,
             ObjectMapper objectMapper) {
         this.reader = reader;
         this.repository = repository;
+        this.archive = archive;
         this.events = events;
         this.objectMapper = objectMapper;
     }
@@ -134,6 +138,11 @@ public class BathingAreaImportService {
                 && repository.lastAppliedSourceVersion(state)
                         .filter(sourceVersion::equals)
                         .isPresent()) {
+            // Nada do mapa muda, mas o arquivo continua sendo o que foi
+            // aplicado: arquiva (chave por conteúdo, então repetir é barato) e
+            // completa a chave do lote que veio de antes desta coluna existir.
+            String storageKey = archive.store(state, sourceVersion, command.content());
+            repository.fillMissingStorageKey(state, sourceVersion, storageKey);
             return unchangedReport(command, prefix, state, sourceVersion, groups);
         }
 
@@ -230,9 +239,13 @@ public class BathingAreaImportService {
                 command, state, sourceVersion, changes, missing);
 
         if (!command.dryRun()) {
+            // O arquivo aplicado é arquivado antes do lote: se o storage estiver
+            // fora, `store` devolve nulo e a importação não é bloqueada.
+            String storageKey = archive.store(state, sourceVersion, command.content());
             repository.insertBatch(new BatchWrite(
                     command.sourceFile(),
                     sourceVersion,
+                    storageKey,
                     state,
                     command.mode().name(),
                     false,
