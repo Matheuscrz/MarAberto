@@ -63,8 +63,11 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
               -- O prefiltro do GiST não pode entrar aqui: um posto distante com o
               -- operador em campo perto do chamado ficaria de fora. O conjunto
               -- varrido é o de plantões abertos (índice parcial da V8).
+              -- `LEAST` aplica o teto da instalação: um raio cadastrado errado
+              -- (ou muito generoso) não pode chamar quem está longe demais.
               AND ST_DWithin(COALESCE(s.last_position, p.location), sos.point,
-                             COALESCE(p.coverage_radius_m, :defaultRadiusMeters))
+                             LEAST(COALESCE(p.coverage_radius_m, :defaultRadiusMeters),
+                                   :maxRadiusMeters))
             UNION ALL
             SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
                    ST_Distance(COALESCE(s.last_position, b.location), sos.point) AS distance_m,
@@ -76,7 +79,8 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             WHERE b.active
               AND s.last_seen_at >= :aliveSince
               AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point,
-                             COALESCE(b.coverage_radius_m, :defaultRadiusMeters))
+                             LEAST(COALESCE(b.coverage_radius_m, :defaultRadiusMeters),
+                                   :maxRadiusMeters))
             ORDER BY distance_m
             LIMIT :maxResults
             """;
@@ -96,6 +100,8 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             WHERE s.ended_at IS NULL
               AND s.last_seen_at >= :aliveSince
               AND s.post_id IS NOT NULL
+              -- Fora do teto não é "vizinho": a coordenação assume o chamado.
+              AND ST_DWithin(COALESCE(s.last_position, p.location), sos.point, :maxRadiusMeters)
             UNION ALL
             SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
                    ST_Distance(COALESCE(s.last_position, b.location), sos.point) AS distance_m,
@@ -107,6 +113,7 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             WHERE s.ended_at IS NULL
               AND s.last_seen_at >= :aliveSince
               AND s.mobile_base_id IS NOT NULL
+              AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point, :maxRadiusMeters)
             ORDER BY distance_m
             LIMIT :fallbackResults
             """;
@@ -115,6 +122,7 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
     private final int defaultRadiusMeters;
     private final int maxRecipients;
     private final int fallbackRecipients;
+    private final int maxRadiusMeters;
     private final Duration positionStaleAfter;
     private final Duration shiftIdleTimeout;
 
@@ -123,12 +131,14 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
             @Value("${maraberto.dispatch.default-coverage-radius-m:2000}") int defaultRadiusMeters,
             @Value("${maraberto.dispatch.max-recipients:50}") int maxRecipients,
             @Value("${maraberto.dispatch.fallback-recipients:3}") int fallbackRecipients,
+            @Value("${maraberto.dispatch.max-radius-m:5000}") int maxRadiusMeters,
             @Value("${maraberto.dispatch.position-stale-after:PT30M}") Duration positionStaleAfter,
             @Value("${maraberto.dispatch.shift-idle-timeout:PT15M}") Duration shiftIdleTimeout) {
         this.jdbc = jdbc;
         this.defaultRadiusMeters = defaultRadiusMeters;
         this.maxRecipients = maxRecipients;
         this.fallbackRecipients = fallbackRecipients;
+        this.maxRadiusMeters = maxRadiusMeters;
         this.positionStaleAfter = positionStaleAfter;
         this.shiftIdleTimeout = shiftIdleTimeout;
     }
@@ -159,6 +169,7 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
                 .addValue("latitude", latitude)
                 .addValue("longitude", longitude)
                 .addValue("defaultRadiusMeters", defaultRadiusMeters)
+                .addValue("maxRadiusMeters", maxRadiusMeters)
                 // O driver não infere o tipo de Instant; OffsetDateTime vira
                 // TIMESTAMPTZ sem depender do timezone da sessão.
                 .addValue("staleBefore", OffsetDateTime.now(ZoneOffset.UTC).minus(positionStaleAfter))

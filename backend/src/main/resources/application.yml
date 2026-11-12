@@ -55,6 +55,10 @@ maraberto:
   dispatch:
     # Raio padrão de cobertura quando o posto/base não define o seu (metros).
     default-coverage-radius-m: ${DISPATCH_DEFAULT_COVERAGE_RADIUS_M:2000}
+    # Teto de distância da notificação (metros). O raio do posto/base pode ser
+    # menor, nunca maior: um cadastro errado não pode chamar quem está longe
+    # demais. Fora do teto, o chamado vai para a coordenação.
+    max-radius-m: ${DISPATCH_MAX_RADIUS_M:5000}
     # Idade a partir da qual a última posição do plantão é considerada velha.
     position-stale-after: ${DISPATCH_POSITION_STALE_AFTER:PT30M}
     # Teto de segurança por rodada. Todos os plantões dentro do raio são
