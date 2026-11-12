@@ -1,43 +1,46 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { MapPin, Search } from "lucide-react";
+import { Link, useOutletContext } from "react-router-dom";
+import { MapPin, MapPinned, Navigation, RefreshCw, Search } from "lucide-react";
 import { Card, PageHeader } from "@/shared/components/Card";
-import { FlagBadge, RiskBadge } from "@/shared/components/Badges";
-import { beaches } from "@/features/beaches/api/demo-beaches";
-import type { RiskLevel } from "@/shared/types/flags";
+import { BEACH_KIND_LABEL } from "@/features/beaches";
+import type { BeachKind } from "@/features/beaches";
+import type { BeachesOutletContext } from "@/features/beaches";
+import { formatDistance } from "@/shared/lib/format";
 import { sanitizeText } from "@/shared/lib/sanitize";
-import { formatOccupancy } from "@/shared/lib/format";
 
-const riskFilters: Array<{ value: RiskLevel | "ALL"; label: string }> = [
-  { value: "ALL", label: "Todos os riscos" },
-  { value: "LOW", label: "Risco baixo" },
-  { value: "MODERATE", label: "Risco moderado" },
-  { value: "HIGH", label: "Risco alto" },
-  { value: "EXTREME", label: "Risco extremo" },
+const kindFilters: Array<{ value: BeachKind | "ALL"; label: string }> = [
+  { value: "ALL", label: "Todos os tipos" },
+  { value: "BEACH", label: "Praias" },
+  { value: "RIVER", label: "Banho de rio" },
+  { value: "DAM", label: "Barragens" },
+  { value: "LAGOON", label: "Lagoas" },
+  { value: "OTHER", label: "Outras áreas" },
 ];
 
 export function BeachesPage() {
+  const { beaches, status, position, message, onRetryLocation } =
+    useOutletContext<BeachesOutletContext>();
   const [query, setQuery] = useState("");
-  const [risk, setRisk] = useState<RiskLevel | "ALL">("ALL");
+  const [kind, setKind] = useState<BeachKind | "ALL">("ALL");
 
   const filtered = useMemo(() => {
     const term = sanitizeText(query, 80).toLocaleLowerCase("pt-BR");
     return beaches.filter((beach) => {
-      const matchesRisk = risk === "ALL" || beach.riskLevel === risk;
+      const matchesKind = kind === "ALL" || beach.kind === kind;
       const matchesTerm =
         term.length === 0 ||
         `${beach.name} ${beach.municipality} ${beach.state}`
           .toLocaleLowerCase("pt-BR")
           .includes(term);
-      return matchesRisk && matchesTerm;
+      return matchesKind && matchesTerm;
     });
-  }, [query, risk]);
+  }, [beaches, query, kind]);
 
   return (
     <div className="grid gap-3">
       <PageHeader
         title="Praias"
-        subtitle="Consulte bandeira, risco e ocupação estimada antes de entrar no mar."
+        subtitle="Áreas de banho mapeadas num raio de até 30 km da sua posição."
       />
 
       <div className="grid gap-2">
@@ -58,15 +61,13 @@ export function BeachesPage() {
         </label>
 
         <label className="block">
-          <span className="sr-only">Filtrar por nível de risco</span>
+          <span className="sr-only">Filtrar por tipo de área de banho</span>
           <select
-            value={risk}
-            onChange={(event) =>
-              setRisk(event.target.value as RiskLevel | "ALL")
-            }
+            value={kind}
+            onChange={(event) => setKind(event.target.value as BeachKind | "ALL")}
             className="min-h-10 w-full rounded-xl border border-ocean-200 bg-white px-3 text-sm font-semibold text-ocean-950"
           >
-            {riskFilters.map((option) => (
+            {kindFilters.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -75,53 +76,105 @@ export function BeachesPage() {
         </label>
       </div>
 
-      {filtered.length === 0 ? (
+      {status === "locating" ? (
+        <Card className="border-dashed bg-ocean-50/40">
+          <p className="flex items-center gap-2 text-sm font-semibold text-ocean-800">
+            <Navigation aria-hidden="true" className="size-4 text-ocean-500" />
+            <output>Obtendo sua localização...</output>
+          </p>
+        </Card>
+      ) : null}
+
+      {status === "error" || status === "empty" ? (
+        <Card className="border-dashed bg-ocean-50/40 text-center">
+          <p className="text-sm font-bold text-ocean-950">
+            {status === "empty"
+              ? "Nenhuma praia num raio de 30 km"
+              : "Localização necessária"}
+          </p>
+          <p className="mt-1 text-xs text-ocean-700">{message}</p>
+          <button
+            type="button"
+            onClick={onRetryLocation}
+            className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-ocean-300 bg-white px-3 text-xs font-bold text-ocean-900 hover:bg-ocean-50"
+          >
+            <RefreshCw aria-hidden="true" className="size-3.5" />
+            Tentar de novo
+          </button>
+        </Card>
+      ) : null}
+
+      {status === "ready" && filtered.length === 0 ? (
         <Card className="border-dashed bg-ocean-50/40 text-center">
           <p className="text-sm font-bold text-ocean-950">
             Nenhuma praia encontrada.
           </p>
           <p className="mt-1 text-xs text-ocean-700">
-            Ajuste o filtro ou aguarde a importação do mapeamento KML das
-            praias.
+            Ajuste a busca ou o tipo de área.
           </p>
         </Card>
-      ) : (
+      ) : null}
+
+      {filtered.length > 0 ? (
         <ul className="grid gap-3">
-          {filtered.map((beach) => (
-            <li key={beach.id}>
-              <Link
-                to={`/praias/${beach.id}`}
-                className="group block rounded-2xl focus-visible:outline-2"
-              >
-                <Card className="transition group-hover:border-ocean-300 group-hover:shadow-md">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <h2 className="text-base font-black text-ocean-950">
-                        {beach.name}
-                      </h2>
-                      <p className="flex items-center gap-1 text-xs text-ocean-600">
-                        <MapPin aria-hidden="true" className="size-3.5" />
-                        {beach.municipality} · {beach.state}
-                      </p>
+          {filtered.map((beach) => {
+            const isHere = position?.beachId === beach.id;
+            return (
+              <li key={beach.id}>
+                <Card className="transition hover:border-ocean-300 hover:shadow-md">
+                  <Link
+                    to={`/praias/${beach.id}`}
+                    className="group block rounded-xl focus-visible:outline-2"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h2 className="text-base font-black text-ocean-950">
+                          {beach.name}
+                        </h2>
+                        <p className="flex items-center gap-1 text-xs text-ocean-600">
+                          <MapPin aria-hidden="true" className="size-3.5" />
+                          {[beach.municipality, beach.state]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-ocean-50 px-2.5 py-1 text-[11px] font-bold text-ocean-700">
+                        {BEACH_KIND_LABEL[beach.kind]}
+                      </span>
                     </div>
-                    <RiskBadge level={beach.riskLevel} />
-                  </div>
-                  <p className="mt-2 line-clamp-2 text-xs text-ocean-700">
-                    {beach.description}
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <FlagBadge flag={beach.flag} />
-                    <span className="text-xs text-ocean-600">
-                      Ocupação:{" "}
-                      <strong>{formatOccupancy(beach.occupancyPercent)}</strong>
+
+                    {isHere ? (
+                      <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-900">
+                        <MapPinned aria-hidden="true" className="size-3.5" />
+                        Você está no {sanitizeText(position.sectorLabel, 60)}
+                      </p>
+                    ) : null}
+                  </Link>
+
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-ocean-600">
+                    <span>
+                      {beach.sectorCount === 1
+                        ? "1 setor mapeado"
+                        : `${beach.sectorCount} setores mapeados`}
+                      <span className="mx-1.5 text-ocean-300">·</span>
+                      <span className="font-semibold text-ocean-800">
+                        {formatDistance(beach.distanceMeters)}
+                      </span>
                     </span>
+                    <Link
+                      to={`/?praia=${beach.id}`}
+                      className="inline-flex min-h-8 items-center gap-1 rounded-xl border border-ocean-300 bg-white px-2.5 text-[11px] font-bold text-ocean-900 transition hover:bg-ocean-50"
+                    >
+                      <MapPinned aria-hidden="true" className="size-3.5" />
+                      Ver no mapa
+                    </Link>
                   </div>
                 </Card>
-              </Link>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
-      )}
+      ) : null}
     </div>
   );
 }

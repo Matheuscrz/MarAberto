@@ -1,0 +1,38 @@
+import { apiRequest } from "@/shared/lib/api-client";
+import type { ImportMode, ImportReport } from "@/features/management/types";
+
+export interface ImportBathingAreasInput {
+  readonly file: File;
+  readonly state: string;
+  readonly dryRun: boolean;
+  readonly confirm: boolean;
+  readonly mode: ImportMode;
+}
+
+/**
+ * Envia o KML do QGIS para a coordenação.
+ *
+ * <p>`dryRun` é o padrão do servidor: a primeira chamada analisa e devolve o
+ * diff sem escrever. Aplicar exige `dryRun=false` **e** `confirm=true`, para
+ * que um cliente distraído não substitua o mapa por engano.
+ */
+export async function importBathingAreas(
+  input: ImportBathingAreasInput,
+): Promise<ImportReport> {
+  const form = new FormData();
+  form.append("file", input.file);
+
+  const query = new URLSearchParams({
+    state: input.state,
+    dryRun: String(input.dryRun),
+    confirm: String(input.confirm),
+    mode: input.mode,
+  });
+
+  return apiRequest<ImportReport>(
+    `/api/v1/management/bathing-areas/import?${query.toString()}`,
+    { method: "POST", body: form },
+    // Uma importação maior pode passar do timeout padrão das telas.
+    60000,
+  );
+}

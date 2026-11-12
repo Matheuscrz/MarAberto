@@ -54,8 +54,8 @@ public final class EmergencyTestData {
         UUID beachId = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO beaches (id, name, state_code, boundary)
-                VALUES (?, ?, 'AL', ST_GeomFromText(
-                    'POLYGON((-38 -11, -37 -11, -37 -10, -38 -10, -38 -11))', 4326))
+                VALUES (?, ?, 'AL', ST_Multi(ST_GeomFromText(
+                    'POLYGON((-38 -11, -37 -11, -37 -10, -38 -10, -38 -11))', 4326)))
                 """, beachId, "Praia de teste " + beachId);
 
         UUID postId = UUID.randomUUID();

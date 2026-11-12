@@ -1,204 +1,403 @@
 # AGENTS.md — Memória de contexto do projeto
 
-Este arquivo serve como memória para agentes de IA (assistentes de codificação) que
-trabalham neste repositório. Mantenha-o atualizado com o estado do projeto.
+Memória de contexto para agentes de IA neste repositório. Se o código divergir deste
+arquivo, **confie no código** e corrija o arquivo. Mudança de arquitetura ou de requisito
+atualiza `docs/` e este arquivo **no mesmo PR**; decisão relevante vira ADR.
 
-## Descrição do projeto
+## Descrição
 
-**MarAberto** (repositório: Praias-Seguras) — plataforma open source de segurança balnear:
-mapa de zonas de risco, bandeiramento em tempo real, tábua de marés, reportes comunitários
-com quórum, estimativa anônima de ocupação e **SOS cidadão** para guarda-vidas.
-Ferramenta de *apoio*; não substitui o acionamento oficial (ligar 193).
+**MarAberto** (repositório `Praias-Seguras`) — plataforma open source de segurança
+balnear: mapa de riscos, bandeiramento, tábua de marés, reportes comunitários com
+quórum, estimativa anônima de ocupação e **SOS cidadão** para guarda-vidas.
+Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 
-## Panorama geral (2026-11-10)
+## Direção atual (2026-11-11)
 
-- **Direção atual (2026-11-10):** universalização (qualquer CBM/estado), **operação de campo** (o guarda-vidas registra ocorrências atendidas que não passaram pelo 193/SOS e cadastra postos/bases com a localização atual), **acompanhamento pela coordenação** (posição/plantão dos operadores, nº de ocorrências, sinalizações e pendências), **ocorrências operacionais** com ficha para transcrever no CIOSP (ADR-013), **login único com três áreas por perfil** (`/operador`, `/gestao`, `/admin`), sessão com cookie de refresh `HttpOnly; Secure; SameSite=Strict` e access token em memória, **frontend feature-based** (ADR-015), **busca tolerante a erros com `pg_trgm`** (ADR-014) e **importação de mapeamento QGIS/KML com setores de praia** (ADR-016). No backend, `identity` já entrega **login/refresh/logout/me reais** com RBAC (Spring Security + JWT) e o **despacho do SOS (ADR-018) está implementado até o ack por CAS** (`V8`, consulta de elegíveis, STOMP autenticado); `occurrences` continua planejamento. O frontend usa o backend real, com acesso demo só se `VITE_DEMO_AUTH=true` em desenvolvimento.
-- **Entregas concluídas:** esqueleto do backend, ambiente local, CI, modelagem espacial, Etapa 1 arquitetural, camada de sanitização/criptografia (ADR-012), primeira versão do PWA do banhista, home com mapa de tela cheia (MapLibre, 2026-11-09), publicação da outbox do SOS por STOMP (2026-11-09), **login único com RBAC nas três áreas (2026-11-10)**, frontend *feature-based* com operador/gestão/TI, **despacho do SOS com destinatários por plantão, STOMP autenticado e ack por CAS (2026-11-10)** e **plantão no console do operador com captura da posição do aparelho (2026-11-10)**
-- **Backend esqueleto funcional:** Spring Boot 3.3.4 + Spring Modulith 1.2.13 (ADR-011; docs visam Boot 4.1.x — migrar em issue futura), Java 21, Gradle 9.8.2, Virtual Threads, Swagger, `/actuator/health` UP
-- **Persistência:** PostgreSQL 16 + PostGIS (H2 removido), Flyway com `V1__init_postgis.sql` + `V2__risk_zone_persistence.sql` + `V3__emergency_walking_skeleton.sql` + `V4__sensitive_data_protection.sql` + `V5__emergency_outbox_publication.sql` + `V6__identity_operational_users.sql` + `V7__identity_auth_sessions.sql` + `V8__sos_dispatch_and_shifts.sql` + `V9__shift_idle_expiry.sql` + `V10__sos_escalation.sql`, Hibernate Spatial 6.5.3 e `ddl-auto: validate`. A **`V8` (aplicada em 2026-11-10)** trouxe o despacho do SOS: `shift_sessions`, `coverage_radius_m` em postos/bases, coluna gerada + GiST em `emergency_calls` e `emergency_dispatches` por destinatário. A **`V9`** trouxe o *lease* do plantão: `last_seen_at` (sinal de vida, `NOT NULL` com default `NOW()`), `ended_reason` (`MANUAL`/`IDLE_TIMEOUT`/`LOGOUT`, com check) e o índice parcial `idx_shift_open_last_seen`. A **`V10` (escrita em 2026-11-11)** trouxe o escalonamento do SOS: `escalation_step` (`SMALLINT NOT NULL DEFAULT 0`, com check) e `next_escalation_at` em `emergency_calls`, mais o índice parcial `idx_emergency_calls_escalation`. A `occurrences` usa a **próxima migração livre (`V11`)**.
-- **Domínios em `com.maraberto`** (padrão `api/ application/ domain/ infra/` por módulo): todos os módulos da Architecture.md §6 existem como pacote — `identity`, `region`, `beaches`, `operations`, `emergency`, `safety`, `tides`, `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`. `oceanography` foi renomeado para `tides` e `education` para `content`. Têm fluxo de domínio: `beaches`, `emergency`, **`identity`** (`OperationalUser` com e-mail/CPF por índice cego e matrícula, `Role` = `LIFEGUARD`/`COORDINATOR`/`ADMIN`, `AuthenticationService` com login por e-mail/CPF/matrícula, `RefreshTokenService` com rotação e detecção de reuso, `JwtService`, `SecurityConfig`, `AuthController` em `/api/v1/auth`, seed de desenvolvimento opt-in e migrações `V6`/`V7`) e **`operations`** (plantão `shift_sessions` em `/api/v1/dispatch/shifts` com listagem de postos/bases ativos, consulta de elegíveis do SOS e seed opt-in de posto/base). `media` e `realtime` têm portas (`ObjectStoragePort`, `RealtimePublisherPort`/`SosNotifierPort`); os demais são `package-info.java`.
-- **Etapa 1 concluída:** `ApplicationModules.verify()` protege as fronteiras; `media.api.ObjectStoragePort` + `StubObjectStorage`; `realtime.WebSocketConfig` (STOMP em `/ws`); Redis integrado via Spring Data Redis e testado com Testcontainers
-- **Stack de infra local (docker compose) validada:** Postgres 16 + PostGIS, Redis 7, RabbitMQ 3, Garage S3 (bucket `media-public`) — a aplicação conecta ao Postgres; Redis é usado no teste de integração; Garage/RabbitMQ ainda não são usados pela aplicação
-- **Execução em containers:** `docker compose up -d --build` constrói o backend via `backend/Dockerfile` e o frontend via `web/Dockerfile`; frontend em `localhost:3000`, backend em `localhost:8080`
-- **PWA do banhista (2026-11-08):** scaffold do Vite substituído por telas reais em Tailwind 4 (Início, Praias, detalhe da praia, SOS, Marés, Aprender, Sobre, 404), Zustand para preferências não sensíveis, Zod no fluxo do SOS, manifesto + service worker manual + fallback offline, CSP/headers no Nginx e proxy `/api`. Dados de praias/marés ainda são de demonstração e sinalizados na UI.
-- **CI no GitHub Actions** (`.github/workflows/ci.yml`: JDK 21 Temurin + cache Gradle, `./gradlew clean check` com Testcontainers PostGIS + Redis); sem lint/build do frontend no CI
+- **Área de banho é a unidade territorial**: praia, rio e barragem, com **setores**
+  operacionais dentro dela (ADR-016 + ADR-021). Nada regional no código.
+- **Operação de campo**: plantão, ocorrências `FIELD_ATTENDED` e cadastro de postos/bases
+  com a localização atual do aparelho (a posição não vira rastreamento contínuo).
+- **Coordenação** (`/gestao`): importação do mapa de áreas de banho (primeira aba do perfil), plantão/última posição, contadores, sinalizações e CIOSP.
+  **TI** (`/admin`): só usuários, papéis, postos/bases e auditoria — **sem roadmap e sem importação de mapa**.
+- **SOS (ADR-018)**: o PostGIS decide os destinatários na transação do chamado; a outbox
+  cifrada + STOMP autenticado entrega; ack por CAS (um chamado, um atendente);
+  escalonamento por anéis de 5 a 20 km (`V10`).
+- **Sessão**: `/login` único e três áreas por papel; refresh em cookie
+  `__Secure-maraberto_rt; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict` e access
+  token **só em memória**.
+- **Estado**: backend com **145 testes** (`./gradlew clean check`); frontend com
+  `npm run build` e `npm run lint` verdes; app Android (Capacitor 8) com APK debug gerado.
 
-## Documentação principal (ler antes de trabalhar)
+## Ler antes de trabalhar
 
-- `docs/Architecture.md` — arquitetura (monólito modular, DDD, Spring Modulith, Postgres+PostGIS, Redis, S3-compatível)
-- `docs/Requirements.md` — requisitos funcionais e não funcionais (SOS: p95 < 3 s)
-- `docs/Implementation.md` — stack e etapas de implementação
-- `docs/adr/` — decisões arquiteturais (ADRs 001–020; mais relevantes: 001 — SOS sem conta, 003 — uma instalação por estado/órgão, 006 — licença MIT, 009 — autenticação embutida, 010 — persistência temporal das zonas de risco, 011 — Modulith 1.2.x com Boot 3.3.x, 012 — sanitização e criptografia de dados sensíveis, 013 — ocorrências operacionais, 014 — busca com `pg_trgm` antes de OpenSearch, 015 — frontend feature-based, 016 — importação de mapeamento QGIS/KML com setores, 017 — geoindexação do SOS, 018 — seleção de destinatários e entrega do SOS, 019 — app mobile com Capacitor sobre o PWA, 020 — escala e persistência do caminho crítico do SOS **proposta para análise**, com envelope de capacidade, gargalos em ordem e gatilhos numéricos para particionar, escalar ou trocar por NoSQL)
+- `docs/Architecture.md` — §7.5/§7.6 (SOS e escala), §7.7 (importação, arquivamento, lista
+  pública, "onde estou" e geometria com `ETag`), §7.8 (zonas temporais), §7.12/§7.13
+  (geoindexação e despacho), §8.5 (ocupação por área e por setor) e §9 (cache).
+- `docs/Requirements.md` — RF/RN/RNF; **RF41** é a importação de mapeamento.
+- `docs/adr/` — ADRs 001–021. Mais usadas: 012 (dados sensíveis), 013 (ocorrências),
+  016 (importação), 017/018 (SOS), 019 (Capacitor), 020 (escala), 021 (área de banho).
+- `docs/kml/Areas_Banho_Sergipe.kml` — mapeamento real de SE (fonte da Fatia 1); não
+  editar à mão, reexportar do QGIS.
 
-## Estado do backend
+## Módulos (Spring Modulith)
 
-- `backend/src/main/java/com/maraberto/MarAbertoApplication.java` — classe raiz (component scan cobre todos os módulos)
-- `application.yml` único em `backend/src/main/resources`; datasource Postgres `jdbc:postgresql://localhost:5432/maraberto` (env `DB_URL`/`DB_USER`/`DB_PASSWORD`), Flyway habilitado e `ddl-auto: validate`
-- Migrações `backend/src/main/resources/db/migration/`: `V1__init_postgis.sql` (PostGIS, `beaches`, `lifeguard_posts`, `mobile_bases`, `critical_zones` e índices GiST), `V2__risk_zone_persistence.sql` (persistência temporal das zonas), `V3__emergency_walking_skeleton.sql` (SOS), `V4__sensitive_data_protection.sql` (payload da outbox em `TEXT` cifrado e comentários de colunas sensíveis), `V5__emergency_outbox_publication.sql` (`attempts`/`last_error` com check e comentários), `V6__identity_operational_users.sql`/`V7__identity_auth_sessions.sql` (login e sessões), `V8__sos_dispatch_and_shifts.sql` (plantão, raio por posto/base, geoindexação do chamado, despacho por destinatário e `claimed_at` na outbox) e `V9__shift_idle_expiry.sql` (`last_seen_at`, `ended_reason` e índice parcial do job de inatividade) e `V10__sos_escalation.sql` (`escalation_step`/`next_escalation_at` e o índice parcial da escada de anéis)
-- `critical_zones` tem persistência temporal: `PERMANENT` (estrutural, sem validade) e `SEMI_PERMANENT` (topográfica, com `valid_from`/`valid_until`/`last_confirmed_at`); `EPHEMERAL` fica em `rip_current_markings` (`operations`). Ver ADR-010 e `docs/Architecture.md` §7.8
-- Entidades em `com.maraberto.beaches.domain` (JTS `Polygon` para `geometry(Polygon,4326)` e `Point` para `geography(Point,4326)`); `RiskType` cobre todos os riscos, `RiskPersistence` classifica a duração da zona e `FlagColor` fixa as cores de bandeira (tabela de bandeiramento virá na issue de operações)
-- `media.api.ObjectStoragePort` (`presignPut`, `presignGet`, `delete`, `head`) com `media.infra.StubObjectStorage` como bean padrão (`maraberto.storage.provider=stub`); implementação S3 real fica para a Etapa 11
-- `realtime.WebSocketConfig` habilita STOMP/WebSocket em `/ws` (broker simples `/topic` e `/queue`, prefixo `/app`, prefixo de usuário `/user`) com `StompAuthenticationInterceptor` exigindo JWT no frame `CONNECT`; `realtime.api.RealtimePublisherPort` + `StompRealtimePublisher` publicam eventos gerais e `realtime.api.SosNotifierPort` + `StompSosNotifier` entregam o SOS em `/user/{userId}/queue/sos` (o cliente assina `/user/queue/sos`); fan-out entre instâncias via Redis e Web Push ainda pendentes
-- **`identity` (login real):** `AuthController` expõe `POST /api/v1/auth/login|refresh|logout` e `GET /api/v1/auth/me`; login aceita e-mail, CPF (índice cego) ou matrícula e devolve access token JWT curto (`PT15M`) no corpo + refresh opaco (32 bytes, hash SHA-256 no banco) no cookie `__Secure-maraberto_rt; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict`. `RefreshTokenService` faz rotação por família de sessão (`auth_sessions`), com janela de tolerância de 10 s entre abas e revogação da família em reuso fora da janela; `AuthenticationService.refresh` **não** é `@Transactional` para garantir o commit da revogação antes do 401. `SecurityConfig` (Spring Security stateless + `JwtAuthenticationFilter`) libera login/refresh/logout e Swagger, exige Bearer em `/me` e nas áreas por papel (`LIFEGUARD`/`COORDINATOR`/`ADMIN`), com 401/403 em `application/problem+json`. Seed de desenvolvimento opt-in (`maraberto.identity.dev-seed.enabled`/`IDENTITY_DEV_SEED`, recusado em `prod`) cria `operador@maraberto.dev` (LIFEGUARD, `BM-10492`, CPF `11144477735`), `coordenador@maraberto.dev` (COORDINATOR, `CBM-2041`, CPF `52998224725`) e `admin@maraberto.dev` (ADMIN, sem matrícula, CPF `39053344705`), todos com senha `demo1234`; o login aceita e-mail, CPF ou matrícula e o seed é idempotente por e-mail. Segredo JWT em `JWT_SECRET` (padrão de dev recusado no perfil `prod`).
-- O SOS usa `POST /api/v1/emergency-calls`: grava o chamado, **um despacho por destinatário escolhido pelo PostGIS** e um evento durável na outbox por destinatário, tudo em uma transação; `client_request_id` é único (UUID validado) para evitar duplicação em retries. O payload da outbox é cifrado com AAD `maraberto:emergency-outbox:v1`. A publicação usa dois gatilhos: listener `@TransactionalEventListener(AFTER_COMMIT)` para latência + sweep `@Scheduled` (`FOR UPDATE SKIP LOCKED` com lease `claimed_at`, ISO-8601 `PT5S`) para recuperação; publicar acontece **fora** da transação que reivindica as linhas e o `TransactionTemplate` exige `REQUIRES_NEW`. O frame STOMP é redigido (`callId`/`dispatchId`/`status`/`round`/`occurredAt`; sem coordenadas nem `clientRequestId`) e vai só para `/user/{userId}/queue/sos` — o cliente assina `/user/queue/sos`. O console reconcilia por `GET /api/v1/dispatch/calls` e assume o chamado por `POST /api/v1/dispatch/calls/{callId}/ack` (CAS; `409` para quem perdeu a corrida, `403` para quem nunca foi despachado). Assumir **não apaga** o chamado: `GET /api/v1/dispatch/calls/assigned` devolve o atendimento em curso (`ACKNOWLEDGED`/`EN_ROUTE`/`ON_SCENE`) do operador, com `acknowledgedAt`, a coordenada restrita e a **distância atual** (`currentDistanceMeters`/`currentPositionAt`/`currentPositionStale`, medida da última posição do plantão até o banhista) — é o que alimenta a rota até o banhista, a decisão entre a pé e veículo e a futura ocorrência (ADR-013).
-- **Geoindexação do SOS:** a posição fica em `emergency_calls.latitude/longitude` (`double precision`, ADR-012) e o ponto geográfico é uma coluna **gerada** (`ST_SetSRID(ST_MakePoint(longitude, latitude),4326)::geography`) com índice **GiST** `idx_emergency_calls_location` (V8); a escolha de postos usa `ST_DWithin` sobre `geography` + KNN `<->`, a geofence usa `ST_Contains` no polígono da praia (GiST da V1) e a fila de escalonamento continua em B-tree parcial. A geofence **não bloqueia** o chamado (só marca `outside_area` para triagem). Detalhes, DDL e medição em `docs/Architecture.md` §7.12; a consulta existe em `operations.infra.JdbcEligibleRespondersRepository` e roda na transação do SOS.
-- `application.yml` configura `spring.data.redis.*` (`REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`, timeouts curtos), `maraberto.realtime.allowed-origins`, `maraberto.emergency.outbox.*` (`sweep-interval: PT5S`, `sweep-initial-delay: PT10S`, `batch-size`, `max-attempts`, `claim-lease: PT30S` — `@Scheduled` aceita somente ISO-8601), `maraberto.dispatch.*` (`default-coverage-radius-m: 2000`, `max-radius-m: 15000` como **teto de distância** da notificação, `position-stale-after: PT30M`, `max-recipients: 50` como teto de segurança, `fallback-recipients: 3` para o KNN, `shift-idle-timeout: PT15M` e `shift-sweep-interval: PT10M`/`shift-sweep-initial-delay: PT2M` para o job de carimbo do plantão inativo, e `escalation.rings: 5000,7000,10000,12000,15000,20000`/`escalation.delay: PT20S`/`sweep-interval: PT10S`/`sweep-initial-delay: PT15S`/`batch-size: 20` para a escada de anéis) — o antigo `search-radius-m` foi **removido** junto com o prefiltro por estrutura —, `maraberto.security.crypto.*`, `maraberto.security.jwt.*` (`JWT_SECRET`, issuer, `PT15M`/`P7D`), `maraberto.identity.dev-seed.enabled`, `maraberto.operations.dev-seed.enabled` (posto/base de demonstração, `OPERATIONS_DEV_SEED`), limites de request (`spring.servlet.multipart`, `server.max-http-request-header-size`, `server.tomcat.max-http-form-post-size`, `max-swallow-size`); Redis é opcional no boot e não é fonte da verdade
-- Testes: `ModularityTests` (`ApplicationModules.verify()` + módulos esperados), `MarAbertoApplicationTests` (contexto + bean do storage + broker STOMP), `BeachesSpatialMappingTests`, `EmergencyCallIntegrationTests` (criação, idempotência, validação do SOS, um despacho por plantão elegível e payload da outbox cifrado), `EmergencyOutboxPublisherTests` (publicação após commit com payload redigido, lease, recuperação pelo sweep, retry até `max-attempts` → `FAILED`; usa um `RealtimePublisherPort` gravado e sweep em `PT1H` para não fazer corrida), `EmergencyRealtimePublicationTests` (STOMP autenticado ponta a ponta: JWT no `CONNECT` e frame na fila `/user/queue/sos`, com `MappingJackson2MessageConverter`/`JsonNode` — `ByteArrayMessageConverter` falha por só aceitar octet-stream), `EmergencyDispatchAckTests` (dois plantões com ack concorrente, 409 para o perdedor, 403 para quem não foi despachado, e o vencedor mantendo 1 item em `/calls/assigned` com lat/long/`acknowledgedAt` enquanto o perdedor vê a lista vazia), `SosDispatchEligibilityTests` (todos os 6 plantões no raio notificados, posto fora do raio excluído, distância medida pela posição reportada do plantão e não pela estrutura, plantão cuja posição reportada saiu do raio excluído, KNN de fallback limitado a 3, **raio cadastrado acima de `max-radius-m` ignorado** e **KNN que não alcança além do teto**, e `position_stale` de posto e base móvel — inclusive **sem** posição reportada), `SosEscalationTests` (**escada de anéis**: abre o primeiro anel só para quem não foi avisado no round 1, pula anéis vazios na mesma passada, esgota a escada na coordenação sem reavisar quem já recebeu, não escala chamado já assumido e respeita o lease — plantão sem sinal não é chamado), `ShiftIdleExpiryTests` (**lease** do plantão: leitura fecha o turno sem sinal e carimba `IDLE_TIMEOUT`, batimento renova, `move`/`heartbeat` recusam plantão vencido, `close` de plantão vencido é idempotente e reporta o motivo, plantão vencido **não recebe o SOS**, plantão vivo recebe e o job carimba só as linhas vencidas), `ShiftControllerTests` (abrir/mover/encerrar plantão, listagem de postos/bases ativos e coordenadas em par), `StompAuthenticationInterceptorTests`, `ApiSecurityHeadersTests`, `IdentityAuthIntegrationTests` (login por e-mail/CPF/matrícula, refresh rotativo, `/me`, logout e 401/403 por papel), `RefreshTokenReuseTests` (detecção de reuso e revogação de família), testes de crypto/blind index/protetor/CPF/sanitizer, `RedisIntegrationTests` (Redis via Testcontainers) e `ObjectStorageStubTests`; bases em `com.maraberto.support.PostgisIntegrationTest` e `RedisIntegrationTest`. `PostgisIntegrationTest` limpa outbox/despachos/chamados/plantões antes de cada teste (o PostGIS é compartilhado por toda a JVM) e `src/test/resources/application.properties` deixa o sweep em `PT1H`.
+- Pacotes em `com.maraberto` com `api/ application/ domain/ infra/` por módulo:
+  `identity`, `region`, `beaches`, `operations`, `emergency`, `safety`, `tides`,
+  `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`.
+  `ApplicationModules.verify()` (`ModularityTests`) protege as fronteiras.
+- Com fluxo implementado: `beaches` (entidades, importação KML e setores, arquivamento do
+  arquivo aplicado, API pública por proximidade), `emergency` (SOS completo até o ack),
+  `identity` (login/RBAC/sessões), `operations` (plantão e elegibilidade do SOS) e
+  `occupancy` (indicador anônimo por setor). `media` tem a porta `ObjectStoragePort`
+  (`stub`/`s3`); `realtime` tem porta; o resto é `package-info`.
+- **Nunca** importar de outro módulo fora da `api/` pública. `beaches` não importa
+  `emergency`/`operations`; o SOS nunca espera a ocorrência.
 
-## Ocorrências, perfis e operação de campo (decisões de 2026-11-09/10)
+## Backend
 
-- **Ocorrência ≠ SOS.** O SOS (`emergency`) é o alerta em tempo real; a **ocorrência** (`occurrences`, ainda não implementada) é a ficha operacional. Todo SOS gera uma ocorrência **por evento** (`EmergencyCallCreated`, idempotente por `emergency_call_id UNIQUE`) com job de reconciliação; **`emergency` nunca importa `occurrences`** e o alerta nunca espera a ocorrência.
-- **Origem:** `SOS_CITIZEN`, `CBM_193`, `EXTERNAL_OTHER` e **`FIELD_ATTENDED`**. `FIELD_ATTENDED` é o atendimento que o guarda-vidas fez **sem** chamado no 193 ou no SOS (situação vista na praia, rádio, presencial, outro posto) e que ele registra depois para não perder o histórico. Campos mínimos em Requirements RN12; dados de pessoas são opcionais, **cifrados e mascarados**; duplicata só avisa, nunca bloqueia (RN13).
-- **Registro pelo operador em campo:** o formulário é curto, usável com uma mão, com data/hora **do fato**, natureza, praia/setor + referência (ou coordenada), resumo e desfecho. O operador pode registrar **ao encerrar o atendimento**; a ocorrência entra na fila do CIOSP conforme a configuração. `client_request_id` garante idempotência em retry/duplo toque.
-- **Posto/base em campo:** o guarda-vidas que trabalha no local pode cadastrar/atualizar posto fixo e base móvel, usando a **localização atual do aparelho** (`position_source` = `MANUAL`/`DEVICE_GPS`/`MAP_PICK` + `position_accuracy_m`), com ajuste do pino e foto da estrutura. A posição do dispositivo é usada **só no cadastro**, não vira rastreamento contínuo. A TI também mantém o cadastro.
-- **Painel da coordenação (`/gestao`):** acompanhamento geral do campo — quem está de plantão, **última posição conhecida** de cada operador (com horário e acurácia), nº de ocorrências por operador/praia/setor, sinalizações lançadas, pendências no CIOSP e alertas ativos. A coordenação ativa/desativa guarda-vidas do seu escopo; **não cria usuário**. Posição de operador é dado sensível: visível só ao escopo autorizado, nunca em listagem pública, log, cache ou métrica.
-- **Área da TI (`/admin`):** **só cadastro/convite de usuários, papéis, ativação e poder administrativo sobre tudo** (auditado). **Não** exibir roadmap, status de integração, "pendente (backend)" nem planejamento de desenvolvimento nessa área; pendência de produto fica em `docs/`/issue, não na tela do órgão.
-- **Perfis e áreas:** um `/login`; `LIFEGUARD` → `/operador`, `COORDINATOR` → `/gestao`, `ADMIN` (TI) → `/admin`. Guarda de rota no cliente é só UX; **a autorização é do servidor** (papel + escopo de posto/praia/setor).
-- **CIOSP:** sem integração (ADR-007). O sistema monta a **ficha de transcrição** e controla `ciosp_status` (`PENDING`/`REGISTERED`/`NOT_REQUIRED`); campos e ordem vêm de configuração da instalação. Pendente com o CBM: lista oficial de campos.
-- **Sessão:** access token JWT curto **só em memória**; refresh opaco em cookie `__Secure-maraberto_rt; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict` (`__Host-` não serve: exige `Path=/`). **Proibido** token em `localStorage`/`sessionStorage`. Renovação *single-flight* entre abas (`navigator.locks`) + janela de tolerância de ~10 s no servidor, senão duas abas disparam a detecção de reuso. `next` do login só aceita caminho interno.
-- **Busca:** `SearchPort` com adaptador PostgreSQL (`pg_trgm`, normalização NFKC/sem acento feita na aplicação). OpenSearch só por critério do ADR-014. Dado cifrado nunca entra na busca.
+- Spring Boot 3.3.4 + Spring Modulith 1.2.13 (ADR-011), Java 21, Gradle, virtual threads,
+  Swagger e `/actuator/health`. Migrar para Boot 4.1.x é issue futura.
+- PostgreSQL 16 + PostGIS, Flyway e `ddl-auto: validate`; H2 removido.
+- Migrações em `backend/src/main/resources/db/migration/`: `V1` PostGIS e tabelas
+  espaciais · `V2` zonas temporais · `V3` SOS · `V4` proteção de dados · `V5` outbox ·
+  `V6`/`V7` identidade e sessões · `V8` despacho + plantão · `V9` lease do plantão ·
+  `V10` escalonamento em anéis · `V11` áreas de banho/setores/lotes de importação ·
+  `V12` chave do arquivo arquivado do lote · `V13` índice geográfico da projeção do
+  mapa · `V14` amostras anônimas de ocupação.
+  **Próxima livre: `V15`** (ocorrências).
+- `application.yml` único. Chaves relevantes: `maraberto.dispatch.*` (raio padrão, teto
+  `max-radius-m: 15000`, `position-stale-after: PT30M`, `shift-idle-timeout: PT15M`,
+  `escalation.rings: 5000,7000,10000,12000,15000,20000` e `escalation.delay: PT20S`),
+  `maraberto.emergency.outbox.*`, `maraberto.security.crypto.*`, `maraberto.security.jwt.*`,
+  `maraberto.storage.*` (provider `stub`/`s3`, endpoint/região/credenciais e `path-style`
+  do Garage), `maraberto.occupancy.*` (janela `PT15M`, `minimum-sample: 5`, limiares
+  `moderate/high/extreme`, retenção `PT24H`),
+  seeds `maraberto.identity.dev-seed.enabled`, `maraberto.operations.dev-seed.enabled` e
+  `maraberto.beaches.dev-seed.enabled` (este exige a tabela `beaches` vazia e recusa o
+  perfil `prod`; `maraberto.beaches.import.file` atende a importação assistida).
+  `@Scheduled` aceita **somente ISO-8601**.
+- Redis é opcional no boot e **nunca** é fonte da verdade. Erros HTTP em RFC 9457
+  (`application/problem+json`, com `type`, `title`, `status`, `detail`, `instance`) e
+  todo endpoint novo documentado no OpenAPI com `@Schema` quando for contrato.
+- **Lease do plantão:** `shift_sessions.last_seen_at` renovado pelo console a cada 5 min;
+  sem sinal por `PT15M` o plantão deixa de ser elegível **na consulta**, e o job só
+  carimba `IDLE_TIMEOUT`. Logout encerra o plantão.
+- **Distância do SOS é medida pela posição do plantão** (`COALESCE(last_position,
+  estrutura)`), nunca pela estrutura quando há posição — o bug real foi 207 km. Check-in
+  não abre plantão sem posição.
+- Testes usam `PostgisIntegrationTest` (PostGIS compartilhado pela JVM; limpa
+  outbox/despachos/chamados/plantões antes de cada teste) e deixam os sweeps em `PT1H`
+  em `src/test/resources/application.properties`.
 
-### Mapeamento de praias e setores (QGIS/KML, ADR-016)
+## Segurança de dados e convenções
 
-- O mapeamento é **autorado no QGIS** (EPSG:4326) e pode ser entregue em **KML/KMZ**; o backend **não lê KML em produção**. Converter para **GeoJSON (RFC 7946)** com `ogr2ogr` no pipeline offline; o GeoJSON é o formato canônico de importação e do Region Pack.
-- Camadas esperadas: `beaches` (polígono da praia) e **`beach_sectors`** (setor/trecho operacional dentro da praia), além de postos/bases e zonas de risco. Cada feição precisa de `external_id` estável, `name` e `source`.
-- **Setor** é a unidade de operação: plantão, bandeira, ocorrência, sinalização e ocupação podem referenciar `beach_sector_id`. O setor herda a praia quando não informado; a soma dos setores não precisa cobrir 100 % da praia.
-- Importação **idempotente por `external_id`** (upsert), versionada e auditada, com validação `ST_IsValid`/`ST_MakeValid`, reprojeção para 4326, descarte de Z e conferência de sobreposição. Guardar a geometria completa; simplificar só a cópia do cliente. Ver `docs/Architecture.md` §7.7 e `docs/adr/016-importacao-de-mapeamento-qgis-kml.md`.
+- Decisão completa na ADR-012. **Todo DTO de request com texto usa `@Sanitized`**
+  (`PLAIN_TEXT`, `RICH_TEXT`, `IDENTIFIER`, `EMAIL`, `PHONE`, `CPF`, `URL`, `YOUTUBE_ID`).
+- Dado sensível novo usa `EncryptedStringConverter`/`SensitiveDataProtector` (AES-256-GCM
+  e índice cego HMAC); **nunca** PII em claro em log, outbox, fila, cache, métrica ou
+  storage web. Campos cifrados não aceitam `LIKE`, ordenação ou range.
+- **Proibido** token em `localStorage`/`sessionStorage`; coordenada, `clientRequestId`,
+  CPF, e-mail e telefone também não são persistidos no cliente.
+- Commits em **pt-BR** com Conventional Commits; nomes de classes em inglês; sem
+  comentário óbvio. **Não commitar sem aval explícito.** `docs/kml/` e
+  `web/src/assets/*.jpg` são do usuário.
+- Banco: `FOR UPDATE SKIP LOCKED` para filas, transações curtas, índice parcial e
+  idempotência por constraint (`client_request_id`/`external_id`). Distância sempre em
+  metros via `geography`; `geometry` 4326 para polígonos e `ST_Contains`. Medir com
+  `EXPLAIN (ANALYZE, BUFFERS)` antes de criar índice; detalhes em `§7.6`.
 
-## Despacho do SOS (ADR-018, aceito em 2026-11-10 — passos 1–4 e 6 implementados)
+## Frontend (`web/`)
 
-- **Duas decisões separadas:** o **PostGIS decide quem notificar** (`ST_DWithin`/KNN com `shift_sessions` abertas, `docs/Architecture.md` §7.5) e o **transporte só entrega**. **Proibido** filtro geográfico no broker (routing key por geohash/célula/posto): erra fronteira de célula, não acompanha raio por posto nem base móvel deslocada e não faz KNN.
-- **Implementado (2026-11-10/11):** `V8` aplicada; `shift_sessions` (`operations`, `/api/v1/dispatch/shifts`) com `uq_shift_open`; `coverage_radius_m` em postos/bases; coluna gerada + GiST em `emergency_calls`; consulta de elegíveis (`operations.api.EligibleRespondersPort` → `JdbcEligibleRespondersRepository`) que mede a distância pela **posição do plantão** (`COALESCE(last_position, location da estrutura)`) e notifica **todos** os plantões dentro do raio de cobertura (sem prefiltro por estrutura; `max-recipients: 50` só como teto), com o raio efetivo limitado por `max-radius-m` (`LEAST(raio, 15000)`) e o KNN de `fallback-recipients: 3` também limitado pelo teto, com coordenação (`identity.api.OperatorDirectory`) quando ninguém está no raio, e `position_stale` nas **duas** ramificações quando não há posição reportada (`last_position_at IS NULL`) **ou** quando ela é mais velha que `position-stale-after` (`PT30M`) — "nunca reportou" também é stale porque a distância, nesse caso, é a do cadastro da estrutura (foi o caso real do "196,4 km"); uma linha de `emergency_dispatches` por destinatário na transação do SOS; um evento de outbox por destinatário com `messageId = dispatchId`; publicação com lease e fora da transação; STOMP autenticado por JWT no `CONNECT` (`identity.api.AccessTokenVerifier`) em `/user/{userId}/queue/sos`; ack por CAS com `409` para o perdedor e `403` para quem nunca foi despachado; cancelamento dos demais **na mesma transação** com frame `CANCELLED` após o commit. O tópico aberto `/topic/operational.emergency.calls` foi **removido**.
-- **Um chamado, um atendente (2026-11-11).** O ack vence por CAS e cancela os demais despachos na mesma transação; o frame `CANCELLED` fecha popup, sirene e notificação dos perdedores logo depois do commit (o console também fecha ao ver o chamado sair da fila). Dois guarda-vidas saindo para o mesmo banhista é desperdício e deixa o posto descoberto — apoio adicional é pedido pelo **rádio** da guarnição, não abrindo o alerta para mais gente.
-- **Teto de distância (2026-11-11).** `maraberto.dispatch.max-radius-m: 15000` limita o raio efetivo de qualquer posto/base no **despacho inicial** e também o KNN de fallback: um `coverage_radius_m` errado (20 km, 25 km) não pode chamar quem não chega a tempo. Fora do teto o chamado vai para a coordenação (RN03).
-- **Escalonamento por anéis (2026-11-11, `V10`).** Sem ack em `escalation.delay` (**PT20S**, alinhado a RF21/RF42), o chamado é reaberto para anéis **absolutos** de 5, 7, 10, 12, 15 e 20 km (configuráveis em `escalation.rings`) até alguém assumir; o anel **ignora** o `coverage_radius_m` do posto/base porque, nesse momento, a pergunta é "quem consegue chegar". Três regras sustentam a escada: **ninguém é avisado duas vezes** (exclusão por `recipient_user_id` em qualquer rodada), **anel vazio não espera** (o seguinte abre na mesma passada) e **fim da escada = coordenação** (RN03) com `next_escalation_at = NULL`. O estado é durável no banco (`escalation_step`/`next_escalation_at`), então reinício não reabre anel. `SosEscalationJob` (10 s, batch 20) reivindica com `FOR UPDATE SKIP LOCKED` e é **sequencial de propósito**: transação curta de banco, sem I/O externo a paralelizar — a escala vem de mais instâncias, não de mais threads. `SosDispatchNotifier` é o ponto comum entre o round 1 e a abertura de anel (mesma prova de despacho + outbox cifrada). A consulta do anel é a da §7.5 com `ST_DWithin(..., :ringMeters)` e `NOT (s.user_id = ANY (:excluded))` (`EligibleRespondersPort.findWithinRing`).
-- **Plantão é um *lease* (2026-11-11, `V9`).** `last_seen_at` é renovado pelo console a cada 5 min enquanto aberto e visível (posição quando há GPS; `POST /api/v1/dispatch/shifts/current/heartbeat` quando não há, `204` sem payload, com jitter). Sem sinal por `shift-idle-timeout: PT15M` o plantão **deixa de ser elegível** — o filtro `last_seen_at >= :alive_since` está dentro da consulta de elegibilidade (não depende de job) e nas leituras do plantão (`current` devolve 404, `move`/`heartbeat`/`close` recusam). O `ShiftIdleExpiryJob` roda a cada `PT10M` só para carimbar `ended_at`/`ended_reason = 'IDLE_TIMEOUT'` (índice parcial da `V9`). Sair da conta encerra o plantão na hora (o console chama `close` antes do logout) e o motivo fica em `ended_reason`. Isso resolve o caso de o guarda-vidas fechar o app à força: o emulador mostrou que app minimizado/tela bloqueada **não** toca nem notifica, então um plantão fantasma só geraria chamado para quem não vai atender.
-- **Falha não descarta o chamado:** consulta espacial com erro ou sem ninguém no raio → KNN puro → coordenação (RN03). A seleção roda em `REQUIRES_NEW`; geofence nunca bloqueia.
-- **Ack por CAS** (`UPDATE … WHERE status='DISPATCHED'`) com `sos.cancel` para os demais — **implementado**. **Escalonamento em job no banco** (`SKIP LOCKED` + índice parcial `idx_emergency_calls_escalation`), nunca em mensagem com _delay_ — **implementado na `V10`** (anéis de 5 a 20 km, ver acima).
-- **RabbitMQ é perfil `rabbit`** (ADR-004): exchange `maraberto.emergency` (topic), keys `sos.notify`/`sos.cancel`, filas `q.sos.realtime` e `q.sos.push` + DLX/parking, consumidor idempotente por `dispatchId`. **Sem fila por posto** (não há consumidor por posto) e **sem STOMP broker relay** agora. **Ainda não implementado**; hoje só o adaptador STOMP existe.
-- **WebSocket autenticado:** JWT no frame `CONNECT` (`StompAuthenticationInterceptor` com `identity.api.AccessTokenVerifier`); o cliente assina `/user/queue/sos` e o servidor publica em `/queue/sos` via `convertAndSendToUser`. O frame entregue é redigido (sem coordenadas e sem `clientRequestId`).
-- **Sem `@Externalized` do Modulith no SOS:** a outbox cifrada própria é o registro de publicação. Porta `SosNotifierPort` em `realtime` com adaptador STOMP (padrão) e AMQP (perfil `rabbit`, pendente), mantendo `ModularityTests` verde e `emergency` sem acoplamento.
-- **Pendente:** perfil `rabbit` com confirms/DLQ, Web Push com o app fechado, métricas, sonda sintética e k6 (ver `docs/adr/020` para os gatilhos). Escalonamento por anéis **feito** (`V10`). No frontend, o console do operador já consome a fila real, o ack e o STOMP autenticado, abre/encerra o plantão com captura da posição e dispara popup, sirene e notificação do sistema; falta o cadastro de postos/bases persistido no backend (hoje `StationRegistry` é local) e o painel da gestão ler a última posição do plantão.
+- Vite 8 + React 19 + TypeScript 6 + Tailwind 4; **feature-based** (ADR-015):
+  `app/`, `shared/`, `features/`. Feature importa só de `shared/` e de si; entre features
+  só pela `index.ts` e apenas `operator→occurrences`, `operator→stations`,
+  `management→occurrences`, `admin→stations`, `*→auth`. Fronteiras no ESLint.
+- Rotas públicas: `/`, `/praias`, `/praias/:beachId`, `/sos`, `/mares`, `/aprender`,
+  `/sobre`; `/login`; áreas `/operador/**`, `/gestao/**` (com `/gestao/importar` como
+  primeira aba), `/admin/**`.
+- Home é mapa de tela cheia (MapLibre; worker via `?url` + `setWorkerUrl`). **Marcador**:
+  o elemento raiz recebe `transform` inline do MapLibre — nunca aplicar `transform`,
+  `scale`, `transition` nem mudar tamanho nele; efeitos vão num filho. Marcadores são
+  criados uma vez e atualizados por classe; todo pin tem `data-map-marker="true"` e
+  sempre abre uma ficha (praia não tem marcador, é acessada pela lista).
+- Acessibilidade obrigatória: `<output>` em vez de `role="status"`, `<dialog open>` em
+  vez de `role="dialog"`, overlays por `useOverlay` (foco, Escape, Tab preso).
+- PWA: service worker manual **nunca** cacheia `/api/**`, `/tiles/**`, WebSocket, não-GET
+  nem rotas autenticadas. Nginx e Vite fazem proxy de `/api` e `/ws` (Upgrade).
+- **App mobile (ADR-019)**: mesmo `web/` em WebView (Capacitor 8), sem fork de UI;
+  `shared/lib/platform.ts` e `shared/lib/native.ts` são os únicos que importam
+  `@capacitor/*`; no nativo o `api-client` usa `CapacitorHttp` e o cookie é tratado pelo
+  `CookieHandler` do processo. O backend **não muda** por causa do app (sem CORS,
+  `SameSite=Strict` intacto); `REALTIME_ALLOWED_ORIGINS` precisa listar
+  `https://localhost`/`capacitor://localhost`. `mobile/` (Flutter) está congelado.
 
-## Segurança de dados (sanitização e criptografia)
+## Fatia 1 — importador de áreas de banho (KML → PostGIS)
 
-Decisão completa em `docs/adr/012-protecao-de-dados-sensiveis-e-sanitizacao.md`; resumo operacional:
+**Status:** commitada (`1a795ea`, `1466485`, `cf58aa2`, `e08e3e2`). Entregue:
+`KmlFeatureReader`, `BathingAreaImportService`, `BathingAreaRepository`, `V11`, endpoint
+da coordenação, seed de dev e `ImportMapPage` em `/gestao`. O fluxo é **síncrono** nesta
+fatia; a fila (Rabbit ou tabela de jobs) entra quando houver volume/concorrência medidos.
 
-- **Sanitização:** `com.maraberto.shared.security.sanitization` — `TextSanitizer` (OWASP Java HTML Sanitizer), `SanitizationPolicy` (`PLAIN_TEXT`, `RICH_TEXT`, `IDENTIFIER`, `EMAIL`, `PHONE`, `CPF`, `URL`, `YOUTUBE_ID`), anotação `@Sanitized` + `SanitizedStringDeserializer`. **Todo DTO de request com texto deve usar `@Sanitized`.** Falha fechada: política inválida vira `""` (Bean Validation reporta); texto livre acima do limite vira 400.
-- **Criptografia:** `com.maraberto.shared.security.crypto` — `FieldEncryptor` (AES-256-GCM, IV 12 bytes, tag 128 bits, AAD por contexto, formato `enc:v1:<keyId>:<base64url>`), `BlindIndexer` (HMAC-SHA256 com chave derivada; nunca SHA-256 simples), `SensitiveDataProtector` (fachada + máscaras de CPF/e-mail/telefone/localização/IP), `EncryptedStringConverter` (`@Convert` para colunas String) e `CryptoConfiguration` (valida a chave no boot e recusa a chave de desenvolvimento em `prod`/`production`).
-- **Chave mestra:** `CRYPTO_MASTER_KEY` (32 bytes em base64) + `CRYPTO_KEY_ID`; rotação por `previous-keys`. A chave de desenvolvimento em `application.yml`/`docker-compose.yml` é só local. Perder a chave = perder os dados cifrados.
-- **Dados sensíveis hoje:** localização precisa do SOS (`emergency_calls.latitude/longitude`, `double precision` por exigência de despacho/geofence, protegida por acesso restrito, backup cifrado, minimização e proibição de log) e payload durável da outbox (cifrado, `TEXT`).
-- **Headers da API:** `ApiSecurityHeadersFilter` aplica CSP `default-src 'none'`, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP/CORP e `Cache-Control: no-store` em `/api/v1/emergency-calls` e `/api/v1/auth`.
-- **Regra para novos dados:** campo String sensível novo usa `EncryptedStringConverter` ou `SensitiveDataProtector`; nunca gravar PII em claro em outbox, fila, cache, log ou métrica; campos cifrados não aceitam `LIKE`/ordenação/range (igualdade via índice cego).
-- **Limites de request:** `spring.servlet.multipart` 5 MB/6 MB, header 16 KB, form post 64 KB, `max-swallow-size` 64 KB.
+Objetivo: ler `docs/kml/Areas_Banho_Sergipe.kml`, converter as geometrias para
+`geometry(...,4326)` com JTS e persistir **idempotentemente** em `beaches`,
+`beach_sectors` e proveniência (ADR-016). O leitor de KML é **ferramenta de importação**
+(seed de dev + endpoint da gestão opt-in), **não** parser do caminho de produção: o GeoJSON
+continua canônico no Region Pack (emenda da ADR-016).
 
-## Estado do frontend (`web/`)
+### O que o arquivo tem (levantado em 2026-11-11)
 
-> **Estado (2026-11-10):** a migração *feature-based* está concluída, as áreas por perfil já existem no cliente e o `/login` usa o **backend real** (`/api/v1/auth/*`), com redirecionamento por papel. O acesso demo (`VITE_DEMO_AUTH=true`) existe só para desenvolvimento sem backend. Se o código divergir deste arquivo, **confie no código** e corrija o arquivo.
+- **45 `<Placemark>` = 45 setores**, todos `MultiGeometry > Polygon` (1 a 3 polígonos por
+  feição). **32 praias distintas** por (`Municipio`, `Praia`).
+- `ExtendedData`: `id` (1–45, único), `Praia`, `Setor`, `Municipio`, `Estado` (SE) e
+  `Num. de Oc` (contagem histórica — guardar como metadado de origem, **não** como
+  contador vivo).
+- **`Estado` pode faltar**: o CBM informa a UF no envio, então o importador recebe `state`
+  como parâmetro (seed/endpoint). Quando a feição traz `Estado`, ele precisa bater com o
+  parâmetro; quando não traz, vale o parâmetro. Sem UF (nem no arquivo nem no envio) a
+  importação é rejeitada — `beaches.state_code` é `NOT NULL`.
+- **Nome não identifica nada**: "Prainha da Orla" existe em Canindé, Propriá e Neópolis;
+  no Brasil inteiro há homônimos de município e de praia. A chave da área é
+  (`state_code`, `municipio`, `praia normalizada`) e **nome de setor nunca é chave**.
+  Dois setores da mesma praia podem ter o mesmo nome; o que os distingue é o `id` da
+  origem (o `external_id`) e a `display_order`.
+- **Setor sem nome**: `Setor = "-"` em **20 das 45** feições (ex.: Praia do Restinho,
+  Praia da Costa, Barragem de Lagarto). Não é "praia inteira": é o **único setor sem
+  nome** daquela praia. Guardar `name` nulo + `display_order`; a UI mostra "Setor N".
+- O arquivo **mistura praia oceânica, banho de rio e barragem** (S. do Socorro, Propriá,
+  Neópolis, Santana do São Francisco, Pacatuba, Porto da Folha e as três "Barragem de…").
+- Não há postos, bases nem zonas de risco no arquivo — essas camadas virão em outra fatia.
 
-- Vite 8 + React 19 + TypeScript 6 + Tailwind CSS 4 (tema em `index.css` via `@theme`, paleta `ocean`/`sand`/`coral`). PWA único; as áreas operacionais são *chunks* lazy.
-- **Universal (qualquer CBM/estado):** nada regional no código. `.env`: `VITE_MAP_DEFAULT_CENTER` (JSON; padrão `[-51.9253, -14.2350]`, centro do Brasil), `VITE_MAP_DEFAULT_ZOOM`, `VITE_MAP_BOUNDS` (opcional; sem ele, navegação livre), `VITE_PMTILES_URL`, `VITE_DEMO_TILE_URL` (basemap raster de demonstração enquanto não há PMTiles; a origem é lida pelo `vite.config.ts` e entra em `img-src`/`connect-src` da CSP do app — no Nginx ela é literal no `nginx.conf`), `VITE_API_BASE_URL` (**vazio = mesma origem**, para o cookie de refresh funcionar no proxy do Vite/Nginx), `VITE_DEMO_AUTH` (acesso demo em dev, exige `true` explícito). Dados de demonstração são contratos neutros prontos para KML/API.
-- **Login e sessão no cliente:** `features/auth` concentra `LoginPage`, `session.ts` (Zustand **sem `persist`**, `status: unknown | anonymous | authenticated`), `session-boot.ts` (refresh no carregamento), `guards.tsx` (`RequireRole` + `next` só interno), `use-logout.ts`, `api.ts` (`refreshSingleFlight` com `navigator.locks`) e `demo.ts` (acesso demo só com `VITE_DEMO_AUTH=true` e `import.meta.env.DEV`). `/login` redireciona por papel via `homePathForRole`; a guarda de rota é UX e a autorização real é do servidor.
-- **Home é um mapa de tela cheia** (RF01): `MapView` (chunk lazy; MapLibre v6.17.0) com estilo local de demonstração, marcadores DOM, fichas (sheets) e chips de camadas (Riscos, Pins, Grade), botão de centralizar (geolocalização sob demanda, não persistida), fallback sem WebGL e PMTiles por `VITE_PMTILES_URL` (ADR-005). Cabeçalho flutuante sobre o mapa na home.
-- **Worker do MapLibre precisa de URL explícita:** `import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'` + `setWorkerUrl(...)` no escopo do módulo; `web/nginx.conf` tem `location ~* \.mjs$` com `default_type application/javascript`.
-- **Marcadores (regras que evitam o "teleporte" e o sumiço):**
-  - O MapLibre posiciona o elemento raiz do marcador com `transform: translate(...)` **inline**. **Nunca** aplique `transform`, `scale`, `transition: all` nem mude tamanho/margem **no elemento raiz** (nem em `:hover`). O raiz é só âncora; efeitos de hover/seleção vão num **filho** (`.mld-marker-inner`).
-  - Todo marcador leva `data-map-marker="true"`; o clique usa `preventDefault()` + `stopPropagation()`; filhos visuais (label, dot, badge) levam `pointer-events-none`; o `map.on('click')` ignora alvos dentro de `[data-map-marker='true']` antes de fechar qualquer ficha.
-  - Crie os marcadores **uma vez** e atualize o estado selecionado por classe; não remova/recrie todos a cada seleção (piscada, perde o hover).
-  - Tocar em qualquer pin **sempre** abre uma ficha (RF38): posto fixo/base móvel (`StationSheet`) e sinalização com galeria (`SignalSheet`). **Praia não tem marcador**: é acessada pela lista/ficha (`BeachSheet`).
-- **Acessibilidade/lint (obrigatório, RNF18):** `<output>` no lugar de `role="status"`; `<dialog open>` no lugar de `role="dialog"` (BeachSheet, SignalSheet, StationSheet, SosFab, AppMenu); props de componentes e contratos de tipos `readonly`; sem operador `void` nem parâmetros não usados (use `_nome`); `array.at(-1)`. Overlays usam `useOverlay` (foco em `[data-autofocus]`, Escape, Tab preso, retorno de foco).
-- **SOS flutuante com confirmação** (ADR-001): FAB em todas as telas exceto `/sos`; o envio real é só em `/sos`, com resposta do servidor, timeout de 5 s, `clientRequestId` gerado uma vez e reutilizado, e "Ligar 193" sempre visível. Sem promessa de envio offline.
-- **Aprender** (`LearnPage`): chips por categoria; 3 fases em acordeão (o que fazer · como identificar · prevenção); *facade* do YouTube sob demanda em `youtube-nocookie.com`.
-- **Estado/armazenamento:** Zustand só para preferências não sensíveis (`selectedBeachId`, `installPromptDismissed`). **Nunca** persistir coordenadas, `clientRequestId`, CPF, e-mail, telefone **nem tokens** (`localStorage`/`sessionStorage`). Validação com Zod; o backend revalida. Sanitização de exibição em `sanitize.ts` (DOMPurify); proibido `dangerouslySetInnerHTML` com dado não confiável.
-- **Cliente HTTP:** `shared/lib/api-client.ts` com timeout, erros RFC 9457 (`ApiProblem`) e *bridge* de autenticação (`AuthBridge`) que injeta o Bearer em memória e repete uma vez em 401 após `refreshSingleFlight` (`navigator.locks`); `features/auth/api-auth.ts` instala a *bridge*. **Nenhum token** é persistido.
-- **PWA:** `manifest.webmanifest`, `sw.js` manual versionado (**nunca** cacheia `/api/**`, `/tiles/**`, WebSocket, não-GET, `Range` nem rotas autenticadas `/operador`, `/gestao`, `/admin`), `offline.html`, ícones por `npm run icons`.
-- **Nginx:** CSP restritiva (sem inline/eval; `blob:` só em `worker-src`/`img-src`; `frame-src https://www.youtube-nocookie.com`), headers de segurança, proxy `/api/` para `backend:8080` e `location /ws` com `Upgrade`/`Connection` e leitura longa para o STOMP do console.
-- Dev: `npm run dev` na porta 3000 com proxy `/api` e `/ws` (`ws: true`) para `localhost:8080` (`VITE_PROXY_TARGET`); em produção o Nginx faz o mesmo com `Upgrade`/`Connection` e `proxy_read_timeout` longo no `location /ws`.
-- **App mobile (Capacitor 8, ADR-019 — decidido e aplicado em 2026-11-11):** o app Android/iOS é o **mesmo `web/` empacotado em WebView**, sem fork de UI. O projeto nativo já existe: `@capacitor/core` + `@capacitor/android` (deps), `@capacitor/cli` (dev), `web/capacitor.config.ts` (`appId org.maraberto.app`, `appName MarAberto`, `webDir dist`) e `web/android/` gerado e sincronizado (minSdk 24, compile/target 36, AGP 8.13, Gradle 8.14.3); `web/ios/` só em macOS com Xcode. Scripts em `web/package.json`: `build:app` (`vite build --mode capacitor`), `cap:sync` (build + `cap sync android`) e `cap:open`; `web/.env.capacitor.example` documenta o build nativo. **Plugins integrados por adaptadores:** `@capacitor/geolocation` 8.2.4 (posição pontual do plantão/SOS/cadastro), `@capacitor/local-notifications` 8.3.1 (notificação persistente do SOS com canal `sos`, já que o WebView não tem service worker) e `@capacitor-community/keep-awake` 8.0.1 (tela ligada no atendimento); `@capacitor/browser` **não** é necessário porque o `Bridge` já abre `http(s)`/`tel:` no app externo, e `camera` fica para quando houver captura de foto. `shared/lib/native.ts` é o único adaptador que fala com plugin; `shared/lib/geolocation.ts` usa o plugin no nativo e a API do navegador no PWA (`getDevicePosition` virou `async`, e `MapView`, `SosPage`, `OperatorOccurrencesPage` e `StationRegistry` não chamam mais `navigator.geolocation` direto). **O que já está adaptado:** `VITE_API_BASE_URL` absoluto e HTTPS obrigatório no modo nativo (validado no `vite.config.ts`, porque no WebView a origem é `https://localhost`/`capacitor://localhost`); CSP injetada por `<meta>` no `index.html` com a origem da API/WS (no app não há Nginx); `shared/lib/platform.ts` (detecção de plataforma) e `shared/lib/native.ts` (plugins) são os únicos módulos que importam `@capacitor/*`, com regra de lint barrando fora deles; `shared/lib/pwa.ts` não registra service worker no nativo; `api-client.ts` usa `executeNative` (HTTP nativo) em **todas** as chamadas do app, e a **sessão funciona pelo jar do processo**: o plugin core `CapacitorCookies` registra `CookieHandler.setDefault` com o `CookieManager` do WebView (persistente), então o `HttpURLConnection` do `CapacitorHttp` envia o cookie `Path=/api/v1/auth` no refresh/logout e guarda o `Set-Cookie` do login sem o JS tocar no valor — o backend **não mudou** (`SameSite=Strict`, sem CORS), nenhum token vai para storage web e `CapacitorCookies.getCookies` não é usado (no Android ele lê `document.cookie`, onde `HttpOnly` não aparece); `AndroidManifest.xml` com `android:allowBackup="false"`, `ACCESS_COARSE/FINE_LOCATION` e `uses-feature gps required=false`. O `maplibre-gl-worker-*.mjs` **não** precisa de gambiarra: o Capacitor 8 serve `.js` e `.mjs` como `application/javascript` (confirmado no fonte). Capacitor 8.6.0 exige Node ≥ 22 (ok: 24). **O APK debug já foi gerado** em `web/android/app/build/outputs/apk/debug/app-debug.apk` com `JAVA_HOME` no Temurin 21 de `~/.gradle/jdks/eclipse_adoptium-21-amd64-linux.2` e `sdk.dir=~/android-sdk` (platform 36; o AGP baixou as build-tools 35/36). Ícone e splash são os **padrões do Capacitor** — não há arte de marca. **Pendente:** `camera`/`push-notifications`/links externos, ícone/splash próprios, `versionCode`/keystore de release e **teste em aparelho físico** (o login já foi validado no **emulador Android 15/API 35** contra o backend real por túnel HTTPS, porque o cookie `__Secure-` exige HTTPS — `http://10.0.2.2:8080` é rejeitado; receita em `web/README.md`). O backend do app precisa aceitar `https://localhost`/`capacitor://localhost` em `REALTIME_ALLOWED_ORIGINS` para o STOMP (allow-list de WebSocket, não CORS). **`mobile/` (Flutter) está congelado e intocado** por decisão do usuário: não entra em build/CI e a retomada (app nativo mais elaborado) substitui a ADR-019 quando for decidida.
+### Modelo e migração `V11`
 
-### Estrutura de pastas (alvo: *feature-based*, ADR-015)
+- `beaches` mantém o nome da tabela (FKs de postos/zonas já existem), mas passa a
+  significar **área de banho**: adicionar `kind` (`BEACH`/`RIVER`/`DAM`/`LAGOON`/`OTHER`,
+  default `BEACH`), `external_id`, `source`, `source_version`, `imported_at`, `imported_by`,
+  `source_metadata JSONB`, `active` e trocar `boundary` para `geometry(MultiPolygon,4326)`.
+- `beach_sectors`: tabela nova com `beach_id`, `external_id` (= `<uf>-areas-banho:<id>`),
+  **`name` nulo**, `display_order`, `active`, `geometry_hash`, geometria `MultiPolygon` e a
+  mesma proveniência; `UNIQUE (external_id)`, `CHECK (ST_IsValid(geometry))`, GiST na
+  geometria.
+- `import_batches`: `source_file`, `source_version` (SHA-256), `imported_at`, `imported_by`,
+  `accepted`, `rejected`, `unchanged`, `missing` e `report JSONB` — auditoria e `dry-run`.
+- `beaches.boundary` = união dos setores daquela (`state_code`, `municipio`, `praia`); cada
+  placemark vira **um** setor. Feição ausente na reimportação **não** é apagada: só
+  relatada.
+- **UUID estável**: o upsert é por `external_id` e **preserva o `id`** da área/setor, para
+  que `lifeguard_posts`, `critical_zones`, `shift_sessions` e `occurrences` nunca apontem
+  para uma linha recriada. **A âncora da área é o menor `id` de setor do grupo**
+  (`<uf>-areas-banho:area:<min-id>`), não o nome: renomear a praia no QGIS atualiza a mesma
+  área em vez de criar outra. Se essa âncora sumir do arquivo, o importador casa pelo
+  (`state_code`, `municipio`, `praia` normalizada) e mantém o UUID; se nem isso casar,
+  reporta "área ausente + área nova" e a fusão é decisão humana.
+- **`external_id` inclui a UF** (`<uf>-areas-banho:<id>`): o `id` do KML é único no arquivo,
+  não no país. Sem o prefixo da UF, um KML de outro estado com o mesmo `id` colidiria na
+  constraint `UNIQUE` e sobrescreveria a praia errada.
+- **Nome de setor é rótulo, não identidade.** `beach_sectors.name` aceita nome repetido
+  (inclusive dentro da mesma praia) e nome nulo; a identidade é o `external_id` e a ordem é
+  a `display_order`. O `UNIQUE` é só em `external_id` — nunca em (`beach_id`, `name`).
+- `kind`: o KML não traz o tipo. Ordem de decisão: campo `Tipo` no `ExtendedData` quando
+  o QGIS passar a exportá-lo → nome iniciado por `Barragem`/`Açude` = `DAM` → default
+  `BEACH`. A classificação de rio é ajustável pelo cadastro/endpoint, sem reimportar.
 
-```
-web/src/
-├── app/        # App.tsx, main.tsx, index.css, routes.tsx, layout/ (RootLayout, AppMenu, OfflineBanner, InstallPrompt), pages/ (HomePage, About, NotFound)
-├── shared/     # components/ (Card, Badges, DemoNotice, Dialog/Sheet), lib/ (api-client, sanitize, format, id, overlay, storage), types/
-└── features/   # map, beaches, stations, signals, sos, tides, learn, search, auth, occurrences, operator, management, admin
-    └── <feature>/{api,components,types,pages}/ + index.ts (API pública)
-```
+### Importar e **atualizar** (reimportação)
 
-- **Regras:** feature importa só de `shared/` e de si; entre features só via `index.ts` e só `operator→occurrences`, `operator→stations`, `management→occurrences`, `admin→stations`, `*→auth`; `shared/` nunca importa de `features/` nem `app/`; composição entre domínios (ex.: home = map + beaches + stations + signals) fica em `app/`; tipos de domínio na feature; `map` não conhece praia (recebe camadas por props). As fronteiras são verificadas por `no-restricted-imports` em `web/eslint.config.js` (sem dependência nova).
-- **Estado da migração:** **concluída em 2026-11-10** — o código está em `app/`, `shared/` e `features/`; não há mais `components/`, `pages/`, `lib/`, `types.ts` na raiz de `src/`. `admin-auth-store` e `AdminPage` provisórios foram removidos. A tabela de/para histórica está em `docs/Implementation.md`, Etapa 8A.
-- **Rotas:** públicas `/`, `/praias`, `/praias/:beachId`, `/sos`, `/mares`, `/aprender`, `/sobre`, `*`; `/login`; áreas por papel `/operador/**` (SOS, ocorrências, postos), `/gestao/**` (equipe/painel, ocorrências) e `/admin/**` (visão geral, usuários, postos) — fora do `RootLayout` público com mapa.
-- **Áreas operacionais:**
-  - `/operador`: fila de SOS **com dados reais** (`GET /api/v1/dispatch/calls`), ack por `POST …/ack`, notificação por STOMP autenticado (`features/operator/lib/sos-realtime.ts`, assinatura `/user/queue/sos`) e _polling_ de 10 s; **assumir não some com o chamado**: a seção "Em atendimento por você" (`GET …/calls/assigned`, carregada em paralelo com a fila e recarregada após o ack) mantém o card com horário do ack, **distância agora** em destaque (da última posição do plantão até o banhista, com hora da posição e aviso quando está desatualizada; serve para decidir entre a pé e veículo e cai para "na abertura do chamado" quando o plantão não tem posição) e a **rota até o banhista** (`features/operator/lib/maps.ts`: `https://www.google.com/maps/dir/?api=1&destination=lat,lon`, `target="_blank"`, `rel="noreferrer"`, só no clique, com aviso de que a coordenada vai ao app de mapas) e o ponto no mapa; o atendimento continua na mesa mesmo após encerrar o plantão, porque é dele que sairá a ocorrência (ADR-013); **alerta ativo** (`lib/use-sos-alert.ts` + `lib/sos-alarm.ts` + `components/SosAlertOverlay.tsx`): popup em tela cheia (`<dialog open>`), sirene WebAudio em ciclo (1,5 s, para sozinha em 5 min) com `navigator.vibrate`, notificação do sistema via service worker (fallback `Notification` da página) e wake lock da tela; cada `callId:dispatchId` alerta uma vez e rodada nova alerta de novo; som e permissão só são armados em gesto (`ShiftPanel` ao entrar de plantão ou o chip `SosAlertActivation`); **painel de plantão** (`features/operator/components/ShiftPanel.tsx` + `lib/use-shift.ts`) que lista postos/bases ativos (`GET /api/v1/dispatch/shifts/targets`), captura a posição do aparelho no check-in (se ela não estiver preenchida, o submit tenta capturar **dentro do gesto** e **não abre plantão sem posição**, para a distância não cair no cadastro da estrutura), atualiza sob demanda e renova a cada 5 min com a aba visível, e encerra o plantão; registro de ocorrência (inclusive `FIELD_ATTENDED`) e cadastro de posto/base com localização atual. O formulário de posto/base é `features/stations/components/StationRegistry` (compartilhado com `/admin`, não duplicado).
-  - `/gestao`: painel da equipe com plantão, última posição conhecida, contadores de ocorrências e sinalizações por operador; ativação/desativação de guarda-vidas; revisão de ocorrências/CIOSP.
-  - `/admin`: apenas visão administrativa, cadastro/convite de usuários, papéis, postos/bases e auditoria. **Sem roadmap, status de integração ou planejamento de desenvolvimento.**
-- **Mapa de arquivos:** `app/` (`App.tsx`, `main.tsx`, `index.css`, `routes.tsx`, `layout/` com `RootLayout`, `AreaShell`, `AppMenu`, `OfflineBanner`, `InstallPrompt`, `OperatorLayout`, `ManagementLayout`, `AdminLayout`; `pages/` com `HomePage`, `AboutPage`, `NotFoundPage`); `shared/` (`components/`, `lib/`, `types/`); `features/{map,beaches,stations,signals,sos,tides,learn,search,auth,occurrences,operator,management,admin}/`.
-- **Imagens de Postos de Guarda-Vidas Fixos e Moveis** quando o usuário selecionar um posto de guarda-vidas devemos mostrar as imagens do posto para facilitar a identificação pela população.
-- **Imagens dos Alertas e Sinalizações** o campo de detalhes da sinalização quando selecionada deve ter uma estrutura de galeria pois podemos ter mais de uma imagem.
-- **Marcadores de Alertas e Postos de Guarda-Vidas** devemos padronizar os icones com uma descrição no canto inferior esquerdo da pagina sob o aviso do 193. Devemos usar marcadores de localização para alertas onde a cor dele será atrelada a bandeira. Para os marcadores de postos de guarda-vidas devemos padronizar algo que lembre guarda-vidas tendo um icone para fixos e outro icone para movel que facilite a identificação. O objetivo e que a população possa identificar o que é sem precisar olhar nem ler nada.
+O mesmo endpoint e o mesmo *seed* servem para a carga inicial e para a atualização. O CBM
+não precisa mandar um arquivo "limpo": manda o mesmo KML reexportado com as mudanças, e o
+importador descobre o que é novo, o que mudou e o que sumiu.
 
-## CI (GitHub Actions)
+- **Entrada:** arquivo KML (multipart) + `state` (UF informada pelo CBM) ou caminho
+  configurado (`maraberto.beaches.import.file`). KMZ fica para depois (exige descompactar);
+  o QGIS exporta KML ou GeoJSON. A UF entra no prefixo do `external_id`
+  (`<uf>-areas-banho:`), então o mesmo `id` em estados diferentes não colide.
+- **Sempre em duas fases:** `dryRun=true` (padrão) devolve o relatório sem escrever;
+  a aplicação exige `dryRun=false` **e** `confirm=true`.
+- **Modos:** `UPSERT` (padrão) cria e atualiza, **nunca** remove; `SYNC` (opt-in) marca
+  como `active=false` as feições que sumiram do arquivo — **soft delete**, sem apagar
+  linha nem quebrar FK. Reativar uma feição que voltou é automático.
+- **Cenários cobertos:** praia nova → `beaches` + setores `created`; setor novo em praia
+  existente → setor `created` e `beaches.boundary` recalculado só para aquela área;
+  polígono/nome/ordem alterados → `updated`; setor removido → `missing` (e `active=false`
+  em `SYNC`, com o `boundary` recalculado a partir dos setores ativos); praia renomeada →
+  `updated` (a âncora pelo menor `id` de setor mantém o UUID); **mesmo nome em outro
+  município/estado** → duas áreas distintas, nunca um merge por nome.
+- **Diff por feição:** compara `external_id` + `geometry_hash` (WKB normalizado + SHA-256)
+  + campos (`Praia`, `Setor`, `Municipio`, `kind`, `display_order`). O relatório classifica
+  em `created`/`updated`/`unchanged`/`rejected`/`missing`, com os campos alterados; só as
+  linhas realmente diferentes são escritas.
+- **Arquivo idêntico é barato:** se o SHA-256 do arquivo for igual ao do último lote
+  aplicado com sucesso, o relatório responde "sem mudanças" sem reescrever nada (a
+  validação do parser continua rodando).
+- **Uma transação por lote**, `ON CONFLICT (external_id) DO UPDATE`, e `source_version`
+  (hash do arquivo) gravado no lote e em cada feição. Falha no meio não deixa mapa
+  parcialmente atualizado.
+- **Mapa do banhista:** ao aplicar, publicar `BeachChanged`/`SectorChanged` para invalidar
+  o GeoJSON público em cache; o frontend recarrega as camadas. Nada de TTL curto como
+  mecanismo de atualização.
 
-- `.github/workflows/ci.yml`, job `build` em `ubuntu-latest`: checkout, JDK 21 (Temurin), `gradle/actions/setup-gradle@v6` com `cache-provider: basic`, `./gradlew compileJava compileTestJava`, `./gradlew clean check` e upload dos relatórios de teste em caso de falha
-- Gatilhos: `pull_request` e `push` para `main`; `defaults.run.working-directory: backend`
-- Status check a exigir no ruleset de proteção da `main`: **`CI / build`**
-- Ainda não cobre: Testcontainers para Garage, SAST/SCA, cobertura, lint
+### Passos
 
-## Ambiente local (docker compose)
+1. `KmlFeatureReader` (XML namespace-aware, **XXE/DTD desligados**) → `ImportedFeature`
+   (`id`, `praia`, `setor`, `municipio`, `uf`, `MultiPolygon` JTS).
+2. `BathingAreaImportService`: recebe `state`, agrupa por (`state_code`, `municipio`,
+   `praia` normalizada) com âncora no menor `id` de setor, valida (`ST_IsValid`/
+   `ST_MakeValid`), força 2D, reprojeta se preciso, rejeita vazio/auto-intersectado,
+   recalcula `beaches.boundary` apenas nas áreas afetadas e devolve relatório de
+   aceitos/rejeitados/alterados/ausentes.
+3. `JdbcBathingAreaRepository` com `ON CONFLICT` por `external_id`, em transação por lote;
+   `dry-run` é o padrão.
+4. Exposição: `maraberto.beaches.dev-seed.enabled` (importa se a tabela estiver vazia) e
+   `POST /api/v1/management/bathing-areas/import?state=&dryRun=&confirm=&mode=`
+   (`COORDINATOR`; `ADMIN` só como superusuário técnico, sem entrada na área da TI;
+   `dryRun=true` por padrão, relatório de diff em JSON e erros em
+   `application/problem+json`). O mesmo endpoint aceita o arquivo novo do QGIS e atualiza
+   as geometrias existentes.
+5. Testes: parser isolado com fixture pequena, integração PostGIS (importar **duas
+   vezes**, contar linhas, validar SRID/geometria/`ST_IsValid`, setor sem nome, barragem
+   reconhecida), mudança de geometria refletida em `updated`, praia nova em `created`,
+   praia renomeada mantendo o UUID, feição removida vira `missing` sem apagar, `state`
+   como fallback quando o arquivo não traz `Estado`, e `ModularityTests`.
+6. Frontend — **gestão primeiro**: `ImportMapPage` em `/gestao/importar`, **primeira aba e
+   tela inicial do perfil** (`COORDINATOR` entra na gestão já na importação). A página
+   envia o KML com `state`, mostra `dry-run`/relatório (`created`/`updated`/`unchanged`/
+   `missing`/`rejected`), exige confirmação para aplicar e deixa claro que o arquivo
+   substitui/atualiza o mapa. A TI (`/admin`) continua só com usuários, papéis, postos e
+   auditoria. `/praias` e a ficha leem as áreas de banho e listam setores (nome ou
+   "Setor N"); a camada vem do GeoJSON público, não do KML.
+7. Segurança: o endpoint fica em `/api/v1/management/**` (`COORDINATOR`, `ADMIN` como
+   superusuário técnico); upload limitado por tamanho/tipo, conteúdo processado fora do
+   request do banhista e o relatório nunca expõe coordenada exata de operador.
 
-- `docker-compose.yml` na raiz; `cp .env.example .env` para credenciais (padrão de usuários/senhas: `maraberto`)
-- Backend usa `DB_URL`/`DB_USER`/`DB_PASSWORD` (defaults `jdbc:postgresql://localhost:5432/maraberto`, `maraberto`, `maraberto`), compatíveis com o serviço `postgres` do Compose
-- **Garage no lugar de MinIO** (ADR-006): imagem MinIO não é mais pública; S3 em `localhost:9000`, admin em `localhost:9001`; config em `deploy/garage/garage.toml`
-- Volumes nomeados: `maraberto_postgres_data`, `maraberto_redis_data`, `maraberto_garage_data`, `maraberto_rabbitmq_data`
-- Swagger: `backend` em `/swagger-ui/index.html` (com a app rodando)
+### Critérios de aceite
 
-## Convenções
+- KML lido sem erro; **45 setores** e **32 praias** por (`municipio`, `praia`).
+- Reimportar o mesmo arquivo: `unchanged=45`, `created=0`, `updated=0`, `missing=0`.
+- Reimportar depois de mover um polígono no QGIS: aquele setor aparece em `updated`, os
+  demais em `unchanged`, e o `id`/UUID da área e do setor **não muda**.
+- Arquivo novo com uma praia a mais: a praia e seus setores aparecem em `created`; o
+  `boundary` da área é recalculado e as demais áreas ficam `unchanged`.
+- Praia renomeada no QGIS: `updated` na mesma área (UUID preservado), não `created` +
+  `missing`.
+- `SYNC` com uma feição removida marca `active=false` e não apaga a linha; reimportar
+  com ela de volta reativa.
+- Arquivo sem `Estado`: a UF vem do parâmetro `state`; arquivo com `Estado` divergente do
+  parâmetro é rejeitado com erro claro.
+- Duas praias de mesmo nome em municípios diferentes (e duas em estados diferentes) viram
+  **quatro** áreas; dois setores de mesmo nome na mesma praia viram **dois** setores, sem
+  colisão de `UNIQUE`.
+- Geometrias válidas em 4326 (`ST_IsValid`), sem Z e sem coordenada fora da UF.
+- A coordenação entra em `/gestao` na aba **Importar mapa**, envia o KML com a UF, vê o
+  relatório em `dry-run` e só aplica após confirmar; a TI não tem essa aba.
+- `ModularityTests` verde e `beaches` sem importar `emergency`/`operations`.
 
-- Commits em português (pt-BR) com Conventional Commits (`feat:`, `chore:`, `fix:`, `docs:`).
-- Não comentar código desnecessariamente; seguir estilo do código existente.
-- Idioma do código/commits: pt-BR quando for texto exibido ao usuário; nomes de classes em inglês.
-- APIs HTTP devem documentar no Swagger/OpenAPI as respostas de sucesso e os erros esperados, incluindo o schema do corpo quando aplicável.
-- Erros HTTP devem seguir RFC 9457 com `Content-Type: application/problem+json` e os campos `type`, `title`, `status`, `detail` e `instance`. O `type` é uma URI estável para identificar/documentar o problema, não um redirecionamento; `instance` identifica a ocorrência da requisição. Não expor stack trace, credenciais ou dados pessoais.
-- O contrato OpenAPI de erros deve usar `ApiProblem`, com `errors` como lista de `FieldValidationError` quando houver falhas de validação. Os tipos RFC estáveis do módulo de emergência são `https://maraberto.org/problems/invalid-request` e `https://maraberto.org/problems/malformed-json`; o frontend deve tratar essas URIs como identificadores de erro, sem assumir redirecionamento HTTP.
-- Ao construir `ProblemDetail`, sempre definir explicitamente `setTitle`, `setType` e `setInstance`, além de um `detail` seguro e acionável. Records de request/response/evento e contratos de infraestrutura devem receber `@Schema` com descrições e exemplos quando forem parte do contrato documentado.
+## Fatia 2 — mapa público real, arquivamento e ocupação
 
-- Antes de criar tela, hook ou componente novo, decidir a feature dona; se for usado por mais de uma, subir para `shared/` — não importar de outra feature fora da regra.
-- Dado de vítima, localização precisa e resumo de ocorrência **nunca** aparecem em log, outbox, evento, cache, métrica nem em resposta de listagem sem máscara.
-- Mudança de arquitetura ou de requisito atualiza `docs/` e `AGENTS.md` **no mesmo PR**; decisão relevante vira ADR.
+**Status:** commitada (`e2012a7`, `6dd5097`, `30dccf6`, `403083a`, `7da31af`). Substituiu
+os dados mocados de praias pelos dados da importação.
 
-## Diretrizes de banco, cache e idempotência
+### Arquivamento do KML aplicado (`V12`)
 
-- **Views** para projeções de leitura recorrentes; **views materializadas** para agregações/snapshots caros, com índice único + `REFRESH ... CONCURRENTLY` e estratégia de atualização explícita. Não usar view materializada onde o dado precisa ser fresco (SOS, bandeira vigente, postos disponíveis).
-- **`FOR UPDATE SKIP LOCKED`** para filas/consumo concorrente (Outbox, escalonamento de SOS, notificações), com transações curtas, índice parcial de status e idempotência.
-- **Cache Redis** para leituras quentes (GeoJSON, contexto, bandeira) em cache-aside, chaves versionadas, TTL e invalidação por evento; proteger contra stampede e ter fallback se o Redis cair. Cache nunca é fonte da verdade para SOS/ack/escrita.
-- **Idempotência** em escritas com retry/duplo toque: `client_request_id` único, `Idempotency-Key`, constraints únicas/`ON CONFLICT`, consumidores idempotentes e deduplicação no Outbox.
-- **Geoindexação:** distância **sempre** em metros via `geography` (`ST_DWithin`/`ST_Distance`); `geometry` 4326 só para polígonos e `ST_Contains`. Índice **GiST** existe para consulta que filtra por área — não para ponto lido por chave. No SOS: GiST em `lifeguard_posts`/`mobile_bases.location` e em `emergency_calls.location` (coluna gerada de `latitude`/`longitude`), `ST_DWithin` + KNN `<->` para escolher postos, `ST_Contains` para geofence (que **não** bloqueia o chamado) e B-tree parcial para a fila de escalonamento. Detalhes em `docs/Architecture.md` §7.12.
-- Medir com `EXPLAIN (ANALYZE, BUFFERS)` antes de adicionar índices, views ou materializações; documentar a consulta e o ganho.
-- Detalhes em `docs/Architecture.md` §7.6.
+- Lote **aplicado** (nunca `dry-run`) envia os bytes originais ao storage de objetos via
+  `S3ObjectStorage` (`ObjectStoragePort`, provider `maraberto.storage.provider=s3`, padrão
+  no Compose). Chave por conteúdo: `<prefixo>/<UF>/<sha256>.kml` (padrão
+  `bathing-areas/SE/<sha256>.kml`), gravada em `import_batches.source_storage_key`.
+- Reenviar o mesmo arquivo reusa o mesmo objeto; **best-effort**: storage fora do ar não
+  bloqueia o mapa (coluna fica nula, aviso no log). Credenciais de exemplo do Garage são
+  recusadas no perfil `prod` (`S3StorageConfiguration`). Testes fixam `stub`.
+- **Gotcha do Garage:** o SDK v2 assina o corpo em `aws-chunked` por padrão e o Garage
+  responde `400 Invalid payload signature`. O cliente e o presigner usam
+  `chunkedEncodingEnabled(false)` e `requestChecksumCalculation=WHEN_REQUIRED`; sem isso
+  todo upload falha mesmo com credencial correta.
 
-## Roadmap conhecido (próximas entregas plausíveis)
+### Lista pública por proximidade (RF01)
 
-- `identity`: TOTP para ADMIN, cadastro/convite de usuários e gestão de papéis pela TI, escopo por praia/setor para `COORDINATOR` e trilha de auditoria de acesso
-- `emergency` (SOS): concluir a entrega do alerta seguindo a ADR-018 — passos 1–4 **feitos** (`V8`, consulta de elegíveis que mede pela posição do plantão e notifica todos os plantões no raio, dispatches na transação + STOMP autenticado, ack por CAS) e o **console do operador no frontend já integrado** (`GET /api/v1/dispatch/calls`, ack real, STOMP com `@stomp/stompjs` e polling, **abrir/encerrar plantão com posição do aparelho**, **popup + sirene + notificação do sistema** no despacho, e **chamado assumido mantido na mesa** por `GET …/calls/assigned` com rota no app de mapas); falta a transição de conclusão do atendimento (`RESOLVED`/`FALSE_ALARM`) junto da ocorrência, e (5) perfil `rabbit` com confirms/DLQ/Testcontainers; (6) Web Push com o app fechado — o **job de escalonamento por anéis está feito** (`V10`, `SosEscalationTests`); (7) métricas, sonda sintética e k6, seguindo os gatilhos de `docs/adr/020`
-- `beaches`: repositórios/CRUD, validação `ST_IsValid`, fichas e GeoJSON público — substitui os dados de demonstração do PWA
-- `beaches`: CRUD de zonas `PERMANENT`/`SEMI_PERMANENT`, revalidação de zonas vencidas e filtro temporal no GeoJSON — ver `docs/Architecture.md` §7.8
-- `operations`: `rip_current_markings` para correntes efêmeras/migratórias (RF13), com `valid_until` curto e evento `RipCurrentMarked`
-- `beaches`: importador de delimitações via QGIS/KML/GeoJSON, incluindo **`beach_sectors`** (reprojetar para 4326, validar e fazer upsert idempotente por `external_id`) — ver ADR-016 e `docs/Architecture.md` §7.7
-- `region`: `installation_settings` e Region Pack
-- `tides`/`content`: endpoints públicos de marés e vídeos; hoje o PWA usa dados de demonstração
-- `occurrences`: migração `V11__occurrences.sql` (próxima livre, depois da `V10` do escalonamento), criação por evento do SOS + reconciliação, registro externo (193), fila e ficha CIOSP (Etapa 6A; ADR-013)
-- `search`: `pg_trgm` + `search_documents` + `SearchPort` e conjunto de teste de grafias erradas (Etapa 14A; ADR-014)
-- Frontend: corrigir o hover dos marcadores e a ficha dos pins; cadastro de posto/base com localização atual (compartilhado entre operador e TI); painel da gestão com posição/contadores; formulário de ocorrência do operador (`FIELD_ATTENDED`); **remover qualquer roadmap/status de integração da área `/admin`**
-- Frontend: tiles PMTiles gerados + camadas com dados reais (postos, bandeira vigente, alertas)
-- App mobile: `web/android` criado com Capacitor 8, sincronizando e com **APK debug gerado** (ADR-019, Etapa 8B); plugins de geolocalização, notificação do SOS e keep-awake integrados por `shared/lib/native.ts`; **sessão no WebView resolvida** (`CapacitorHttp` + jar do processo) e **login validado no emulador Android 15/API 35** por túnel HTTPS — falta `camera`/`push-notifications`/links externos, ícone/splash, assinatura/`versionCode` e teste em aparelho físico; `ios/` só em macOS. `mobile/` (Flutter) segue congelado e intocado; a retomada substitui a ADR-019
-- `beaches`/`region`: importador QGIS/KML → GeoJSON com `beach_sectors` e Region Pack (ADR-016)
-- Migração para Spring Boot 4.1.x + linha compatível do Spring Modulith (ADR-011)
-- Pipeline CI: base pronta (build + testes com PostGIS e Redis); evoluir com build/lint do frontend, Testcontainers Garage, SAST/SCA e cobertura
+- `GET /api/v1/beaches?lat=&lon=&radiusM=` — só as áreas ativas num raio de até
+  **30 000 m** (`radiusM` omitido = 30 km), da mais próxima para a mais distante; sem
+  posição não existe lista. `GET /api/v1/beaches/{id}` devolve a ficha com os setores na
+  ordem do mapeamento (`sectorLabel` mostra "Setor N" quando o nome é nulo).
+- Lê da projeção materializada `beach_map_features` (`feature_kind = 'AREA'`), com
+  `ST_DWithin(geometry::geography, ponto, raio)` sobre o índice GiST de expressão da
+  `V13`; distância em metros até o polígono. Erros em RFC 9457 (`localizacao-invalida`
+  400, `praia-nao-encontrada` 404). `SecurityConfig` já libera `GET /api/v1/beaches/**`.
+- Cache em memória (`BeachMapQueryService`): TTL de 120 s, chave pela posição arredondada
+  a 3 casas (~110 m) + raio, **nunca** persistida/logada, limpa por
+  `BathingAreaMapChanged`/`BeachChanged`; `Cache-Control: private, max-age=60`.
+- Frontend: `useNearbyBeaches` (leitura pontual de GPS, sem `watchPosition`),
+  `BeachesPage`/`BeachDetailPage`/`BeachSheet` consumindo a API; `demo-beaches.ts`
+  removido. Negar a permissão ou estar longe do litoral mostra estado explicado com
+  "Tentar de novo" — a tela não quebra.
 
-Validação local mais recente (2026-11-11): `cd web && npm run build && npm run lint` verdes com o **alerta ativo do SOS** (popup em tela cheia, sirene WebAudio com vibração, notificação do sistema via service worker, wake lock e chip de ativação) integrado ao console, além do painel de plantão e da fila real. Backend com `./gradlew clean check --offline` verde (**102 testes**, incluindo `SosDispatchEligibilityTests` — 6 plantões no raio notificados, fora do raio excluído, **distância medida pela posição reportada do plantão e não pela estrutura**, plantão cuja posição reportada saiu do raio excluído, KNN limitado a 3 e `position_stale` de posto e base móvel — e `ShiftControllerTests` com a listagem de postos/bases ativos). O bug de distância foi reproduzido no Postgres local: chamado e `shift_sessions.last_position` no mesmo ponto, posto seed em Maceió a `207.385,1 m`; a consulta de elegibilidade passou a usar `COALESCE(last_position, location da estrutura)` e o prefiltro por estrutura (`search-radius-m`) foi removido. Login real das três contas validado contra o Postgres local (`V6`/`V7` aplicadas, seed `IDENTITY_DEV_SEED=true`). O plantão foi validado na API local (targets, check-in no posto com GPS persistido, atualização e encerramento; base móvel com posição reportada mudou a distância do despacho de ~230 m para 59,2 m; após encerrar, o SOS seguinte foi para a coordenação) e no navegador com Playwright/Chromium (9 checagens: login por papel, "fora de plantão", GPS no check-in, lista de destinos, abertura, início/última posição, atualização de posição e encerramento). O **alerta ativo** foi validado ponta a ponta no navegador (10 checagens, todas verdes): plantão aberto pelo formulário com GPS, permissão de notificação concedida no gesto, SOS anônimo no mesmo ponto do plantão, popup em tela cheia em até 20 s, distância exibida como "a 0 m de você" (não mais 207 km), foco inicial no botão de assumir, silenciar/rearmar a sirene, ack pelo popup fechando o alerta, confirmação "Chamado assumido" no console e encerramento do plantão. O **atendimento em curso** foi validado no navegador (20 checagens, todas verdes, após limpar chamados/despachos/plantões no Postgres local): plantão com GPS, SOS no mesmo ponto, popup a "0 m de você", ack, seção "Em atendimento por você" com o card do chamado, rota `https://www.google.com/maps/dir/?api=1&destination=-9.6659,-35.7088` e link do ponto, horário de assunção, **"Distância agora" a 0 m com a hora da posição**, deslocamento de ~1 km do plantão refletido como **995 m** na ficha (não a distância da abertura), saída da fila aberta (sem duplicar o id), **persistência do atendimento após reload**, `GET /api/v1/dispatch/calls/assigned` devolvendo exatamente 1 atendimento com `/calls` vazio, e o atendimento continuando na mesa após encerrar o plantão; nenhum erro de aplicação e **nenhuma coordenada no log** do backend. Fluxo de login no navegador validado com Playwright/Chromium (19 checagens): redirecionamento por papel, reload com refresh, `next` externo ignorado, logout e rota protegida sem sessão; a API respondeu 401 sem token, 403 para papel errado em `application/problem+json` e 404 para ADMIN em rota administrativa ainda não implementada.
+### Ocupação anônima (RF10/RN06/RNF04, `V14`)
 
----
-Última atualização: 2026-11-11 (noite), após **(d)** implementar o **escalonamento do SOS por anéis** (`V10` + `SosEscalationPolicy`/`SosEscalationService`/`SosEscalationJob`/`SosDispatchNotifier` e `EligibleRespondersPort.findWithinRing`): sem ack em **PT20S** o chamado é reaberto para anéis absolutos de **5, 7, 10, 12, 15 e 20 km**, anéis vazios são pulados, quem já recebeu não é reavisado, o fim da escada aciona a coordenação (RN03) e o estado fica durável no banco (`escalation_step`/`next_escalation_at`, `FOR UPDATE SKIP LOCKED`); o teto de distância subiu para **15 km** por posto/base (`max-radius-m`) e a **ADR-020 (proposta)** registra o envelope de capacidade, os gargalos em ordem e os **gatilhos numéricos** para particionar, escalar ou trocar por NoSQL (bem como o que se perderia ao sair do PostGIS: decisão espacial exata, CAS transacional, idempotência por constraint). Backend com **102 testes verdes** (`SosEscalationTests`, 5 casos; 2 casos de teto ajustados para 15 km). Anteriormente, no mesmo dia, após **(a)** encerrar o plantão por inatividade (`V9` + *lease* `last_seen_at` + `POST /api/v1/dispatch/shifts/current/heartbeat`, expiração preguiçosa na elegibilidade e nas leituras, job só de carimbo em `PT10M`, `close` no logout e aviso "encerrado por inatividade" ao voltar), **(b)** limitar o alcance da notificação do SOS (`maraberto.dispatch.max-radius-m: 5000`, aplicado ao raio por posto/base via `LEAST` e ao KNN de fallback — fora do teto o chamado vai para a coordenação) e **(c)** registrar que **um chamado tem um atendente**: o ack vence por CAS, cancela os demais despachos na mesma transação e o frame `CANCELLED` fecha popup/sirene/notificação dos perdedores após o commit (apoio extra é pelo rádio). Backend com 97 testes verdes naquele momento (`ShiftIdleExpiryTests` + 2 casos de teto em `SosDispatchEligibilityTests`); `npm run build`/`npm run lint` verdes. Validação no emulador Android interrompida a pedido do usuário (PC reiniciado): falta ver no aparelho o plantão aberto → app fechado → "fora de plantão" após o lease.
+- `POST /api/v1/occupancy/samples {latitude, longitude, token}` resolve o **setor** que
+  contém o ponto (`ST_Contains`) e grava só `beach_id`, `sector_id`, `bucket_start`
+  (janela de 15 min) e o **HMAC** do token (`BlindIndexer`). A coordenada é descartada;
+  não há coluna de posição, IP nem histórico por aparelho. Fora de setor mapeado → `204`.
+- `UNIQUE (anonymous_token, sector_id, bucket_start)` + `ON CONFLICT DO NOTHING`:
+  recarregar a tela não infla. Estimativa = `count(DISTINCT token)` na janela móvel;
+  abaixo de `minimum-sample` (5) → `INSUFFICIENT` **sem nível** (protege praia vazia).
+  Retenção de 24 h com expurgo **na escrita**.
+- `GET /api/v1/occupancy/beaches/{id}` devolve `status`, `level` e `windowMinutes`, nunca
+  a contagem. Token do cliente é `crypto.getRandomValues` em memória do módulo (rotaciona
+  ao recarregar), nunca em storage web. `SecurityConfig` libera `/api/v1/occupancy/**`.
 
-Histórico imediatamente anterior: 2026-11-11, após corrigir a distância do despacho (medida pela posição do plantão, com a estrutura só como fallback; `search-radius-m` removido), entregar o alerta ativo no console do operador (popup em tela cheia, sirene WebAudio com vibração, notificação do sistema pelo service worker, wake lock e chip de ativação armado no gesto), **manter o chamado assumido na mesa** (`GET /api/v1/dispatch/calls/assigned`, seção "Em atendimento por você" com rota até o banhista e **distância agora** da posição do plantão, para decidir entre a pé e veículo; `position_stale` agora cobre "nunca reportou" nas duas ramificações e o check-in exige posição), **aplicar o empacotamento mobile com Capacitor sobre o PWA** (ADR-019: projeto nativo em `web/android` gerado e sincronizado, `capacitor.config.ts`, scripts `build:app`/`cap:sync`/`cap:open`, `.env.capacitor.example`, `shared/lib/platform.ts` com regra de lint que barra `@capacitor/*` fora dele, service worker desligado no nativo, CSP por `<meta>` no build nativo e `allowBackup=false`; `mobile/` Flutter congelado — **APK debug gerado** em `web/android/app/build/outputs/apk/debug/app-debug.apk` com JDK 21 do `~/.gradle/jdks` e Android SDK de `~/android-sdk`, e plugins de geolocalização, notificação do SOS e keep-awake integrados por `shared/lib/native.ts`; ícone/splash ainda são os padrões do Capacitor) e **resolver a sessão do app no WebView** (`CapacitorHttp` em todas as chamadas via `executeNative`, com o cookie de refresh tratado pelo `CookieHandler` do processo ligado ao `CookieManager` do WebView pelo plugin core `CapacitorCookies` — envio automático no refresh/logout e persistência entre reinícios, sem o JS ler o valor; backend intacto, `SameSite=Strict` mantido, nenhum token em storage web). Verificado: `npm run build`, `npm run lint`, `VITE_API_BASE_URL=https://… npm run cap:sync` e `./gradlew assembleDebug` (APK regenerado); a CSP com `connect-src` da API e o bundle com o HTTP nativo estão no pacote. **Validado no emulador Android 15 (API 35)** em 2026-11-11: APK debug instalado via `adb`, backend local exposto por túnel HTTPS (`cloudflared`) e login real (`operador@maraberto.dev`) abrindo o console do operador com dados do backend — o cookie `__Secure-` exige HTTPS, então `http://10.0.2.2:8080` **não** serve (receita completa em `web/README.md`). Falta o teste em **aparelho físico** (refresh, logout, GPS, notificação, sirene, keep-awake) e incluir `https://localhost`/`capacitor://localhost` em `REALTIME_ALLOWED_ORIGINS` no ambiente do app. Migração `V8` já aplicada (plantão, raio por posto/base, geoindexação e despacho por destinatário), `V9` (lease do plantão) e `V10` (escada de anéis); backend com **102 testes verdes**.
+## Fatia 3 — geometria no mapa e ocupação por setor
+
+**Status:** implementada no working tree (backend + testes + frontend + docs); falta o aval
+para commitar. **Plano detalhado:** `docs/plan/fatia-3-mapa-e-ocupacao.md` (2026-11-12).
+
+A geometria **já era armazenada** (`beaches.boundary`, `beach_sectors.geometry`, projetada em
+`beach_map_features`), mas o cliente só recebia o centroide e a ocupação só agregava por área.
+A fatia fechou as três lacunas:
+
+- **Geometria na API:** `GET /api/v1/beaches/{id}/map` devolve `bbox` (`ST_Envelope` em tempo
+  de consulta) + geometria GeoJSON simplificada (`ST_SimplifyPreserveTopology`, tolerância
+  `5e-5` ≈ 5 m, 6 casas) da área e de cada setor ativo, com `Cache-Control: max-age=60,
+  public` e `ETag` por área e por versão do mapa → `304` com `If-None-Match` (aceita lista,
+  `*` e `W/`). **`import_batches.id` é UUID**, então a versão é
+  `count(*) || '-' || extract(epoch from max(imported_at))` dos lotes aplicados; o `ETag`
+  inclui o `beachId` para o `If-None-Match` de uma praia nunca responder `304` para outra.
+  A lista continua com centroide; não existe GeoJSON por viewport nesta fatia.
+- **Onde estou:** a resposta de `GET /beaches?lat&lon` ganhou `position`
+  (`beachId`/`beachName`/`sectorId`/`sectorLabel`), resolvido por `ST_Contains` em
+  `beach_sectors` com `ORDER BY display_order, id LIMIT 1` (setor sobreposto → vence o
+  primeiro da ordem do mapeamento, a mesma regra da amostra). A query vive em `beaches`
+  (duplicada de propósito: o módulo não pode importar `occupancy`) e `sectorLabel` é gerado no
+  backend ("Setor N" quando o nome é nulo).
+- **Ocupação por setor:** `GET /api/v1/occupancy/beaches/{id}` devolve `BeachOccupancy` —
+  faixa da área e `sectors[]`. **A área é `count(DISTINCT token)`, nunca a soma dos setores**
+  (quem está na fronteira aparece em dois); `countDistinctTokensBySector` usa `LEFT JOIN`
+  para listar setor ativo sem amostra com contagem 0. `k` mínimo continua 5 nos dois escopos;
+  setor pequeno responder `INSUFFICIENT` é o esperado. `POST /samples` continua devolvendo só
+  a faixa da área.
+- **Mapa:** `MapView` recebe `beachArea`/`beachSectors` (GeoJSON genérico) e `focus`
+  (`MapFocus`); camadas `beach-area-*`/`beach-sector-*` criadas uma vez no `load` e
+  alimentadas por `setData`, enquadramento por `fitBounds` (padding 48, `maxZoom: 16`,
+  duration 600) que **não** voa se o `getBounds()` já contém o bbox. Marcador intocado: o
+  elemento raiz continua recebendo o `transform` do MapLibre.
+- **Deep link e ficha:** a praia selecionada mora na URL (`/?praia=<id>&setor=<id>`), não em
+  estado paralelo — "Ver no mapa" da lista e da ficha navega para lá e o mapa enquadra. A
+  ficha mostra "Você está no <setor>", a faixa da área e a de cada setor, e o setor
+  selecionado vai para `?setor=`. Geometria fica em cache de módulo no frontend (sem TTL;
+  muda só em importação) e o `304`/`ETag` fica no servidor (`apiRequest` não envia
+  `If-None-Match`).
+
+Sem migração nova (`V15` continua livre para ocorrências): `bbox` sai de `ST_Envelope` em
+tempo de consulta e as amostras já têm `sector_id`. PostGIS emite `"type":"Polygon"` quando o
+`MultiPolygon` tem uma única parte — testes e tipos do frontend aceitam os dois.
+
+## Roadmap conhecido (curto)
+
+- `beaches` — depois da Fatia 3: zonas
+  `PERMANENT`/`SEMI_PERMANENT` com filtro temporal, GeoJSON público por viewport com
+  ETag/Redis e importação de postos/bases/zonas.
+- `occurrences` — `V15` (depois da `V14`), criação por evento do SOS + reconciliação,
+  193/`FIELD_ATTENDED` e ficha CIOSP (ADR-013).
+- `operations` — `rip_current_markings` para correntes efêmeras (RF13).
+- `region` — `installation_settings` e Region Pack.
+- `tides`/`content`/`search` — endpoints públicos de marés/vídeos e `pg_trgm` (ADR-014).
+- `emergency` — transição `RESOLVED`/`FALSE_ALARM`, perfil `rabbit` com DLQ, Web Push
+  com o app fechado, métricas/k6 (gatilhos da ADR-020).
+- Frontend — cadastro persistido de postos/bases, painel da gestão com posição,
+  formulário de ocorrência, tiles PMTiles e ícones padronizados.
+- App mobile — câmera/push, ícone/splash próprios, keystore e teste em aparelho físico.
+- CI — lint/build do frontend, Testcontainers Garage, SAST/SCA e cobertura.

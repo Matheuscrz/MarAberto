@@ -3,7 +3,7 @@
 ## Documentation and scope
 
 - Read [Contributing.md](../Contributing.md), [docs/Requirements.md](../docs/Requirements.md), and [docs/Architecture.md](../docs/Architecture.md) before making changes.
-- Keep personal planning notes in `docs/Implementation.md`; that file is intentionally ignored and must not be committed.
+- Keep planning notes in `docs/` (Architecture, Requirements, ADRs and the roadmap in `AGENTS.md`); do not commit personal scratch files.
 - Do not add secrets, real personal data, or production credentials to the repository.
 
 ## Safety-sensitive behavior

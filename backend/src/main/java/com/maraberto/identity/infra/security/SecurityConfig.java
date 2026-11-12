@@ -66,9 +66,14 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/emergency-calls/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/beaches/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/tides/**").permitAll()
+                        // Ocupação é anônima por definição (RF10/RNF04): amostra e leitura
+                        // públicas, sem sessão.
+                        .requestMatchers("/api/v1/occupancy/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         // Áreas operacionais por papel.
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/v1/management/**")
+                        .hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/operations/**").hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/dispatch/**")
                         .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")

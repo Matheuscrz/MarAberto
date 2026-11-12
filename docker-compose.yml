@@ -14,7 +14,13 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-maraberto}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      STORAGE_PROVIDER: stub
+      # Garage da própria stack: S3 na 3900 (a 9000 é o mapeamento do host).
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-s3}
+      STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:-http://garage:3900}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-garage}
+      STORAGE_S3_ACCESS_KEY: ${GARAGE_ACCESS_KEY:-maraberto-access-key}
+      STORAGE_S3_SECRET_KEY: ${GARAGE_SECRET_KEY:-maraberto-secret-key}
+      BATHING_AREAS_IMPORT_BUCKET: ${GARAGE_BUCKET:-media-public}
       REALTIME_ALLOWED_ORIGINS: ${REALTIME_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       # Chave de desenvolvimento; o backend recusa esta chave no perfil `prod`.
       # Defina CRYPTO_MASTER_KEY no .env (openssl rand -base64 32) fora do dev local.
@@ -35,6 +41,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      garage:
+        condition: service_started
     restart: unless-stopped
 
   web:

@@ -1,6 +1,6 @@
 # ADR-020: Escala e persistência do caminho crítico do SOS
 
-- Status: **Proposta — para análise** (2026-11-11). Não autoriza mudança de infraestrutura: define **números, gargalos e gatilhos** para que a troca de banco (inclusive para NoSQL) seja decidida com medição, não com opinião. Nenhum item abaixo está implementado além do que já existe (`V10`, outbox, escalada, lease).
+- Status: **Aceito** (2026-11-11). Aprova o **envelope de capacidade, os gargalos e os gatilhos numéricos** deste documento. Não autoriza, por si só, mudança de infraestrutura: cada ação da tabela de gatilhos só é executada quando o número medido disparar. Nenhum item abaixo está implementado além do que já existe (`V10`, outbox, escalada, lease).
 - Relacionadas: ADR-001 (SOS sem conta), ADR-003 (uma instalação por órgão), ADR-004 (broker opcional), ADR-010 (zonas temporais), ADR-012 (dados sensíveis), ADR-017 (geoindexação), ADR-018 (seleção e entrega do SOS).
 - Requisitos que balizam a análise: RF07, RF21, RF42, RN03, RN19, **RNF01 (p95 do SOS < 3 s)**.
 
@@ -135,7 +135,7 @@ Trocar o Postgres no caminho crítico significa abrir mão de três coisas que o
 
 - **Positivas:** o desenho atual fica com envelope documentado e critérios de troca explícitos; a decisão por NoSQL passa a ter gatilho numérico (e nunca "porque é moderno"); fica registrado o que se perde ao sair do PostGIS (decisão espacial exata, CAS transacional, idempotência por constraint).
 - **Negativas / dívidas assumidas:** sem retenção/particionamento hoje, as três tabelas do SOS crescem indefinidamente (item 4 acima); sem carga k6, os limiares são estimativas de projeto, não medições — e a primeira medição pode mover os gatilhos.
-- **A decidir pelo usuário (dono do produto):** (a) política de retenção do histórico do SOS (proposta: 24 meses quentes + arquivo, alinhado à ADR-008); (b) se a continuidade do CBM exige escrita ativa-ativa multi-região — só esse requisito, por escrito, reabre a discussão de NoSQL; (c) se telemetria contínua de plantão entra no escopo (hoje a posição é sob demanda, por decisão de privacidade da ADR-012).
+- **A decidir pelo usuário (dono do produto), sem bloquear o envelope aprovado:** (a) política de retenção do histórico do SOS (proposta: 24 meses quentes + arquivo, alinhado à ADR-008); (b) se a continuidade do CBM exige escrita ativa-ativa multi-região — só esse requisito, por escrito, reabre a discussão de NoSQL; (c) se telemetria contínua de plantão entra no escopo (hoje a posição é sob demanda, por decisão de privacidade da ADR-012).
 - **Revisão:** ao final da primeira temporada com dados reais, ou antes, se um gatilho da tabela disparar.
 
 ## Referências

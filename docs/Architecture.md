@@ -159,7 +159,7 @@ Implementados com **Spring Modulith**: cada módulo é um pacote de topo; só a 
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------- |
 | `identity`    | Cadastro, OTP, CPF (cifrado), login, tokens, MFA (TOTP), papéis, convite de operacionais.                                           | `UserRegistered`, `OperatorInvited`                                            | —                                                    |
 | `region`      | Configuração da instalação, importação de _Region Pack_.                                                                            | `RegionConfigChanged`                                                          | —                                                    |
-| `beaches`     | Praias, zonas de risco permanentes e semipermanentes, fichas, GeoJSON público.                                                      | `BeachChanged`, `RiskZoneChanged`                                              | `RegionConfigChanged`                                |
+| `beaches`     | Áreas de banho (praia, rio, barragem), setores, zonas de risco permanentes e semipermanentes, fichas, GeoJSON público.              | `BeachChanged`, `SectorChanged`, `RiskZoneChanged`                             | `RegionConfigChanged`                                |
 | `operations`  | Postos, plantões, bandeiramento, demarcação de correntes.                                                                           | `ShiftStarted`, `ShiftEnded`, `FlagChanged`, `RipCurrentMarked`, `PostChanged` | —                                                    |
 | `emergency`   | SOS: criação, despacho, ack, escalonamento, ciclo de vida.                                                                          | `EmergencyCallCreated`, `…Acknowledged`, `…Escalated`, `…Resolved`             | —                                                    |
 | `occurrences` | Ocorrências: abertas a partir do SOS ou registradas manualmente (193/externas), desfecho, fila e ficha de transcrição para o CIOSP. | `OccurrenceOpened`, `OccurrenceClosed`, `OccurrenceCiospRegistered`            | `EmergencyCallCreated`, `…Acknowledged`, `…Resolved` |
@@ -242,6 +242,7 @@ web/src/
 | `/login`                                                | público                   | `auth`                                    |
 | `/operador/**`                                          | `LIFEGUARD` (e acima)     | `operator`, `occurrences`                 |
 | `/gestao/**`                                            | `COORDINATOR` (e `ADMIN`) | `management`, `occurrences`               |
+| `/gestao/importar`                                      | `COORDINATOR` (e `ADMIN`) | `management` — **primeira aba do perfil** |
 | `/admin/**`                                             | `ADMIN`                   | `admin`                                   |
 
 A guarda de rota no cliente é **só experiência de uso**; a autorização real é do servidor (13.2).
@@ -273,7 +274,7 @@ web/
 
 **Regra de código:** nenhuma feature importa `@capacitor/*` diretamente. Detecção de plataforma e adaptadores ficam em `shared/lib/platform.ts` (plataforma) e `shared/lib/native.ts` (plugins: GPS, notificação e keep-awake), com a implementação web como padrão em `shared/lib/geolocation.ts` e `shared/lib/pwa.ts` — assim o PWA continua funcionando sem plugin e as fronteiras da ADR-015 seguem válidas.
 
-**Build:** `cd web && npm run cap:sync` (equivale a `npm run build:app` + `npx cap sync android`); o APK/AAB sai do Android Studio (`npm run cap:open`) ou de `web/android/gradlew assembleDebug|assembleRelease` (JDK 21 + Android SDK com platform 36). O APK **debug** já é gerado com `JAVA_HOME` no Temurin 21 e `sdk.dir` em `web/android/local.properties`; o release exige keystore. O build nativo usa `--mode capacitor`: exige `VITE_API_BASE_URL` absoluto em HTTPS (validado pelo `vite.config.ts`), injeta a CSP por `<meta>` e desliga o service worker. `cap add ios` e o build iOS exigem macOS + Xcode. Detalhes e o procedimento passo a passo ficam em `docs/Implementation.md`, Etapa 8B.
+**Build:** `cd web && npm run cap:sync` (equivale a `npm run build:app` + `npx cap sync android`); o APK/AAB sai do Android Studio (`npm run cap:open`) ou de `web/android/gradlew assembleDebug|assembleRelease` (JDK 21 + Android SDK com platform 36). O APK **debug** já é gerado com `JAVA_HOME` no Temurin 21 e `sdk.dir` em `web/android/local.properties`; o release exige keystore. O build nativo usa `--mode capacitor`: exige `VITE_API_BASE_URL` absoluto em HTTPS (validado pelo `vite.config.ts`), injeta a CSP por `<meta>` e desliga o service worker. `cap add ios` e o build iOS exigem macOS + Xcode. Detalhes e o procedimento passo a passo ficam na ADR-019.
 
 ---
 
@@ -637,40 +638,48 @@ O job reivindica `DISPATCHED` com prazo vencido por `FOR UPDATE SKIP LOCKED` (ba
 
 **Escala e troca de persistência.** O envelope de capacidade do caminho crítico do SOS (chamados/s, plantões abertos, linhas por chamado, volume anual), os gargalos em ordem de probabilidade (consulta de elegibilidade não indexável por `COALESCE`, fan-out de entrega, contenção de pool, crescimento sem retenção) e os **gatilhos numéricos** para escalar verticalmente, particionar, usar Redis ou trocar por NoSQL/Kafka estão em `docs/adr/020-escala-e-persistencia-do-caminho-critico-do-sos.md`. Nada entra sem `EXPLAIN`/`pg_stat_statements`/k6 que o justifique.
 
-### 7.7 Ingestão de delimitações de praias e setores (QGIS, KML e GeoJSON)
+### 7.7 Ingestão de áreas de banho e setores (QGIS, KML e GeoJSON)
 
 - **Fonte operacional:** QGIS em EPSG:4326, com a geometria validada antes de exportar. KML/KMZ serve para interoperabilidade; **GeoJSON (RFC 7946)** é o formato canônico do Region Pack e do importador (ADR-016).
-- **KML não é lido pelo backend em produção.** Converter KML/KMZ para GeoJSON com `ogr2ogr` (GDAL) ou exportar direto do QGIS no pipeline de importação; evita acoplar o runtime a GeoTools/parsers XML pesados.
-- **Pipeline:** QGIS → KML/GeoJSON → validação → importador → PostGIS. Reprojetar para 4326, forçar 2D, garantir `Polygon`/`MultiPolygon`, aplicar `ST_IsValid`/`ST_MakeValid`, rejeitar geometria vazia ou auto-intersectada e conferir sobreposição entre praias/setores.
-- **Camadas e contrato mínimo:** `beaches` (polígono), `beach_sectors` (polígono + `beach_external_id`), `lifeguard_posts` (ponto + tipo) e `critical_zones` (polígono + risco/persistência). Toda feição tem `external_id` estável, `name` e, quando aplicável, `source`.
-- **Setor é a unidade operacional.** Plantão, bandeira, ocorrência, sinalização e ocupação podem referenciar `beach_sector_id`; o escopo de autorização pode ser por setor. O setor herda a praia quando não informado e a soma dos setores não precisa cobrir 100 % da praia.
+- **KML não é lido no caminho de produção.** O leitor de KML existe apenas na **ferramenta de importação** do módulo `beaches` (seed de desenvolvimento opt-in e `POST /api/v1/management/bathing-areas/import`, da coordenação, com `dry-run` padrão). Ele é namespace-aware e desliga DTD/entidades externas (XXE). Para produção em escala, o pipeline continua convertendo KML/KMZ para GeoJSON com `ogr2ogr` (GDAL) ou exportando direto do QGIS, sem acoplar o runtime do SOS a parsers XML.
+- **Pipeline:** QGIS → KML/GeoJSON → validação → importador → PostGIS. Reprojetar para 4326, forçar 2D, garantir `Polygon`/`MultiPolygon`, aplicar `ST_IsValid`/`ST_MakeValid`, rejeitar geometria vazia ou auto-intersectada e conferir sobreposição entre áreas/setores.
+- **Área de banho, não só praia (ADR-021).** `beaches` é a **área de banho** (praia, rio, barragem, lagoa) e tem `kind` (`BEACH` padrão, `RIVER`, `DAM`, `LAGOON`, `OTHER`). O nome físico da tabela foi mantido para não quebrar as FKs de postos, zonas, plantões e ocorrências; o conceito está no `package-info`/JavaDoc e no `kind`.
+- **Camadas e contrato mínimo:** `beaches` (`MultiPolygon` + `kind`), `beach_sectors` (`MultiPolygon` + `beach_id`), `lifeguard_posts` (ponto + tipo) e `critical_zones` (`MultiPolygon` + risco/persistência). Toda feição tem `external_id` estável, `name` (anulável no setor), `source` e proveniência.
+- **Setor é a unidade operacional.** Plantão, bandeira, ocorrência, sinalização e ocupação podem referenciar `beach_sector_id`; o escopo de autorização pode ser por setor. **Cada feição do mapeamento é um setor**, inclusive quando não tem nome (`Setor = "-"`): `beach_sectors.name` é anulável e a UI mostra "Setor N" pela `display_order`. A soma dos setores não precisa cobrir 100 % da área; o polígono da área é a **união** dos setores.
+- **Chave natural e idempotência.** Nome de área não é único ("Prainha da Orla" existe em Canindé, Propriá e Neópolis, e homônimos podem ocorrer em estados diferentes): a chave é (`state_code`, `municipio`, `praia` normalizada). **Nome de setor também não é identidade** — dois setores da mesma praia podem ter o mesmo nome; o que os distingue é o `external_id` da origem e a `display_order`. O `external_id` do setor deriva do id estável da origem com o prefixo da UF (`<uf>-areas-banho:<id>`), porque o `id` é único só dentro do arquivo; a reimportação é upsert por `external_id`. A UF vem do parâmetro `state` do envio quando o KML não traz `Estado` (divergência entre os dois é rejeitada). `source_metadata JSONB` guarda o que é proveniência e não estado vivo (por exemplo, `Num. de Oc`, a contagem histórica do arquivo).
 - **Precisão:** guardar a geometria completa no banco; simplificar apenas a cópia enviada ao cliente (`ST_SimplifyPreserveTopology`) e nunca alterar o dado de origem por causa do payload.
-- **Importação idempotente** por `external_id` (upsert por camada), versionada e auditada, com dados em `region-packs/<uf>/`. `dry-run` obrigatório, relatório de aceitos/rejeitados e remoção de feição **nunca** automática. Não usar SQL manual em produção.
-- **Proveniência:** registrar fonte, versão/data e responsável (`source`, `source_version`, `imported_at`, `imported_by`); validar contra a delimitação oficial (Marinha/DHN ou município). A delimitação do órgão é operacional e não substitui a oficial.
+- **Importação idempotente** por `external_id` (upsert por camada), versionada e auditada, com dados em `region-packs/<uf>/`. `dry-run` obrigatório, relatório de aceitos/rejeitados, execução registrada em `import_batches` (`source_version` = hash do arquivo) e remoção de feição **nunca** automática. Não usar SQL manual em produção.
+- **Atualização do mapa (reimportação).** O mesmo endpoint faz carga e atualização: o QGIS é reexportado e o arquivo novo é enviado. O upsert por `external_id` **preserva o UUID** da área/setor (FKs de postos, zonas, plantões e ocorrências continuam válidas). Modos: `UPSERT` (padrão; cria/atualiza, nunca remove) e `SYNC` (opt-in; feição ausente vira `active=false`, *soft delete* reversível). O relatório classifica `created`/`updated`/`unchanged`/`missing`/`rejected` e compara `geometry_hash` (WKB normalizado + SHA-256) com os campos de origem, escrevendo só o que mudou. **Arquivo idêntico ao do último lote aplicado faz curto-circuito:** o parser e a validação continuam rodando, mas nada é reescrito nem entra na auditoria. `dryRun=true` é o padrão; aplicar exige `dryRun=false&confirm=true`. Tudo em uma transação por lote — falha não deixa mapa parcial — e ao aplicar publica `BeachChanged`/`SectorChanged` para invalidar GeoJSON/cache. O fluxo desta fatia é **síncrono** (resposta com o relatório); a fila de importação entra quando houver volume/concorrência medidos.
+- **Projeção de leitura do mapa.** `beach_map_features` é uma view materializada (`AREA` + `SECTOR`, `active` preservado) com índice único e GiST; depois do commit de cada lote aplicado, `REFRESH MATERIALIZED VIEW CONCURRENTLY` roda fora da transação (`@TransactionalEventListener(AFTER_COMMIT)`) para não bloquear leituras. O GeoJSON público e a lista de praias leem a view, não o KML.
+- **Arquivamento do arquivo aplicado.** Todo lote **aplicado** (nunca o `dry-run`) envia os bytes originais ao storage de objetos (`V12`, ADR-016): `S3ObjectStorage` sobre o Garage, chave endereçada pelo conteúdo em `<prefixo>/<UF>/<sha256>.kml` (padrão `bathing-areas/SE/<sha256>.kml`). A chave fica em `import_batches.source_storage_key`; reenviar o mesmo arquivo reusa o mesmo objeto em vez de acumular cópias. O envio é **best-effort**: se o storage estiver fora, a importação continua e a coluna fica nula — perder o mapa correto é pior do que ficar sem a cópia de auditoria.
+- **Leitura pública por proximidade (RF01).** `GET /api/v1/beaches?lat=&lon=&radiusM=` devolve **apenas** as áreas ativas num raio de até **30 km** da posição informada, da mais próxima para a mais distante; `GET /api/v1/beaches/{id}` devolve a ficha com os setores na ordem do mapeamento. Sem posição não existe lista (não há "todas as praias do estado"). O filtro é `ST_DWithin(geometry::geography, ponto, raio)` sobre a projeção materializada, com o índice GiST de expressão da `V13`; a distância é medida até o polígono, então quem está dentro da área vê `0 m`. Erros em RFC 9457 (`localizacao-invalida` 400, `praia-nao-encontrada` 404).
+- **"Onde estou" na lista (RF01).** A resposta da lista carrega `position` (`beachId`, `beachName`, `sectorId`, `sectorLabel`) resolvida por `ST_Contains` em `beach_sectors` com `ORDER BY display_order, id LIMIT 1`: setor sobreposto resolve para o primeiro da ordem do mapeamento, a mesma regra da amostra de ocupação, para "onde estou" e "onde registro presença" nunca divergirem. Fora de setor ativo o bloco vem nulo. A coordenada continua sendo dado efêmero de request: serve à consulta e é descartada. `sectorLabel` é gerado no backend ("Setor N" quando o nome é nulo), porque o rótulo é regra de apresentação do mapeamento e não pode divergir entre telas. A query fica em `beaches` mesmo sendo parecida com a de `occupancy`: módulo não importa outro fora da `api/` pública, então a duplicação é intencional.
+- **Geometria para o mapa (`GET /api/v1/beaches/{id}/map`).** Devolve `bbox` + `geometry` da área e `bbox` + `geometry` de cada setor ativo, tudo em GeoJSON simplificado com `ST_SimplifyPreserveTopology(geometria, 5e-5)` (~5 m) e 6 casas decimais — o suficiente para o zoom de bairro; a geometria completa continua no banco. `bbox` sai de `ST_Envelope` em tempo de consulta (sem coluna nova) e é o que o cliente usa para `fitBounds`, que é mais preciso no setor do que na área (a área é a união dos setores). Endpoint separado da lista de propósito: a lista é chamada a cada abertura do mapa e não pode carregar dezoito polígonos. Resposta com `ETag` por área e por versão do mapa e `Cache-Control: max-age=60, public`; `If-None-Match` (lista, `*` e forma fraca `W/`) responde `304` sem corpo. A versão do mapa é `(quantidade de lotes aplicados, instante do último lote)` — `import_batches.id` é UUID e não serve de contador — e o `ETag` inclui o `beachId`, senão o `If-None-Match` de uma praia responderia `304` para outra. PostGIS emite `"type":"Polygon"` quando o `MultiPolygon` tem uma única parte; o cliente aceita os dois.
+- **Proveniência:** registrar fonte, versão/data e responsável (`source`, `source_version`, `imported_at`, `imported_by`, `source_metadata`); validar contra a delimitação oficial (Marinha/DHN ou município). A delimitação do órgão é operacional e não substitui a oficial.
 
 ```sql
 CREATE TABLE beach_sectors (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    beach_id      UUID NOT NULL REFERENCES beaches(id),
-    external_id   VARCHAR(120) NOT NULL,
-    name          TEXT NOT NULL,
-    kind          VARCHAR(20),                    -- NORTH, SOUTH, CENTRAL, OTHER
-    display_order INT NOT NULL DEFAULT 0,
-    geometry      geometry(Polygon, 4326) NOT NULL,
-    source        VARCHAR(80),
-    source_version VARCHAR(40),
-    imported_at   TIMESTAMPTZ,
-    imported_by   UUID REFERENCES app_users(id),
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_sector_external UNIQUE (external_id),
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    beach_id       UUID NOT NULL REFERENCES beaches(id),
+    external_id    VARCHAR(160) NOT NULL,         -- <uf>-areas-banho:<id> da origem
+    name           TEXT,                          -- anulável e repetível: é rótulo, não identidade
+    display_order  INT NOT NULL DEFAULT 0,
+    geometry       geometry(MultiPolygon, 4326) NOT NULL,
+    source         VARCHAR(80),
+    source_version VARCHAR(64),
+    source_metadata JSONB,
+    imported_at    TIMESTAMPTZ,
+    imported_by    UUID REFERENCES operational_users(id),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_sector_external UNIQUE (external_id),  -- nunca (beach_id, name)
     CONSTRAINT chk_sector_geom   CHECK (ST_IsValid(geometry))
 );
 CREATE INDEX idx_sector_beach ON beach_sectors (beach_id);
 CREATE INDEX idx_sector_geom  ON beach_sectors USING GIST (geometry);
 ```
 
-- **Conversão de KML (offline):** `ogr2ogr -f GeoJSON -t_srs EPSG:4326 sectors.geojson sectors.kml`; o importador recebe GeoJSON e rejeita feições fora de praia, `external_id` duplicado ou geometria inválida.
+- **Conversão de KML (offline):** `ogr2ogr -f GeoJSON -t_srs EPSG:4326 sectors.geojson sectors.kml`; o importador recebe GeoJSON e rejeita feições fora de área, `external_id` duplicado ou geometria inválida. A ferramenta aceita KML no desenvolvimento e em importação assistida, com o mesmo contrato de feições.
 - **Cache/busca:** a importação publica `BeachChanged`/`SectorChanged`; a projeção de busca e o GeoJSON público (Redis) são invalidados por evento, nunca por TTL curto.
 - **Privacidade:** geometria de praia/setor é pública; coordenada de ocorrência e posição de operador **não** entram no GeoJSON público.
 
@@ -1085,11 +1094,14 @@ WHERE alert_type = :type
 
 ### 8.5 Ocupação (privacidade por desenho)
 
-1. O cliente baixa o GeoJSON das praias (cacheado, ETag) e **compara localmente** a posição com o polígono.
-2. Se estiver dentro e o app em primeiro plano, envia a cada ~5 min `POST /occupancy/heartbeat {beachId, token}`; `token` é aleatório, **gerado no dispositivo e rotacionado diariamente**.
-3. No servidor: `ZADD occ:{beachId} <agora> sha256(token + salt_do_dia)`; `ZREMRANGEBYSCORE` remove > 15 min; `ZCARD` dá a contagem.
-4. Nível = limiares por praia; abaixo da amostra mínima _k_ → "dados insuficientes".
-5. **Limitações assumidas:** o servidor não consegue verificar a posição enviada pelo cliente (o dado é indicativo, não pericial); o IP **não é registrado** nesses endpoints (configuração do Nginx).
+1. O cliente lê a posição **uma vez** ao abrir a ficha da praia (sem `watchPosition`) e envia `POST /api/v1/occupancy/samples {latitude, longitude, token}`; `token` é aleatório (`crypto.randomUUID()`), vive só na memória do módulo e é descartado ao recarregar o app — nada em `localStorage`/`sessionStorage`.
+2. O servidor resolve o **setor** que contém o ponto (`ST_Contains` em `beach_sectors`) e grava **apenas** `beach_id`, `sector_id`, `bucket_start` (janela de 15 min) e o **HMAC** do token (`BlindIndexer`, índice cego). A coordenada é descartada nessa mesma transação; não há coluna de posição, de IP nem histórico por aparelho. Ponto fora de setor mapeado → `204`, nada gravado.
+3. `UNIQUE (anonymous_token, sector_id, bucket_start)` com `ON CONFLICT DO NOTHING`: recarregar a tela ou um retry de rede não infla o contador.
+4. Estimativa = `count(DISTINCT anonymous_token)` do setor/área na janela móvel de 15 min (`maraberto.occupancy.window`); abaixo de `minimum-sample` (_k_ = 5) a resposta é `INSUFFICIENT` **sem nível**, para não permitir inferir quantas pessoas estão num setor vazio.
+5. **Área e setor no mesmo contrato.** `GET /api/v1/occupancy/beaches/{id}` devolve a faixa da **área** e a de **cada setor ativo** (`INSUFFICIENT` quando o setor não atinge _k_). **A faixa da área é a união das amostras, nunca a soma dos setores:** quem está na divisa de dois setores aparece nos dois, e somar inflaria o número (dois setores com os mesmos 5 aparelhos dariam 10, mudando a faixa). Por isso a área tem contagem própria (`count(DISTINCT token)` por `beach_id`) e o cliente nunca deriva uma leitura da outra. Setor pequeno responder `INSUFFICIENT` é o esperado — o _k_ é o mesmo nos dois escopos, senão a leitura por setor reabriria o que a área protege.
+6. Faixas calibráveis por instalação: `moderate` 10, `high` 25, `extreme` 50 amostras. A API devolve a faixa (`LOW`/`MODERATE`/`HIGH`/`EXTREME`) e a janela, nunca a contagem.
+7. Retenção curta: o expurgo (`delete ... where created_at < now() - 24 h`) roda **na própria escrita**, então a tabela não acumula trilha; nenhum job noturno é necessário.
+8. **Limitações assumidas:** o servidor não consegue verificar que o aparelho está mesmo na praia (o dado é indicativo, não pericial); aparelho sem o app aberto não conta; o IP não é registrado nesses endpoints (configuração do Nginx). A fonte da verdade é a tabela `occupancy_samples`, não o Redis — o indicador é barato o bastante para dispensar cache.
 
 ### 8.6 Upload de foto
 
@@ -1145,10 +1157,13 @@ sequenceDiagram
 | Dado                     | Onde                   | Chave / política                                | Invalidação                                           |
 | ------------------------ | ---------------------- | ----------------------------------------------- | ----------------------------------------------------- |
 | Praias e zonas (GeoJSON) | HTTP + Redis           | `geo:beaches:v{versão}`; `ETag`; `max-age=3600` | `BeachChanged`/`RiskZoneChanged` incrementa a versão. |
+| Lista de praias por proximidade | HTTP (60 s, `private`) + memória do processo | chave pela posição arredondada a 3 casas (~110 m) + raio; **posição nunca persiste nem é logada** | `BathingAreaMapChanged`/`BeachChanged` limpa o cache; TTL de 120 s como rede de segurança. |
+| Ficha da área e setores     | HTTP (60 s) + memória do processo | `detail:{beachId}`                                                                              | `BeachChanged` limpa o cache.                          |
+| Geometria da área/setores para o mapa | HTTP (`max-age=60, public`) + `ETag` + memória do processo (frontend, sem TTL) | `map:{beachId}`; `ETag` = `beachId` + versão do mapa (lotes aplicados) | `BathingAreaMapChanged`/`BeachChanged` limpa o cache; o `ETag` muda quando um lote é aplicado. |
 | Bandeira atual           | HTTP (30–60 s) + Redis | `flag:current:{beachId}`                        | `FlagChanged` (write-through).                        |
 | Maré do dia              | HTTP + Redis           | `tide:{station}:{yyyy-MM-dd}`, TTL ~24 h        | Reescrito na ingestão diária.                         |
 | Vídeos educativos        | HTTP + Redis           | `content:videos:v{n}`                           | `ContentChanged`.                                     |
-| Ocupação                 | Redis                  | `occ:{beachId}` (ZSET, janela 15 min)           | Expiração por janela.                                 |
+| Ocupação                 | PostgreSQL             | `occupancy_samples` (janela móvel de 15 min)    | Expurgo > 24 h na escrita; sem cache (barato e sensível). |
 | Rate limit               | Redis                  | `rl:{rota}:{sujeito}`                           | Janela do bucket.                                     |
 | Tiles do mapa            | Nginx/CDN              | arquivo PMTiles estático, `Range` requests      | Troca de arquivo versionado.                          |
 
@@ -1221,9 +1236,10 @@ Ambos entram via **externalização do Spring Modulith**, sem alterar o código 
 
 ## 12. Armazenamento de objetos
 
-- **Porta:** `ObjectStoragePort` (`presignPut`, `presignGet`, `delete`, `head`) implementada sobre o **cliente S3** (AWS SDK v2 ou equivalente).
+- **Porta:** `ObjectStoragePort` (`presignPut`, `presignGet`, `put`, `delete`, `head`) implementada sobre o **cliente S3** (AWS SDK v2 ou equivalente).
+- **Compatibilidade do cliente:** o SDK v2 assina o corpo em `aws-chunked` por padrão e o Garage responde `400 Invalid payload signature`; o cliente e o presigner desligam o *chunked encoding* (`chunkedEncodingEnabled(false)`) e só calculam checksum quando o serviço exige (`requestChecksumCalculation=WHEN_REQUIRED`). Sem isso todo upload falha mesmo com credencial correta — o que, por ser *best-effort*, apareceria só como "arquivo de auditoria ausente".
 - **Padrão do Compose:** **Garage** (S3-compatível, leve). **Alternativa:** bucket S3 de nuvem pública, ou SeaweedFS/Ceph RGW onde já exista.
-- **Buckets:** `media-public` (miniaturas/fotos aprovadas, leitura via URL assinada ou CDN) e `media-private` (originais pendentes).
+- **Buckets:** `media-public` (miniaturas/fotos aprovadas, leitura via URL assinada ou CDN) e `media-private` (originais pendentes). O mesmo `media-public` guarda o **arquivo aplicado da importação do mapa** em `bathing-areas/<UF>/<sha256>.kml` (chave por conteúdo; ADR-016), com a chave registrada em `import_batches.source_storage_key`.
 - **Política:** _lifecycle_ para expirar originais `PENDING`/`REJECTED`; versionamento desligado; criptografia em repouso quando disponível.
 - **Teste de contrato** da porta rodando contra Garage no CI, para evitar surpresas ao trocar de provedor.
 
@@ -1292,6 +1308,7 @@ Registro, login e papéis vivem **dentro do sistema** (módulo `identity`), sem 
 | Acompanhar o trabalho em campo (`/gestao`)            |    ✘    |    ✘     |          ✘          |               ✔               |           ✔            |
 | Painel tático e histórico                             |    ✘    |    ✘     |          ✘          |               ✔               |           ✔            |
 | CMS de conteúdo; gestão de praias/zonas               |    ✘    |    ✘     |          ✘          |               ✔               |           ✔            |
+| Importar/atualizar o mapa de áreas de banho (KML)     |    ✘    |    ✘     |          ✘          |        ✔ (primeira aba)       |   ✘ (só usuários)      |
 | Gestão de usuários e configuração regional (`/admin`) |    ✘    |    ✘     |          ✘          | ativar/desativar guarda-vidas | ✔ (cadastra e convida) |
 
 Autorização por **papel + escopo** (posto/praia) validada no servidor, nunca só no cliente.
