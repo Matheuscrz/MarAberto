@@ -25,14 +25,14 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 - **Sessão**: `/login` único e três áreas por papel; refresh em cookie
   `__Secure-maraberto_rt; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict` e access
   token **só em memória**.
-- **Estado**: backend com **132 testes** (`./gradlew clean check`); frontend com
+- **Estado**: backend com **145 testes** (`./gradlew clean check`); frontend com
   `npm run build` e `npm run lint` verdes; app Android (Capacitor 8) com APK debug gerado.
 
 ## Ler antes de trabalhar
 
-- `docs/Architecture.md` — §7.5/§7.6 (SOS e escala), §7.7 (importação, arquivamento e
-  lista pública), §7.8 (zonas temporais), §7.12/§7.13 (geoindexação e despacho), §8.5
-  (ocupação) e §9 (cache).
+- `docs/Architecture.md` — §7.5/§7.6 (SOS e escala), §7.7 (importação, arquivamento, lista
+  pública, "onde estou" e geometria com `ETag`), §7.8 (zonas temporais), §7.12/§7.13
+  (geoindexação e despacho), §8.5 (ocupação por área e por setor) e §9 (cache).
 - `docs/Requirements.md` — RF/RN/RNF; **RF41** é a importação de mapeamento.
 - `docs/adr/` — ADRs 001–021. Mais usadas: 012 (dados sensíveis), 013 (ocorrências),
   016 (importação), 017/018 (SOS), 019 (Capacitor), 020 (escala), 021 (área de banho).
@@ -291,8 +291,8 @@ importador descobre o que é novo, o que mudou e o que sumiu.
 
 ## Fatia 2 — mapa público real, arquivamento e ocupação
 
-**Status:** implementada no working tree (backend + testes + frontend); falta o aval para
-commitar. Substitui os dados mocados de praias pelos dados da importação.
+**Status:** commitada (`e2012a7`, `6dd5097`, `30dccf6`, `403083a`, `7da31af`). Substituiu
+os dados mocados de praias pelos dados da importação.
 
 ### Arquivamento do KML aplicado (`V12`)
 
@@ -340,36 +340,54 @@ commitar. Substitui os dados mocados de praias pelos dados da importação.
   a contagem. Token do cliente é `crypto.getRandomValues` em memória do módulo (rotaciona
   ao recarregar), nunca em storage web. `SecurityConfig` libera `/api/v1/occupancy/**`.
 
-## Fatia 3 — geometria no mapa e ocupação por setor (planejada)
+## Fatia 3 — geometria no mapa e ocupação por setor
 
-**Plano detalhado:** `docs/plan/fatia-3-mapa-e-ocupacao.md` (2026-11-12). Nada implementado.
+**Status:** implementada no working tree (backend + testes + frontend + docs); falta o aval
+para commitar. **Plano detalhado:** `docs/plan/fatia-3-mapa-e-ocupacao.md` (2026-11-12).
 
-A geometria **já é armazenada** (`beaches.boundary`, `beach_sectors.geometry`, projetada em
-`beach_map_features`), mas o cliente só recebe o centroide e a ocupação só agrega por área.
-A fatia fecha três lacunas:
+A geometria **já era armazenada** (`beaches.boundary`, `beach_sectors.geometry`, projetada em
+`beach_map_features`), mas o cliente só recebia o centroide e a ocupação só agregava por área.
+A fatia fechou as três lacunas:
 
-- **Geometria na API:** `GET /api/v1/beaches/{id}/map` devolve `bbox` + `MultiPolygon`
-  simplificado (`ST_SimplifyPreserveTopology`, 6 casas) e `ETag` por versão do mapa
-  (`max(id)` de `import_batches` aplicado) → `304` com `If-None-Match`. A lista continua
-  com centroide; não existe GeoJSON por viewport nesta fatia.
-- **Onde estou:** a resposta de `GET /beaches?lat&lon` ganha `position`
-  (`beachId`/`sectorId`/`sectorLabel`), resolvido por `ST_Contains` em `beach_sectors` com
-  `ORDER BY display_order LIMIT 1`. A query vive em `beaches` (duplicada de propósito: o
-  módulo não pode importar `occupancy`).
-- **Ocupação por setor:** `GET /api/v1/occupancy/beaches/{id}` ganha `sectors`, agrupando as
-  mesmas amostras por `sector_id`. **A área é `count(DISTINCT token)`, nunca a soma dos
-  setores** (quem está na fronteira aparece em dois). `k` mínimo continua 5 para os dois
-  escopos; setor pequeno responder `INSUFFICIENT` é o esperado.
-- **Mapa:** `MapView` ganha prop de foco (`fitBounds` no bbox, `maxZoom: 16`, não voa se a
-  área já está enquadrada) e camadas de área/setor alimentadas por `setData` — nunca recriar
-  o mapa nem tocar no elemento raiz dos marcadores.
+- **Geometria na API:** `GET /api/v1/beaches/{id}/map` devolve `bbox` (`ST_Envelope` em tempo
+  de consulta) + geometria GeoJSON simplificada (`ST_SimplifyPreserveTopology`, tolerância
+  `5e-5` ≈ 5 m, 6 casas) da área e de cada setor ativo, com `Cache-Control: max-age=60,
+  public` e `ETag` por área e por versão do mapa → `304` com `If-None-Match` (aceita lista,
+  `*` e `W/`). **`import_batches.id` é UUID**, então a versão é
+  `count(*) || '-' || extract(epoch from max(imported_at))` dos lotes aplicados; o `ETag`
+  inclui o `beachId` para o `If-None-Match` de uma praia nunca responder `304` para outra.
+  A lista continua com centroide; não existe GeoJSON por viewport nesta fatia.
+- **Onde estou:** a resposta de `GET /beaches?lat&lon` ganhou `position`
+  (`beachId`/`beachName`/`sectorId`/`sectorLabel`), resolvido por `ST_Contains` em
+  `beach_sectors` com `ORDER BY display_order, id LIMIT 1` (setor sobreposto → vence o
+  primeiro da ordem do mapeamento, a mesma regra da amostra). A query vive em `beaches`
+  (duplicada de propósito: o módulo não pode importar `occupancy`) e `sectorLabel` é gerado no
+  backend ("Setor N" quando o nome é nulo).
+- **Ocupação por setor:** `GET /api/v1/occupancy/beaches/{id}` devolve `BeachOccupancy` —
+  faixa da área e `sectors[]`. **A área é `count(DISTINCT token)`, nunca a soma dos setores**
+  (quem está na fronteira aparece em dois); `countDistinctTokensBySector` usa `LEFT JOIN`
+  para listar setor ativo sem amostra com contagem 0. `k` mínimo continua 5 nos dois escopos;
+  setor pequeno responder `INSUFFICIENT` é o esperado. `POST /samples` continua devolvendo só
+  a faixa da área.
+- **Mapa:** `MapView` recebe `beachArea`/`beachSectors` (GeoJSON genérico) e `focus`
+  (`MapFocus`); camadas `beach-area-*`/`beach-sector-*` criadas uma vez no `load` e
+  alimentadas por `setData`, enquadramento por `fitBounds` (padding 48, `maxZoom: 16`,
+  duration 600) que **não** voa se o `getBounds()` já contém o bbox. Marcador intocado: o
+  elemento raiz continua recebendo o `transform` do MapLibre.
+- **Deep link e ficha:** a praia selecionada mora na URL (`/?praia=<id>&setor=<id>`), não em
+  estado paralelo — "Ver no mapa" da lista e da ficha navega para lá e o mapa enquadra. A
+  ficha mostra "Você está no <setor>", a faixa da área e a de cada setor, e o setor
+  selecionado vai para `?setor=`. Geometria fica em cache de módulo no frontend (sem TTL;
+  muda só em importação) e o `304`/`ETag` fica no servidor (`apiRequest` não envia
+  `If-None-Match`).
 
 Sem migração nova (`V15` continua livre para ocorrências): `bbox` sai de `ST_Envelope` em
-tempo de consulta e as amostras já têm `sector_id`.
+tempo de consulta e as amostras já têm `sector_id`. PostGIS emite `"type":"Polygon"` quando o
+`MultiPolygon` tem uma única parte — testes e tipos do frontend aceitam os dois.
 
 ## Roadmap conhecido (curto)
 
-- `beaches` — Fatia 3 acima (plano em `docs/plan/fatia-3-mapa-e-ocupacao.md`); depois zonas
+- `beaches` — depois da Fatia 3: zonas
   `PERMANENT`/`SEMI_PERMANENT` com filtro temporal, GeoJSON público por viewport com
   ETag/Redis e importação de postos/bases/zonas.
 - `occurrences` — `V15` (depois da `V14`), criação por evento do SOS + reconciliação,

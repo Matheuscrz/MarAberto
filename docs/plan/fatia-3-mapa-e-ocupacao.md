@@ -1,6 +1,6 @@
 # Fatia 3 — geometria no mapa e ocupação por setor
 
-**Status:** plano aprovado para execução; nada implementado.
+**Status:** implementada (backend + testes + frontend + docs); falta o aval para commitar.
 **Data:** 2026-11-12.
 **Relacionado:** ADR-016 (importação), ADR-021 (área de banho), RF01, RF10, RN06, RNF04.
 
