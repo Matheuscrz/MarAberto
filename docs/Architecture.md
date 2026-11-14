@@ -404,18 +404,35 @@ CREATE TABLE shifts (
 );
 CREATE UNIQUE INDEX uq_shift_open_per_operator ON shifts(operator_id) WHERE ended_at IS NULL;
 
--- Bandeiramento (histórico com validade)
+-- Bandeiramento (histórico append-only com validade)
 CREATE TABLE flag_updates (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     beach_id    UUID NOT NULL REFERENCES beaches(id),
+    sector_id   UUID REFERENCES beach_sectors(id),  -- nulo = praia inteira
     post_id     UUID REFERENCES lifeguard_posts(id),
-    flag        VARCHAR(20) NOT NULL,              -- GREEN, YELLOW, RED, DOUBLE_RED
-    media_id    UUID,
+    flag        VARCHAR(20) NOT NULL,              -- GREEN, YELLOW, RED, PURPLE, BLACK
+    notes       VARCHAR(400),
     set_by      UUID NOT NULL REFERENCES app_users(id),
     valid_until TIMESTAMPTZ NOT NULL,
+    closed_at   TIMESTAMPTZ,                       -- encerrada antes da validade
+    closed_by   UUID REFERENCES app_users(id),
+    -- Ponto do lançamento por localização (V16); nulo no lançamento por escopo.
+    signal_position      GEOGRAPHY(Point, 4326),
+    position_accuracy_m  NUMERIC(7,1),
+    position_source      VARCHAR(20),              -- SCOPE, DEVICE_GPS
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_flag_current ON flag_updates (beach_id, created_at DESC);
+CREATE INDEX idx_flag_open   ON flag_updates (beach_id, sector_id, created_at DESC)
+    WHERE closed_at IS NULL;
+CREATE INDEX idx_flag_expiry ON flag_updates (valid_until) WHERE closed_at IS NULL;
+
+-- Fotos do lançamento (V16): a bandeira tem até 3, na ordem de exibição.
+CREATE TABLE flag_media (
+    flag_id      UUID NOT NULL REFERENCES flag_updates(id),
+    media_id     UUID NOT NULL REFERENCES media_assets(id),
+    display_order SMALLINT NOT NULL,
+    PRIMARY KEY (flag_id, media_id)
+);
 
 -- Demarcação dinâmica de correntes
 CREATE TABLE rip_current_markings (
@@ -495,10 +512,12 @@ CREATE TABLE media_assets (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     object_key   VARCHAR(255) NOT NULL,
     content_type VARCHAR(60) NOT NULL,
-    size_bytes   BIGINT,
-    sha256       BYTEA,
-    owner_id     UUID NOT NULL,
-    status       VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING, READY, REJECTED
+    size_bytes   BIGINT NOT NULL,
+    width_px     INTEGER,                           -- dimensões do JPEG normalizado
+    height_px    INTEGER,
+    sha256       BYTEA NOT NULL,                    -- hash do conteúdo normalizado
+    owner_id     UUID NOT NULL REFERENCES operational_users(id),
+    status       VARCHAR(20) NOT NULL DEFAULT 'READY', -- PENDING, READY, REJECTED
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -761,6 +780,7 @@ CREATE TABLE occurrence_people (               -- tudo opcional e cifrado; sem �
 **Regras do modelo**
 
 - `emergency_call_id UNIQUE` + `INSERT … ON CONFLICT DO NOTHING` torna a criação a partir do SOS **idempotente** (o evento é _at-least-once_, seção 11).
+- **O gatilho é o aceite (`SosAcknowledged`), não a criação do chamado.** SOS sem atendente não vira ocorrência: a ficha nasce `IN_PROGRESS` quando o guarda-vidas assume, já com praia/setor, coordenada do chamado (sensível) e `ciosp_status = PENDING`. A criação roda depois do commit do ack (`AFTER_COMMIT` + `REQUIRES_NEW`) e o job de reconciliação cobre falha do listener — ver §8.7.
 - **`FIELD_ATTENDED`** é o atendimento feito pelo guarda-vidas **sem** chamado no 193 ou no SOS; ele registra depois, com data/hora do fato e `client_request_id` para idempotência. A origem `CBM_193` exige `external_protocol` recomendado (não obrigatório) e `EXTERNAL_OTHER` cobre rádio/presencial/outro posto.
 - A restrição `chk_occ_place` impõe RN12: sem coordenada, é obrigatório informar praia + ponto de referência. `beach_sector_id`, quando houver, é o recorte operacional usado no painel da coordenação.
 - Nome, contato, condição, resumo e observações usam `EncryptedStringConverter` (ADR-012). Por serem cifrados, **não** entram em `LIKE`, ordenação nem em `search_documents`; a busca de ocorrência é por número, protocolo (igualdade), praia, período e natureza.
@@ -838,6 +858,44 @@ CREATE INDEX idx_shift_scope       ON shift_sessions (beach_id, beach_sector_id,
 - **Privacidade:** `last_position` é dado sensível (RN17) — visível apenas à coordenação do escopo, nunca em listagem pública, log, cache, métrica ou exportação aberta. A posição do posto/base é pública; a do operador não.
 - **Painel:** uma consulta por escopo agrega plantões abertos + última posição + contadores do dia (ocorrências por origem/status, sinalizações, pendências CIOSP). Contadores usam índices parciais (`occurred_at`, `status`) e podem virar _view_ de leitura; não usar _view materializada_ para SOS/plantão, que precisam ser frescos.
 - **Escopo:** `COORDINATOR` vê praias/setores do seu escopo; `ADMIN` vê tudo; `LIFEGUARD` vê o próprio plantão e o posto.
+
+#### Bandeira e estruturas (`V15`)
+
+A vigência da sinalização e a visibilidade das estruturas são decididas **na consulta**, não por mutação. Nada é apagado nem desativado por tempo, e nenhum job "expira" bandeira: os jobs existentes só carimbam `ended_at`/`ended_reason` do plantão e sinalizam revisão.
+
+- **`flag_updates` é append-only.** Cada lançamento tem validade própria (padrão `maraberto.flags.validity: PT12H`, teto de 24 h e piso de 0,5 h). Lançar de novo no mesmo escopo fecha o anterior com `closed_at`/`closed_by` sob `pg_advisory_xact_lock(hashtextextended(beach_id || ':' || sector_id))`; a validade original do anterior permanece registrada.
+- **Vigente = `closed_at IS NULL AND valid_until > now()`.** É esse predicado que o mapa público usa (`GET /api/v1/flags`); a bandeira vencida continua no histórico e não aparece entre os pins.
+- **A ficha não apaga a sinalização.** `GET /api/v1/flags?beachId=<id>&includeExpired=true` devolve o último lançamento de cada escopo (praia inteira e cada setor), mesmo vencido ou encerrado, para a ficha mostrar a última cor com o selo **"desatualizada"** (RN01). `includeExpired` sem `beachId` é `400` em RFC 9457.
+- **Bandeira por setor, fallback para a área.** `sector_id` nulo vale para a praia inteira; setor sem lançamento próprio herda a bandeira da praia na ficha. Dois setores podem ter o mesmo nome — o escopo é o `sector_id`.
+- **O pin não é a posição do operador.** Lançamento de setor usa o centroide do setor; lançamento da área usa `ST_PointOnSurface(boundary)`. A posição do guarda-vidas continua fora da resposta pública (RN17).
+- **Estruturas têm estado explícito.** `lifeguard_posts` e `mobile_bases` ganham `active`, `deactivated_at` e `status_note`: posto inativo some do mapa público e da lista de destinos do plantão, e o histórico de plantões/ocorrências continua apontando para a linha. Reativar limpa `deactivated_at` e **preserva** a nota.
+- **Base móvel só existe no mapa com plantão vivo.** A consulta pública usa `last_position` do plantão aberto (fallback: posição cadastrada) e exige `last_seen_at` dentro do lease. Sem turno aberto ou com lease vencido, a base some; nada é apagado.
+- **Polling do cliente:** 30 s para pins de estação/sinalização e 60 s para zonas de risco e ficha, pausado com a aba escondida e revalidado ao voltar. O servidor é a fonte da verdade; o cache HTTP é curto (30 s no mapa, 60 s na ficha).
+
+#### Sinalização e estruturas ancoradas no aparelho (`V16`, ADR-023)
+
+A operação de campo tem **duas formas** de dizer onde a sinalização está, e as duas convivem no mesmo endpoint (`POST /api/v1/operations/flags`):
+
+- **Por escopo:** `beachId` + `sectorId` opcional, escolhidos no console. É a sinalização geral da área.
+- **Por localização:** `latitude`/`longitude` (+ `accuracyMeters`) da leitura atual do aparelho. O servidor resolve o escopo em `beach_sectors` por `ST_Contains` (`ORDER BY display_order, id LIMIT 1`, a mesma regra da amostra de ocupação) e, sem setor, em `beaches.boundary`. Ponto fora de qualquer área mapeada **não é recusado** desde a ADR-024: a resposta é `201` com `outcome=UNMAPPED` e o registro vai para `unmapped_signals`, na fila da coordenação — sem pin público, porque uma bandeira sem praia não teria onde aparecer nem ficha.
+
+O ponto enviado é da **sinalização** (a bandeira plantada ali), não do guarda-vidas: `signal_position` guarda uma coordenada por lançamento, `position_source` registra a origem (`SCOPE`/`DEVICE_GPS`) e a resposta pública usa `COALESCE(signal_position, centroide do setor / ST_PointOnSurface(área))` como pin. Não existe histórico de deslocamento — a posição do operador continua sendo a do plantão (§7.11, RN17).
+
+**Estruturas (postos e bases)** ganham o mesmo tratamento: `position_source`, `position_accuracy_m` e `position_updated_at` em `lifeguard_posts`/`mobile_bases`, mais `POST /api/v1/operations/stations` (cadastro na posição atual) e `PATCH /api/v1/operations/stations/{kind}/{id}/position` (reposição), ambos para `LIFEGUARD`/`COORDINATOR`/`ADMIN`. A TI mantém o cadastro administrativo em `/api/v1/admin/stations`; o painel mostra origem, precisão e data do ponto para julgar a confiança. A ativação em campo e a foto da estrutura chegaram na ADR-024 (`V18`/`V19`).
+
+**Foto da sinalização** (`media_assets` + `flag_media`, até 3 por lançamento, na ordem de exibição): o upload passa pelo backend (`POST /api/v1/media`, multipart ou JSON em base64), é **re-codificado** pelo `ImageNormalizer` (maior lado 1600 px, JPEG 0,85, EXIF/GPS descartados) e servido em `GET /api/v1/media/{id}` com `ETag`/`304` e cache imutável de 30 dias. O binário do aparelho nunca é guardado como chegou. A foto pertence ao lançamento: some do mapa junto com a bandeira vencida e continua na ficha enquanto o lançamento existir. Ninguém anexa a foto de outro operador — o `MediaCatalog` confere dono e existência antes do `INSERT`.
+
+#### Área não identificada e estrutura em campo (`V18`/`V19`, ADR-024)
+
+**Lançar fora do mapeamento não é erro.** Quando o ponto do lançamento por localização não cai em nenhuma área ativa, `POST /api/v1/operations/flags` responde **`201` com `outcome=UNMAPPED`** e grava em `unmapped_signals` (+ `unmapped_signal_media`, até 3 fotos). **Nada é publicado no mapa**: `flag_updates` não recebe linha e `GET /api/v1/flags` não lê a tabela. O registro guarda um ponto por lançamento (não um trajeto), a cor pretendida, a observação, a matrícula de quem reportou e o posto do plantão.
+
+- **Triagem humana:** `GET /api/v1/management/unmapped-signals?status=&limit=` e `POST /api/v1/management/unmapped-signals/{id}/decision` (`COORDINATOR`; `ADMIN` como superusuário técnico). Decisões: `IDENTIFIED` (associa área ativa e, opcionalmente, setor dela), `NEEDS_MAPPING` (pede novo KML), `DISCARDED` (encerra sem ação) e `PENDING` (reabre). A linha nunca é apagada; a decisão tem autor e data.
+- **A área mais próxima é sugestão calculada na consulta** (`ST_Distance`), nunca vínculo automático: proximidade não identifica o local (um ponto de rio pode estar a poucas centenas de metros de uma praia oceânica).
+- **A fila é sensível (RN17).** Coordenada, matrícula e fotos só são lidas na rota autenticada da coordenação; nada disso entra em listagem pública, log, cache ou métrica.
+
+**Ativação/desativação em campo.** `PATCH /api/v1/operations/stations/{kind}/{id}` (`{active, statusNote}`) permite ao `LIFEGUARD` alternar **a estrutura do próprio plantão aberto** — fora dele, `403 station-outside-shift`. `COORDINATOR`/`ADMIN` alternam qualquer estrutura; a TI mantém `/api/v1/admin/stations`. Desativar carimba `deactivated_at` + nota e tira o pin do mapa na hora; reativar limpa a data e **preserva** a nota. Nada é apagado: plantões e ocorrências continuam apontando para a linha. `GET /api/v1/operations/stations/{kind}/{id}` devolve a estrutura mesmo desativada para o console oferecer "Reativar".
+
+**Foto da estrutura.** `lifeguard_post_media` e `mobile_base_media` (`V19`) ligam até 3 `media_assets` a cada posto/base, com o mesmo `ImageNormalizer` e o mesmo `GET /api/v1/media/{id}`. `CreateStationRequest.mediaIds` recebe as fotos já enviadas; `photoUrls` aparece em `PublicStation` (mapa/ficha) e em `StationAdminView` (painel e console de campo). A foto é da estrutura, não do operador. O visualizador é o `shared/components/PhotoGallery.tsx`, usado pela sinalização, pelo posto e pela base.
 
 ### 7.12 Geoindexação do SOS
 
@@ -1059,11 +1117,12 @@ sequenceDiagram
 
 ### 8.2 Bandeiramento
 
-1. Guarda-vidas autenticado lança a bandeira (`POST /flags`), com foto opcional (já enviada via URL pré-assinada).
-2. Transação grava `flag_updates` + auditoria + evento `FlagChanged`.
-3. Listener invalida `flag:current:{beachId}` no Redis e faz _write-through_ do novo valor.
-4. Banhistas veem a mudança em até 60 s (TTL do micro-cache + ETag). Operacionais veem imediatamente por WebSocket.
-5. **Expiração:** a UI compara `valid_until` com o relógio do servidor; vencida → "desatualizada" (RN01).
+1. Guarda-vidas autenticado lança a bandeira (`POST /api/v1/operations/flags`). O local vem do escopo escolhido (praia/setor) **ou** da leitura atual do aparelho; no segundo caso o servidor resolve praia e setor por `ST_Contains`. **Fora do mapeamento não recusa:** responde `201` com `outcome=UNMAPPED` e manda o registro para a fila da coordenação (`unmapped_signals`), sem publicar pin (ADR-024). A foto é opcional (até 3), enviada antes para `POST /api/v1/media` e anexada ao lançamento ou ao registro da fila.
+2. Transação grava `flag_updates` (+ `flag_media`) e encerra o lançamento anterior do mesmo escopo sob `pg_advisory_xact_lock`.
+3. O mapa público (`GET /api/v1/flags`) publica só `closed_at IS NULL AND valid_until > now()`; o pin é o ponto enviado (modo localização) ou o centroide/`ST_PointOnSurface` do escopo. Nada é invalidado por job: a vigência é decidida na consulta.
+4. Banhistas veem a mudança em até 30 s (polling do mapa) e operacionais em até 30 s na lista do console.
+5. **Expiração:** vencida, a sinalização sai do mapa e a ficha mostra a última cor com o selo "desatualizada" (RN01).
+6. **Fora do mapeamento:** o registro não tem pin nem ficha; a coordenação identifica a área, pede novo mapeamento ou descarta na fila de `/gestao/areas-nao-identificadas`. A decisão é registrada com autor e data e não publica bandeira retroativamente.
 
 ### 8.3 Reporte comunitário e quórum
 
@@ -1105,11 +1164,17 @@ WHERE alert_type = :type
 
 ### 8.6 Upload de foto
 
-1. Cliente pede `POST /media/upload-url` (tipo e tamanho declarados).
-2. API devolve **URL pré-assinada** curta (5 min), com `Content-Type` e tamanho máximos amarrados; registra `media_assets` em `PENDING`.
-3. Cliente envia direto ao armazenamento.
-4. Evento de upload (ou _callback_ da API) dispara o **saneamento**: valida _magic bytes_, remove EXIF/GPS, redimensiona, gera miniatura → `READY` (ou `REJECTED`).
-5. Só mídias `READY` são servidas.
+O upload da sinalização **e das estruturas** passa **pelo backend**, de forma síncrona (ADR-023/ADR-024). Não há URL pré-assinada nesta fatia: a garantia que importa — o que é servido ao público foi produzido pelo servidor, sem EXIF/GPS — só existe se a normalização acontecer antes de o binário virar público.
+
+1. Cliente envia `POST /api/v1/media` autenticado: multipart `file` no navegador/PWA ou `{contentBase64}` no app empacotado (o HTTP nativo do Capacitor exige corpo string reenviável).
+2. O backend recusa acima de 10 MB (`413`), abre a imagem com `ImageIO` (teto de 40 MP contra "bomba de descompressão") e **re-codifica** em JPEG: maior lado 1600 px, fundo branco para PNG transparente, qualidade 0,85, sem metadados.
+3. O JPEG normalizado vai para o storage de objetos com chave aleatória (`signals/AAAA/MM/<uuid>.jpg`, sem praia, operador ou horário no nome) e a linha em `media_assets` guarda dimensões, tamanho e SHA-256 do conteúdo normalizado.
+4. `GET /api/v1/media/{id}` é público (a foto aparece no mapa e na ficha), com `ETag` do SHA-256, `If-None-Match`/`304` e `Cache-Control: public, max-age=30d, immutable` — o conteúdo de um `id` nunca muda.
+5. O lançamento da bandeira referencia até 3 `mediaIds`; só mídia existente e do próprio operador é anexada. Foto enviada e não anexada é órfã inofensiva (não é servida em nenhum lançamento) e pode ser expurgada depois por retenção.
+6. **Posto e base usam o mesmo caminho.** `CreateStationRequest.mediaIds` (até 3) alimenta `lifeguard_post_media`/`mobile_base_media`; `photoUrls` volta em `PublicStation` e `StationAdminView`. A população vê a foto na ficha do pin e na lista, e o console de campo vê a foto da estrutura do plantão. A galeria (`shared/components/PhotoGallery.tsx`) é a mesma da sinalização: imagem inteira, anterior/próxima, miniaturas, teclado e foco preso.
+7. **Fora do mapeamento, a foto vai com a fila.** O registro em `unmapped_signals` anexa as fotos em `unmapped_signal_media`; os caminhos só aparecem na rota autenticada da coordenação, porque o próprio registro não é público (a leitura do binário continua em `GET /api/v1/media/{id}`, que exige o identificador).
+
+> A evolução para upload direto com URL pré-assinada + saneamento assíncrono continua possível (o `ObjectStoragePort` já existe), mas exige um passo de quarentena/`PENDING` e um _callback_ de saneamento. Enquanto a foto é pequena e única por lançamento, o caminho síncrono é mais simples e não deixa binário não normalizado acessível.
 
 ### 8.7 Ocorrências: do SOS e de fora do sistema até o CIOSP
 
@@ -1123,10 +1188,13 @@ sequenceDiagram
     participant C as CIOSP (sistema oficial)
 
     S->>DB: TX do SOS grava call + outbox (8.1, inalterado)
-    S-->>O: EmergencyCallCreated (após o commit)
+    Note over S,O: O chamado nasce sem ficha: só o ack abre a ocorrência
+    G->>S: POST /api/v1/emergency-calls/{id}/ack
+    S->>DB: TX do ack (ACKNOWLEDGED, atendente por CAS)
+    S-->>O: SosAcknowledged (after commit)
     O->>DB: INSERT occurrence (origin=SOS_CITIZEN) ON CONFLICT DO NOTHING
-    O-->>G: OccurrenceOpened (realtime, payload redigido)
-    S-->>O: …Acknowledged / …Resolved → atualiza status e posto
+    O-->>G: ficha disponível em /operador/ocorrencias e /gestao/ocorrencias
+    S-->>O: …Resolved / …FalseAlarm → atualiza status e desfecho
     Note over G,O: Ocorrência externa (193, rádio, presencial)
     G->>O: POST /api/v1/occurrences (client_request_id, origem, fato, local, natureza)
     O->>DB: busca duplicata ≤ 200 m e ≤ 30 min (RN13) → aviso, não bloqueio
@@ -1140,13 +1208,14 @@ sequenceDiagram
 
 **Pontos de projeto**
 
-1. **O SOS não espera a ocorrência.** A criação é por evento, depois do commit do SOS. Se o `occurrences` estiver lento ou falhar, o alerta chega do mesmo jeito (P1, RNF01).
-2. **Nenhuma ocorrência de SOS fica sem registro.** Se o listener falhar, o Outbox reenvia; como rede de segurança, um job (ShedLock) cria a ocorrência de qualquer `emergency_calls` sem par com mais de 1 min e emite alerta se achar algum.
-3. **Idempotência dos dois lados:** `emergency_call_id UNIQUE` no SOS; `client_request_id` no registro manual (duplo toque em tela de rede ruim).
-4. **Duplicata é aviso.** O guarda-vidas decide entre vincular ao registro existente (`LINKED`) ou criar outro. Bloquear seria pior que duplicar quando há vítima.
-5. **Sem integração com o CIOSP (D-07).** O sistema monta a ficha e controla a pendência. O campo `ciosp-sheet` é um modelo de leitura, e os rótulos e a ordem vêm de configuração da instalação (cada CBM tem seu formulário).
-6. **Escopo de acesso (RN15):** guarda-vidas veem ocorrências do seu posto/praia; coordenação, todas. Dados de pessoas vêm mascarados; revelar grava `PERSON_REVEALED` + auditoria.
-7. **Estados:** a ocorrência de SOS segue o ciclo do SOS (`DISPATCHED`→`OPEN`, `ACKNOWLEDGED`/`EN_ROUTE`/`ON_SCENE`→`IN_PROGRESS`, `RESOLVED`→`CLOSED`, `FALSE_ALARM`, `CANCELLED`); a externa nasce `OPEN` ou `CLOSED` (registro após o fato). `CLOSED` exige `outcome_type`.
+1. **O gatilho é o aceite, não a criação do chamado.** Um SOS que ninguém assumiu não é atendimento: não gera ficha, não entra na fila do CIOSP e não aparece como ocorrência. A ocorrência nasce no `ACKNOWLEDGED` (evento `SosAcknowledged`, publicado em `emergency/api`), porque é nesse instante que existe um guarda-vidas responsável, um posto e um atendimento a registrar.
+2. **O SOS não espera a ocorrência.** A criação é por evento, depois do commit do ack (`AFTER_COMMIT` + `REQUIRES_NEW`); se o `occurrences` estiver lento ou falhar, o chamado continua assumido e o alerta nunca é segurado (P1, RNF01).
+3. **Nenhum atendimento assumido fica sem registro.** Se o listener falhar, o job de reconciliação abre a ocorrência de todo chamado assumido há mais de 1 min e sem par (`occurrenceRepository.openMissingAcknowledged`); a idempotência por `emergency_call_id UNIQUE` garante que rodar de novo não duplica.
+4. **Idempotência dos dois lados:** `emergency_call_id UNIQUE` no SOS; `client_request_id` no registro manual (duplo toque em tela de rede ruim).
+5. **Duplicata é aviso.** O guarda-vidas decide entre vincular ao registro existente (`LINKED`) ou criar outro. Bloquear seria pior que duplicar quando há vítima.
+6. **Sem integração com o CIOSP (D-07).** O sistema monta a ficha e controla a pendência. O campo `ciosp-sheet` é um modelo de leitura, e os rótulos e a ordem vêm de configuração da instalação (cada CBM tem seu formulário).
+7. **Escopo de acesso (RN15):** guarda-vidas veem ocorrências do seu posto/praia; coordenação, todas. Dados de pessoas vêm mascarados; revelar grava `PERSON_REVEALED` + auditoria.
+8. **Estados:** a ocorrência de SOS nasce `IN_PROGRESS` no ack (já há atendente) e segue o ciclo do chamado (`RESOLVED`→`CLOSED`, `FALSE_ALARM`, `CANCELLED`); a externa nasce `OPEN` ou `CLOSED` (registro após o fato). `CLOSED` exige `outcome_type`.
 
 ---
 

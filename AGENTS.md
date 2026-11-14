@@ -25,33 +25,58 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 - **Sessão**: `/login` único e três áreas por papel; refresh em cookie
   `__Secure-maraberto_rt; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict` e access
   token **só em memória**.
-- **Estado**: backend com **145 testes** (`./gradlew clean check`); frontend com
+- **Estado**: backend com **188 testes** (`./gradlew clean check`); frontend com
   `npm run build` e `npm run lint` verdes; app Android (Capacitor 8) com APK debug gerado.
+- **Sinalização e estruturas (ADR-022)**: `flag_updates` append-only com validade (12 h,
+  teto 24 h) e `closed_at`; bandeira vencida sai do mapa e a ficha mostra a última cor com
+  selo "desatualizada". Posto/base tem `active`/`deactivated_at`/`status_note`; base móvel
+  só aparece com plantão vivo. Nada é apagado por tempo: a vigência é decidida na consulta.
+- **Campo ancorado no aparelho (ADR-023/ADR-024)**: a bandeira pode ser lançada por
+  praia/setor **ou** pela posição atual (o PostGIS resolve praia/setor) e, **fora do
+  mapeamento, não é recusada** — vira registro de área não identificada (`V18`) para a
+  coordenação triar, sem pin público. Até 3 fotos re-codificadas no servidor (EXIF/GPS
+  fora). Posto/base é cadastrado e reposicionado pelo guarda-vidas com a posição atual
+  (`V16`), recebe foto pública (`V19`) e a estrutura do **próprio plantão** pode ser
+  ativada/desativada em campo.
+- **Ocorrências (ADR-013 emendada)**: o **aceite do SOS** abre a ficha (`V17`) —
+  `origin=SOS_CITIZEN`, `IN_PROGRESS`, `ciosp_status=PENDING`; chamado sem ack não gera
+  ocorrência. Criação por evento depois do commit, idempotente por `emergency_call_id`, com
+  job de reconciliação.
 
 ## Ler antes de trabalhar
 
 - `docs/Architecture.md` — §7.5/§7.6 (SOS e escala), §7.7 (importação, arquivamento, lista
-  pública, "onde estou" e geometria com `ETag`), §7.8 (zonas temporais), §7.12/§7.13
-  (geoindexação e despacho), §8.5 (ocupação por área e por setor) e §9 (cache).
+  pública, "onde estou" e geometria com `ETag`), §7.8 (zonas temporais), §7.9 (ocorrências),
+  §7.11 (plantão, bandeira, estruturas e sinalização por localização), §7.12/§7.13
+  (geoindexação e despacho), §8.2 (bandeiramento), §8.5 (ocupação), §8.6 (upload de foto),
+  §8.7 (ocorrências) e §9 (cache).
 - `docs/Requirements.md` — RF/RN/RNF; **RF41** é a importação de mapeamento.
-- `docs/adr/` — ADRs 001–021. Mais usadas: 012 (dados sensíveis), 013 (ocorrências),
-  016 (importação), 017/018 (SOS), 019 (Capacitor), 020 (escala), 021 (área de banho).
+- `docs/adr/` — ADRs 001–024. Mais usadas: 012 (dados sensíveis), 013 (ocorrências, gatilho
+  no ack), 016 (importação), 017/018 (SOS), 019 (Capacitor), 020 (escala), 021 (área de
+  banho), 022 (ciclo de vida da sinalização e das estruturas), 023 (sinalização por
+  localização, mídia e estruturas de campo) e 024 (fila fora do mapeamento, estrutura em
+  campo e foto do posto).
 - `docs/kml/Areas_Banho_Sergipe.kml` — mapeamento real de SE (fonte da Fatia 1); não
   editar à mão, reexportar do QGIS.
 
 ## Módulos (Spring Modulith)
 
 - Pacotes em `com.maraberto` com `api/ application/ domain/ infra/` por módulo:
-  `identity`, `region`, `beaches`, `operations`, `emergency`, `safety`, `tides`,
-  `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`.
+  `identity`, `region`, `beaches`, `operations`, `emergency`, `occurrences`, `safety`,
+  `tides`, `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`.
   `ApplicationModules.verify()` (`ModularityTests`) protege as fronteiras.
 - Com fluxo implementado: `beaches` (entidades, importação KML e setores, arquivamento do
-  arquivo aplicado, API pública por proximidade), `emergency` (SOS completo até o ack),
-  `identity` (login/RBAC/sessões), `operations` (plantão e elegibilidade do SOS) e
-  `occupancy` (indicador anônimo por setor). `media` tem a porta `ObjectStoragePort`
-  (`stub`/`s3`); `realtime` tem porta; o resto é `package-info`.
+  arquivo aplicado, API pública por proximidade e zonas de risco públicas), `emergency`
+  (SOS completo até o ack, publicando `SosAcknowledged` em `api/`), `identity`
+  (login/RBAC/sessões), `operations` (plantão, elegibilidade do SOS, sinalização por
+  escopo/localização, fila de áreas não identificadas, cadastro/reposição/ativação de
+  estrutura, leitura pública/admin), `occupancy` (indicador anônimo por setor), `media`
+  (upload normalizado com `ImageIO`, leitura pública com `ETag`, `MediaCatalog` para os
+  outros módulos) e `occurrences` (ficha aberta no ack, leitura por escopo,
+  reconciliação). `realtime` tem porta; o resto é `package-info`.
 - **Nunca** importar de outro módulo fora da `api/` pública. `beaches` não importa
-  `emergency`/`operations`; o SOS nunca espera a ocorrência.
+  `emergency`/`operations`; o SOS nunca espera a ocorrência; `operations` pode ler
+  `media.api` (`MediaCatalog`) e `media` não importa `operations`.
 
 ## Backend
 
@@ -63,15 +88,21 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
   `V6`/`V7` identidade e sessões · `V8` despacho + plantão · `V9` lease do plantão ·
   `V10` escalonamento em anéis · `V11` áreas de banho/setores/lotes de importação ·
   `V12` chave do arquivo arquivado do lote · `V13` índice geográfico da projeção do
-  mapa · `V14` amostras anônimas de ocupação.
-  **Próxima livre: `V15`** (ocorrências).
+  mapa · `V14` amostras anônimas de ocupação · `V15` ciclo de vida da sinalização e das
+  estruturas (`flag_updates`, `deactivated_at`/`status_note`) · `V16` posição da sinalização
+  e mídia (`signal_position`/`position_source`, `media_assets`, `flag_media`, origem da
+  posição das estruturas) · `V17` ocorrências (`occurrences` + `occurrence_events`) ·
+  `V18` fila de áreas não identificadas (`unmapped_signals` + `unmapped_signal_media`) ·
+  `V19` fotos das estruturas (`lifeguard_post_media` + `mobile_base_media`).
+  **Próxima livre: `V20`**.
 - `application.yml` único. Chaves relevantes: `maraberto.dispatch.*` (raio padrão, teto
   `max-radius-m: 15000`, `position-stale-after: PT30M`, `shift-idle-timeout: PT15M`,
   `escalation.rings: 5000,7000,10000,12000,15000,20000` e `escalation.delay: PT20S`),
   `maraberto.emergency.outbox.*`, `maraberto.security.crypto.*`, `maraberto.security.jwt.*`,
   `maraberto.storage.*` (provider `stub`/`s3`, endpoint/região/credenciais e `path-style`
   do Garage), `maraberto.occupancy.*` (janela `PT15M`, `minimum-sample: 5`, limiares
-  `moderate/high/extreme`, retenção `PT24H`),
+  `moderate/high/extreme`, retenção `PT24H`), `maraberto.flags.validity: PT12H` (validade
+  padrão da bandeira; o lançamento aceita 0,5 h a 24 h),
   seeds `maraberto.identity.dev-seed.enabled`, `maraberto.operations.dev-seed.enabled` e
   `maraberto.beaches.dev-seed.enabled` (este exige a tabela `beaches` vazia e recusa o
   perfil `prod`; `maraberto.beaches.import.file` atende a importação assistida).
@@ -111,10 +142,13 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 - Vite 8 + React 19 + TypeScript 6 + Tailwind 4; **feature-based** (ADR-015):
   `app/`, `shared/`, `features/`. Feature importa só de `shared/` e de si; entre features
   só pela `index.ts` e apenas `operator→occurrences`, `operator→stations`,
-  `management→occurrences`, `admin→stations`, `*→auth`. Fronteiras no ESLint.
+  `operator→beaches`, `operator→signals`, `beaches→signals`,
+  `management→occurrences`, `management→beaches`, `management→signals`,
+  `admin→stations`, `*→auth`. Fronteiras no ESLint.
 - Rotas públicas: `/`, `/praias`, `/praias/:beachId`, `/sos`, `/mares`, `/aprender`,
-  `/sobre`; `/login`; áreas `/operador/**`, `/gestao/**` (com `/gestao/importar` como
-  primeira aba), `/admin/**`.
+  `/sobre`, `/guarda-vidas`; `/login`; áreas `/operador/**` (`/operador/sinalizacao`,
+  `/operador/postos`), `/gestao/**` (com `/gestao/importar` como primeira aba e
+  `/gestao/areas-nao-identificadas` na triagem) e `/admin/**`.
 - Home é mapa de tela cheia (MapLibre; worker via `?url` + `setWorkerUrl`). **Marcador**:
   o elemento raiz recebe `transform` inline do MapLibre — nunca aplicar `transform`,
   `scale`, `transition` nem mudar tamanho nele; efeitos vão num filho. Marcadores são
@@ -122,6 +156,11 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
   sempre abre uma ficha (praia não tem marcador, é acessada pela lista).
 - Acessibilidade obrigatória: `<output>` em vez de `role="status"`, `<dialog open>` em
   vez de `role="dialog"`, overlays por `useOverlay` (foco, Escape, Tab preso).
+- **Polling e cache do mapa:** postos/bases e sinalização consultam a cada **30 s**;
+  zonas de risco e ficha da praia a cada **60 s**. Aba escondida não consulta; ao voltar e
+  ao reconectar (`online`), consulta na hora. O servidor segue sendo a fonte da verdade —
+  o hook guarda a chave da consulta (`beachId` ou `__map__`) e nunca exibe, nem por um
+  quadro, o dado da praia anterior. `Cache-Control` é 30 s no mapa e 60 s na ficha.
 - PWA: service worker manual **nunca** cacheia `/api/**`, `/tiles/**`, WebSocket, não-GET
   nem rotas autenticadas. Nginx e Vite fazem proxy de `/api` e `/ws` (Upgrade).
 - **App mobile (ADR-019)**: mesmo `web/` em WebView (Capacitor 8), sem fork de UI;
@@ -385,19 +424,215 @@ Sem migração nova (`V15` continua livre para ocorrências): `bbox` sai de `ST_
 tempo de consulta e as amostras já têm `sector_id`. PostGIS emite `"type":"Polygon"` quando o
 `MultiPolygon` tem uma única parte — testes e tipos do frontend aceitam os dois.
 
+## Fatia 4 — sinalização e estruturas operacionais
+
+**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
+aval para commitar. **Decisão:** ADR-022 · **migração:** `V15`. Substituiu os dados mocados
+de postos, bases e bandeiras por leitura real, com ciclo de vida explícito.
+
+### O que está no ar
+
+- **Bandeira (RF12/RN01)**: `POST /api/v1/operations/flags` (guarda-vidas e coordenação) e
+  `POST /api/v1/operations/flags/{id}/close`. Corpo com `beachId`, `sectorId` opcional
+  (nulo = praia inteira), `flag`, `notes` e `validityHours` (0,5 a 24, padrão
+  `maraberto.flags.validity: PT12H`). Lançamento novo no mesmo escopo fecha o anterior sob
+  `pg_advisory_xact_lock(hashtextextended(beach_id || ':' || sector_id))`.
+- **Mapa público**: `GET /api/v1/flags` devolve só o vigente (`closed_at IS NULL AND
+  valid_until > now()`), com nome da praia, rótulo do setor e o pin no centroide do setor
+  (ou `ST_PointOnSurface(boundary)` na praia) — **nunca** a posição do operador (RN17).
+- **Ficha da praia**: `GET /api/v1/flags?beachId=<id>&includeExpired=true` devolve o último
+  lançamento de cada escopo, mesmo vencido/encerrado, para o selo "desatualizada". Sem
+  `beachId`, `includeExpired` é `400` em RFC 9457.
+- **Estruturas**: `GET /api/v1/stations` (público: só `active`, base móvel só com plantão
+  aberto e lease válido), `GET /api/v1/admin/stations` (TI, inclui inativas) e
+  `PATCH /api/v1/admin/stations/{kind}/{id}` com `{active, statusNote}` (`kind` =
+  `FIXED`/`MOBILE`, `ADMIN`). Reativar limpa `deactivated_at` e **preserva** a nota.
+- **Zonas de risco**: `GET /api/v1/risk-zones` publica só `active` e vigente; `PERMANENT`
+  nunca expira, `SEMI_PERMANENT` expira em `valid_until`.
+
+### Frontend
+
+- `features/signals` (`useSignals`, `useBeachSignals`, `SignalSheet`, `BeachFlagCard`,
+  `SignalStateTag`) e `features/stations` (`usePublicStations`, `useAdminStations`,
+  `StationList`, `StationAdminTable`, `StationSheet`) são as features reais; `demo-signals`,
+  `demo-stations`, `StationRegistry` e `lib/risk-zones.ts` foram removidos.
+- `/operador/sinalizacao` lança e encerra bandeira (praia/setor, validade, observação) e
+  lista o último lançamento de cada escopo; `/operador/postos` cadastra, reposiciona e
+  ativa/desativa a estrutura do plantão; `/admin/postos` alterna qualquer estrutura e
+  corrige a posição; a ficha da praia mostra a bandeira vigente ou "desatualizada".
+- `RootLayout` compõe os marcadores a partir de `useSignals`/`usePublicStations`; o
+  `SignalsState`/`StationsState` mantém a chave da consulta para não exibir dado da praia
+  anterior durante o carregamento.
+
+### Dívidas conhecidas
+
+- **Sem contadores de sinalização** por operador/praia/setor no painel da coordenação (RF40).
+- **Push com o app fechado** continua dependendo de projeto Firebase (`google-services.json`).
+
+A foto da sinalização e o cadastro/reposição de estrutura fecharam na Fatia 5 (ADR-023).
+
+## Fatia 5 — sinalização e estruturas ancoradas no aparelho (`V16`, ADR-023)
+
+**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
+aval para commitar. **Decisão:** ADR-023 · **migração:** `V16`. Duas formas de sinalizar e de
+cadastrar estrutura, com foto servida pelo backend.
+
+### O que está no ar
+
+- **Duas formas no mesmo endpoint:** `POST /api/v1/operations/flags` aceita `beachId`
+  (+ `sectorId` opcional) **ou** `latitude`/`longitude` (+ `accuracyMeters`). Sem nenhuma das
+  duas → `400`; só uma coordenada → `400`.
+- **Resolução por ponto:** `FlagService.resolveScope` usa `ST_Contains` em `beach_sectors`
+  (`ORDER BY display_order, id LIMIT 1`) e, sem setor, `beaches.boundary`. Fora do
+  mapeamento, desde a Fatia 7, o lançamento vai para a fila de áreas não identificadas
+  (`outcome=UNMAPPED`); a recusa `422` foi removida (ADR-024).
+- **Posição da sinalização:** `flag_updates.signal_position`/`position_accuracy_m`/
+  `position_source` (`SCOPE`/`DEVICE_GPS`); pin público =
+  `COALESCE(signal_position, centroide do setor, ST_PointOnSurface(área))`. Um ponto por
+  lançamento, **sem histórico de trajeto**.
+- **Foto (RF12/ADR-012):** `POST /api/v1/media` multipart **ou** JSON `{contentBase64}`
+  (o app usa sempre base64); `ImageNormalizer` re-codifica em JPEG (maior lado 1600 px,
+  qualidade 0,85, teto de 40 MP, EXIF/GPS fora); `media_assets` + `flag_media` (até 3, com
+  `display_order`). `MediaCatalog` confere existência e **dono** antes de anexar.
+  `GET /api/v1/media/{id}` é público, com `ETag` do SHA-256, `If-None-Match`/`304` e
+  `Cache-Control: public, max-age=30d, immutable`. `FlagResponse`/`PublicFlag` levam
+  `photoUrls`.
+- **Estruturas (RF11):** `POST /api/v1/operations/stations` (cadastro na posição atual) e
+  `PATCH /api/v1/operations/stations/{kind}/{id}/position` (reposição), para
+  `LIFEGUARD`/`COORDINATOR`/`ADMIN`; `position_source`/`position_accuracy_m`/
+  `position_updated_at` em `lifeguard_posts`/`mobile_bases`; `StationAdminView` expõe
+  origem/precisão/data. A TI continua com o cadastro administrativo; a ativação em campo
+  e a foto do posto chegaram na Fatia 8 (ADR-024).
+
+### Frontend
+
+- `/operador/sinalizacao` tem dois modos (`Praia e setor` / `Minha localização`), até 3 fotos
+  com prévia, progresso de envio e aviso de validade; `shared/lib/media.ts` faz o upload em
+  base64 com `photoProblem`/`MAX_SIGNAL_PHOTOS`, e `SignalPhotos` mostra galeria + dialog na
+  ficha, no card da praia e na lista do console.
+- `/operador/postos` deixou de ser somente leitura: `NewStationForm` cadastra posto/base na
+  posição atual (`useStationPosition` → `getDevicePosition`) com até 3 fotos, e
+  `/admin/postos` ganhou "Corrigir posição" (`StationPositionForm`) com a origem e a
+  precisão na linha.
+- `shared/components/PhotoGallery.tsx` é a galeria única (imagem inteira, anterior/próxima,
+  contador, miniaturas, setas e `Escape`); `SignalPhotos` é o wrapper da sinalização e a
+  mesma galeria aparece em `StationList`/`StationSheet`/`StationAdminTable`.
+- `shared/lib/api-client.ts` expõe `apiAssetUrl` para a `<img>` funcionar no app (a API é
+  outra origem e a tag não passa pelo cliente HTTP).
+
+### Dívidas conhecidas
+
+- Upload base64 cresce ~33% no app; limites de multipart em 12 MB (arquivo) / 14 MB (request).
+- Foto enviada e não anexada fica órfã (inofensiva) até uma rotina de retenção.
+- Ajuste fino do pino e desenho da bandeira na foto continuam para uma fatia de UX.
+
+## Fatia 6 — ocorrência aberta no aceite do SOS (`V17`, ADR-013 emendada)
+
+**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
+aval para commitar. **Decisão:** ADR-013 emendada · **migração:** `V17`. Escopo desta fatia:
+**nascer e ler** a ficha; encerramento, desfecho e protocolo CIOSP ficam para a próxima.
+
+### Backend
+
+- **Gatilho é o ack:** `emergency/api/SosAcknowledged` (`@NamedInterface("api")`) é publicado
+  no aceite; `SosOccurrenceListener` roda `AFTER_COMMIT` + `REQUIRES_NEW` e abre a ficha
+  (`origin=SOS_CITIZEN`, `status=IN_PROGRESS`, `ciosp_status=PENDING`). Chamado sem ack não
+  gera ocorrência; falha do listener só loga.
+- **Idempotência e rede de segurança:** `INSERT … SELECT … ON CONFLICT (emergency_call_id) DO
+  NOTHING`; `OccurrenceReconciliationJob` abre a ficha de todo chamado assumido há mais de
+  `maraberto.occurrences.reconciliation.*` e sem par. `emergency` não depende de
+  `occurrences` e o SOS nunca espera a ficha.
+- **Leitura (RN15):** `GET /api/v1/occurrences` e `GET /{id}`; `LIFEGUARD` vê o que está no
+  escopo do seu plantão aberto (posto/praia) e o que assumiu; `COORDINATOR`/`ADMIN` veem
+  tudo; fora do escopo → `404`. Erros em RFC 9457.
+
+### Frontend
+
+- `features/occurrences` (types/api/hook de 30 s/lista) alimenta `/operador/ocorrencias` e
+  `/gestao/ocorrencias`; a ficha aparece depois do ack, sem recarregar a página.
+
+### Dívidas conhecidas
+
+- Encerramento com `outcome_type`, transição a partir de `RESOLVED`/`FALSE_ALARM`,
+  `FIELD_ATTENDED` e ficha/protocolo do CIOSP ainda não existem.
+
+## Fatia 7 — sinalização fora do mapeamento em triagem (`V18`, ADR-024)
+
+**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
+aval para commitar. **Decisão:** ADR-024 · **migração:** `V18`. Ponto fora do KML não é
+recusado: vira registro para a coordenação decidir o que fazer.
+
+### Backend
+
+- `POST /api/v1/operations/flags` devolve `FlagLaunchResponse`: `outcome=PLACED` (bandeira
+  publicada) ou `outcome=UNMAPPED` (`201`, registro na fila, `flag` nulo).
+- `unmapped_signals` guarda um ponto por lançamento (cor pretendida, observação, precisão,
+  matrícula de quem reportou, posto do plantão) e `unmapped_signal_media` as até 3 fotos.
+  **Nada entra em `flag_updates`** e `GET /api/v1/flags` não lê a fila.
+- `GET /api/v1/management/unmapped-signals?status=&limit=` e
+  `POST /{id}/decision` (`COORDINATOR`; `ADMIN` como superusuário técnico). Decisões
+  `IDENTIFIED`/`NEEDS_MAPPING`/`DISCARDED`/`PENDING`; `IDENTIFIED` exige área ativa e setor
+  da área quando informado. A linha nunca é apagada.
+- A área ativa mais próxima é sugestão calculada na consulta (`ST_Distance`), nunca vínculo
+  automático. A fila é sensível (RN17): coordenada e matrícula só na rota autenticada.
+- `GET /api/v1/management/bathing-areas` é o catálogo enxuto (id, nome, município, setores)
+  usado pelo seletor da triagem.
+
+### Frontend
+
+- `features/signals` expõe `LaunchFlagResult`/`UnmappedSignal`; `launchFlag` devolve o
+  desfecho e `/operador/sinalizacao` mostra "registro enviado para a coordenação" sem fingir
+  que publicou bandeira.
+- `/gestao/areas-nao-identificadas` (`ManagementUnmappedSignalsPage` + `useUnmappedSignals`)
+  lista a fila, sugere a área mais próxima e grava a decisão; item de nav com `MapPinOff`.
+
+### Dívidas conhecidas
+
+- Sem notificação de novo registro para a coordenação; a fila é consultada na tela.
+- Identificar na triagem **não** publica bandeira retroativa: a decisão só associa o local.
+
+## Fatia 8 — estrutura em campo e foto do posto (`V19`, ADR-024)
+
+**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
+aval para commitar. **Decisão:** ADR-024 · **migração:** `V19`. O guarda-vidas gerencia a
+estrutura do próprio plantão e a população vê a foto do posto.
+
+### Backend
+
+- `PATCH /api/v1/operations/stations/{kind}/{id}` (`{active, statusNote}`): `LIFEGUARD` só
+  alterna a estrutura do plantão aberto dele (fora → `403` `station-outside-shift`);
+  `COORDINATOR`/`ADMIN` alternam qualquer uma. Desativar carimba `deactivated_at` e a nota;
+  reativar limpa a data e preserva a nota. Nada é apagado.
+- `GET /api/v1/operations/stations/{kind}/{id}` devolve a estrutura mesmo desativada.
+- `CreateStationRequest.mediaIds` (até 3) anexa `media_assets` via `lifeguard_post_media` /
+  `mobile_base_media` (`V19`); `photoUrls` aparece em `PublicStation` e `StationAdminView`.
+  O upload e a normalização são os mesmos da sinalização.
+
+### Frontend
+
+- `ShiftStationCard` em `/operador/postos` lê o plantão (`useShift`), busca a estrutura e
+  oferece desativar (com motivo opcional) ou reativar; o pin sai do mapa na hora.
+- `StationList`, `StationSheet`, `StationAdminTable` e `NewStationForm` mostram/enviem fotos
+  com a `PhotoGallery` compartilhada.
+
+### Dívidas conhecidas
+
+- Não há troca de foto depois do cadastro nesta fatia (só novo cadastro/reposição anexa).
+- A galeria não tem zoom por gesto; a foto órfã segue sem rotina de retenção.
+
 ## Roadmap conhecido (curto)
 
-- `beaches` — depois da Fatia 3: zonas
-  `PERMANENT`/`SEMI_PERMANENT` com filtro temporal, GeoJSON público por viewport com
-  ETag/Redis e importação de postos/bases/zonas.
-- `occurrences` — `V15` (depois da `V14`), criação por evento do SOS + reconciliação,
-  193/`FIELD_ATTENDED` e ficha CIOSP (ADR-013).
-- `operations` — `rip_current_markings` para correntes efêmeras (RF13).
+- `beaches` — depois da Fatia 3: GeoJSON público por viewport com ETag/Redis e
+  importação de postos/bases/zonas (as zonas e a leitura pública por área já existem).
+- `occurrences` — `V20`: encerramento/desfecho, `FIELD_ATTENDED`, ficha e protocolo CIOSP,
+  atualização de status a partir de `RESOLVED`/`FALSE_ALARM` (ADR-013).
+- `operations` — `rip_current_markings` para correntes efêmeras (RF13); contadores de
+  sinalização no painel da coordenação (RF40).
 - `region` — `installation_settings` e Region Pack.
 - `tides`/`content`/`search` — endpoints públicos de marés/vídeos e `pg_trgm` (ADR-014).
 - `emergency` — transição `RESOLVED`/`FALSE_ALARM`, perfil `rabbit` com DLQ, Web Push
   com o app fechado, métricas/k6 (gatilhos da ADR-020).
-- Frontend — cadastro persistido de postos/bases, painel da gestão com posição,
+- Frontend — painel da gestão com posição e contadores de sinalização,
   formulário de ocorrência, tiles PMTiles e ícones padronizados.
 - App mobile — câmera/push, ícone/splash próprios, keystore e teste em aparelho físico.
 - CI — lint/build do frontend, Testcontainers Garage, SAST/SCA e cobertura.
