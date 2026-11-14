@@ -30,11 +30,12 @@ const FEATURES = [
 ]
 
 const ALLOWED_CROSS_FEATURE_IMPORTS = {
-  // O operador registra ocorrências, cadastra o ponto em campo e escolhe a
-  // praia/setor da ocorrência. A coordenação revisa ocorrências; a TI mantém
-  // postos/bases.
-  operator: ['occurrences', 'stations', 'beaches'],
-  management: ['occurrences'],
+  // O operador registra ocorrências, lança a bandeira e escolhe a praia/setor da
+  // ocorrência. A ficha da praia mostra a sinalização vigente/desatualizada. A
+  // coordenação revisa ocorrências; a TI mantém postos/bases.
+  operator: ['occurrences', 'stations', 'beaches', 'signals'],
+  beaches: ['signals'],
+  management: ['occurrences', 'beaches', 'signals'],
   admin: ['stations'],
 }
 

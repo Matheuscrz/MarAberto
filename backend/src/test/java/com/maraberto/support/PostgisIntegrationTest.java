@@ -40,6 +40,10 @@ public abstract class PostgisIntegrationTest {
 
     @BeforeEach
     void clearEmergencyDispatchState() {
+        // A ocorrência referencia o chamado (ADR-013): ela sai primeiro para a
+        // limpeza do chamado não esbarrar na FK.
+        jdbcTemplate.update("DELETE FROM occurrence_events");
+        jdbcTemplate.update("DELETE FROM occurrences");
         jdbcTemplate.update("DELETE FROM emergency_outbox_events");
         jdbcTemplate.update("DELETE FROM emergency_dispatches");
         jdbcTemplate.update("DELETE FROM emergency_calls");

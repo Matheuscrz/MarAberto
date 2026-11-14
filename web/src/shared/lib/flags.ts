@@ -5,6 +5,7 @@ export const FLAG_COLORS: Record<FlagColor, string> = {
   GREEN: "#10b981",
   YELLOW: "#f59e0b",
   RED: "#ef4444",
+  PURPLE: "#8b5cf6",
   BLACK: "#111827",
 };
 
@@ -19,5 +20,6 @@ export const FLAG_LABELS: Record<FlagColor, string> = {
   GREEN: "Bandeira verde",
   YELLOW: "Bandeira amarela",
   RED: "Bandeira vermelha",
+  PURPLE: "Bandeira roxa",
   BLACK: "Bandeira preta",
 };

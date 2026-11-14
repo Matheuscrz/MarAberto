@@ -1,4 +1,9 @@
-import { ClipboardList, MapPinned, Users } from "lucide-react";
+import {
+  ClipboardList,
+  MapPinned,
+  MapPinOff,
+  Users,
+} from "lucide-react";
 import { AreaShell, type AreaNavItem } from "@/app/layout/AreaShell";
 
 const NAV: readonly AreaNavItem[] = [
@@ -6,6 +11,7 @@ const NAV: readonly AreaNavItem[] = [
   { to: "/gestao", label: "Importar mapa", icon: MapPinned, end: true },
   { to: "/gestao/equipe", label: "Equipe", icon: Users },
   { to: "/gestao/ocorrencias", label: "Ocorrências", icon: ClipboardList },
+  { to: "/gestao/areas-nao-identificadas", label: "Áreas não identificadas", icon: MapPinOff },
 ];
 
 /** Área da coordenação (`COORDINATOR`). */

@@ -202,7 +202,8 @@ export function OperatorSosPage() {
               Em atendimento por você
             </h2>
             <span className="text-[11px] font-semibold text-ocean-500">
-              O chamado fica aqui até o atendimento ser registrado na ocorrência.
+              Encerre na tela de ocorrências: o relato e o desfecho tiram o
+              chamado daqui.
             </span>
           </div>
           <ul className="grid gap-3">

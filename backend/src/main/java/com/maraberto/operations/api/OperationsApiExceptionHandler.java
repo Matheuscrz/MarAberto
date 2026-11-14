@@ -1,7 +1,11 @@
 package com.maraberto.operations.api;
 
+import com.maraberto.operations.domain.FlagNotFoundException;
 import com.maraberto.operations.domain.ShiftAlreadyOpenException;
 import com.maraberto.operations.domain.ShiftNotFoundException;
+import com.maraberto.operations.domain.StationNotFoundException;
+import com.maraberto.operations.domain.StationOutsideShiftException;
+import com.maraberto.operations.domain.UnmappedSignalNotFoundException;
 import com.maraberto.shared.api.FieldValidationError;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -77,6 +81,50 @@ public class OperationsApiExceptionHandler extends ResponseEntityExceptionHandle
                 HttpStatus.NOT_FOUND,
                 "https://maraberto.org/problems/shift-not-found",
                 "Plantão não encontrado",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    @ExceptionHandler(FlagNotFoundException.class)
+    public ResponseEntity<Object> handleFlagNotFound(
+            FlagNotFoundException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.NOT_FOUND,
+                "https://maraberto.org/problems/flag-not-found",
+                "Sinalização não encontrada",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    @ExceptionHandler(StationNotFoundException.class)
+    public ResponseEntity<Object> handleStationNotFound(
+            StationNotFoundException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.NOT_FOUND,
+                "https://maraberto.org/problems/station-not-found",
+                "Estrutura não encontrada",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    @ExceptionHandler(StationOutsideShiftException.class)
+    public ResponseEntity<Object> handleStationOutsideShift(
+            StationOutsideShiftException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.FORBIDDEN,
+                "https://maraberto.org/problems/station-outside-shift",
+                "Estrutura fora do seu plantão",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    @ExceptionHandler(UnmappedSignalNotFoundException.class)
+    public ResponseEntity<Object> handleUnmappedSignalNotFound(
+            UnmappedSignalNotFoundException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.NOT_FOUND,
+                "https://maraberto.org/problems/unmapped-signal-not-found",
+                "Registro não encontrado",
                 exception.getMessage(),
                 request), new HttpHeaders());
     }

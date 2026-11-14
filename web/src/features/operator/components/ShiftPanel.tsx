@@ -17,6 +17,7 @@ import {
   formatDateTime,
   formatDistance,
 } from "@/shared/lib/format";
+import { distanceMetersBetween } from "@/shared/lib/geo";
 import {
   GeolocationError,
   getDevicePosition,
@@ -85,6 +86,21 @@ export function ShiftPanel({ onArmAlerts }: ShiftPanelProps) {
   const options = targets.filter((target) => target.kind === kind);
   const selected =
     options.find((target) => target.id === targetId) ?? options[0] ?? null;
+
+  // A mesma leitura que abre o plantão serve para dizer a distância até cada
+  // destino: o guarda-vidas não escolhe "Base Móvel Orla" sem saber onde ela
+  // está. Quando ele digita a coordenada na mão, a conta acompanha.
+  const typedLatitude = Number.parseFloat(latitude);
+  const typedLongitude = Number.parseFloat(longitude);
+  const referencePosition =
+    Number.isFinite(typedLatitude) && Number.isFinite(typedLongitude)
+      ? { latitude: typedLatitude, longitude: typedLongitude }
+      : null;
+
+  const distanceTo = (target: ShiftTarget): number | null =>
+    referencePosition === null
+      ? null
+      : distanceMetersBetween(referencePosition, target);
 
   const capturePosition = useCallback(async () => {
     setLocating(true);
@@ -370,20 +386,60 @@ export function ShiftPanel({ onArmAlerts }: ShiftPanelProps) {
               e volte para abrir o plantão.
             </p>
           ) : (
-            <label className="block text-xs font-semibold text-ocean-800">
-              {kind === "POST" ? "Posto fixo" : "Base móvel"}
-              <select
-                value={selected?.id ?? ""}
-                onChange={(event) => setTargetId(event.target.value)}
-                className="mt-1 h-9 w-full rounded-lg border border-ocean-200 bg-white px-3 text-xs font-normal focus:border-ocean-600 focus:outline-none"
+            <div className="grid gap-1">
+              <label
+                htmlFor="shift-target"
+                className="text-xs font-semibold text-ocean-800"
               >
-                {options.map((target) => (
-                  <option key={target.id} value={target.id}>
-                    {targetLabel(target)}
-                  </option>
-                ))}
-              </select>
-            </label>
+                {kind === "POST" ? "Posto fixo" : "Base móvel"}
+                <select
+                  id="shift-target"
+                  value={selected?.id ?? ""}
+                  onChange={(event) => setTargetId(event.target.value)}
+                  className="mt-1 h-9 w-full rounded-lg border border-ocean-200 bg-white px-3 text-xs font-normal focus:border-ocean-600 focus:outline-none"
+                >
+                  {options.map((target) => (
+                    <option key={target.id} value={target.id}>
+                      {targetLabel(target, distanceTo(target))}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {selected ? (
+                <div className="rounded-xl border border-ocean-100 bg-ocean-50/60 px-3 py-2 text-[11px] leading-snug text-ocean-700">
+                  <p className="font-bold text-ocean-900">
+                    {distanceTo(selected) === null
+                      ? "Use “Usar minha localização” para ver a distância."
+                      : `A ${formatDistance(distanceTo(selected))} de você`}
+                    {selected.kind === "POST" && selected.beachName
+                      ? ` · ${selected.beachName}`
+                      : ""}
+                  </p>
+                  <p className="mt-0.5">
+                    {selected.positionUpdatedAt
+                      ? `Posição registrada em ${formatDateTime(selected.positionUpdatedAt)}`
+                      : "Posição de cadastro sem data"}
+                    {selected.positionAccuracyM === null
+                      ? ""
+                      : ` · ${formatAccuracy(selected.positionAccuracyM)}`}
+                    {selected.coverageRadiusMeters
+                      ? ` · cobertura de ${formatDistance(selected.coverageRadiusMeters)}`
+                      : ""}
+                  </p>
+                  <p className="mt-0.5 text-ocean-500">
+                    Coordenada {selected.latitude.toFixed(5)},{" "}
+                    {selected.longitude.toFixed(5)}
+                  </p>
+                  {selected.kind === "MOBILE_BASE" ? (
+                    <p className="mt-1 text-ocean-600">
+                      A base móvel é a estrutura cadastrada neste ponto; a
+                      posição muda quando você a reposiciona no console.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           )}
 
           <div className="rounded-xl border border-ocean-200 bg-white p-3">
@@ -616,9 +672,16 @@ function OnShift({
   );
 }
 
-function targetLabel(target: ShiftTarget): string {
+function targetLabel(
+  target: ShiftTarget,
+  distance: number | null,
+): string {
+  const parts = [target.name];
   if (target.kind === "POST" && target.beachName) {
-    return `${target.name} · ${target.beachName}`;
+    parts.push(target.beachName);
   }
-  return target.name;
+  if (distance !== null) {
+    parts.push(formatDistance(distance));
+  }
+  return parts.join(" · ");
 }

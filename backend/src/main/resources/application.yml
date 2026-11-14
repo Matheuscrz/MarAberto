@@ -31,8 +31,8 @@ spring:
   # Limites defensivos para reduzir superfície de abuso (DoS, payloads gigantes).
   servlet:
     multipart:
-      max-file-size: 5MB
-      max-request-size: 6MB
+      max-file-size: 12MB
+      max-request-size: 14MB
 
   # Redis é opcional para os fluxos que ainda não dependem dele. A conexão é
   # criada de forma preguiçosa pelo Lettuce; sem Redis, a aplicação sobe e
@@ -152,6 +152,18 @@ maraberto:
     extreme-threshold: ${OCCUPANCY_EXTREME_THRESHOLD:50}
     # Expurgo das amostras na própria escrita: não guardamos trilha.
     retention: ${OCCUPANCY_RETENTION:PT24H}
+  flags:
+    # Validade padrão da sinalização (RN01). O lançamento pode pedir de 0,5 h
+    # a 24 h; sem pedido explícito, vale este prazo. Depois dele a bandeira
+    # continua no histórico, mas some do mapa público.
+    validity: ${FLAGS_VALIDITY:PT12H}
+  occurrences:
+    reconciliation:
+      # Rede de segurança do evento de ack: abre a ocorrência que o listener
+      # não conseguiu criar. Chamado assumido há mais de 1 min é elegível; a
+      # idempotência por `emergency_call_id` evita duplicar.
+      delay: ${OCCURRENCES_RECONCILIATION_DELAY:PT5M}
+      initial-delay: ${OCCURRENCES_RECONCILIATION_INITIAL_DELAY:PT1M}
   beaches:
     import:
       # Caminho usado quando o endpoint recebe só `state` (importação assistida)

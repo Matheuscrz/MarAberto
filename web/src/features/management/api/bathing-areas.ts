@@ -1,5 +1,9 @@
 import { apiRequest } from "@/shared/lib/api-client";
-import type { ImportMode, ImportReport } from "@/features/management/types";
+import type {
+  BathingAreaOption,
+  ImportMode,
+  ImportReport,
+} from "@/features/management/types";
 
 export interface ImportBathingAreasInput {
   readonly file: File;
@@ -34,5 +38,20 @@ export async function importBathingAreas(
     { method: "POST", body: form },
     // Uma importação maior pode passar do timeout padrão das telas.
     60000,
+  );
+}
+
+/**
+ * Áreas ativas para escolher num formulário da coordenação.
+ *
+ * <p>Diferente da lista pública, que exige posição, é a relação completa — é o
+ * que a triagem usa para identificar uma área existente.
+ */
+export async function fetchBathingAreaOptions(): Promise<
+  readonly BathingAreaOption[]
+> {
+  return apiRequest<readonly BathingAreaOption[]>(
+    "/api/v1/management/bathing-areas",
+    {},
   );
 }

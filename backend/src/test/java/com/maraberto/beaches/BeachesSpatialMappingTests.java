@@ -62,7 +62,13 @@ class BeachesSpatialMappingTests extends PostgisIntegrationTest {
                         "idx_emergency_calls_location",
                         "idx_sector_geom",
                         "idx_beach_map_features_geom",
-                        "idx_beach_map_features_geog");
+                        "idx_beach_map_features_geog",
+                        // Posição exata da sinalização e ponto do chamado que
+                        // originou a ocorrência (V16/V17).
+                        "idx_flag_updates_position",
+                        "idx_occ_loc",
+                        // Fila de áreas não identificadas (V18).
+                        "idx_unmapped_signals_location");
 
         assertThat(jdbcTemplate.queryForList("""
                 SELECT conname

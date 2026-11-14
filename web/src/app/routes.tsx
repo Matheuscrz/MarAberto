@@ -47,6 +47,11 @@ const OperatorOccurrencesPage = lazy(() =>
     default: m.OperatorOccurrencesPage,
   })),
 );
+const OperatorSignalsPage = lazy(() =>
+  import("@/features/operator").then((m) => ({
+    default: m.OperatorSignalsPage,
+  })),
+);
 const OperatorStationsPage = lazy(() =>
   import("@/features/operator").then((m) => ({
     default: m.OperatorStationsPage,
@@ -63,6 +68,11 @@ const ManagementTeamPage = lazy(() =>
 const ManagementOccurrencesPage = lazy(() =>
   import("@/features/management").then((m) => ({
     default: m.ManagementOccurrencesPage,
+  })),
+);
+const ManagementUnmappedSignalsPage = lazy(() =>
+  import("@/features/management").then((m) => ({
+    default: m.ManagementUnmappedSignalsPage,
   })),
 );
 const AdminHomePage = lazy(() =>
@@ -107,6 +117,10 @@ export function AppRoutes() {
       >
         <Route index element={withFallback(<OperatorSosPage />)} />
         <Route
+          path="sinalizacao"
+          element={withFallback(<OperatorSignalsPage />)}
+        />
+        <Route
           path="ocorrencias"
           element={withFallback(<OperatorOccurrencesPage />)}
         />
@@ -125,6 +139,10 @@ export function AppRoutes() {
         <Route index element={withFallback(<ImportMapPage />)} />
         <Route path="importar" element={withFallback(<ImportMapPage />)} />
         <Route path="equipe" element={withFallback(<ManagementTeamPage />)} />
+        <Route
+          path="areas-nao-identificadas"
+          element={withFallback(<ManagementUnmappedSignalsPage />)}
+        />
         <Route
           path="ocorrencias"
           element={withFallback(<ManagementOccurrencesPage />)}

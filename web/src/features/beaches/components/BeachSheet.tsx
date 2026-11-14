@@ -31,7 +31,7 @@ export function BeachSheet({
   useOverlay(true, panelRef, onClose);
 
   return (
-    <div className="absolute inset-x-2 bottom-2 z-30 md:inset-x-auto md:bottom-4 md:right-4 md:w-96">
+    <div className="pointer-events-auto absolute inset-x-2 bottom-2 z-30 md:inset-x-auto md:bottom-4 md:right-4 md:w-96">
       <div
         ref={panelRef}
         role="dialog"

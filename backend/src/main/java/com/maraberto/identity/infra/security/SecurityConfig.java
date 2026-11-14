@@ -65,6 +65,12 @@ public class SecurityConfig {
                         // Rotas públicas do banhista.
                         .requestMatchers(HttpMethod.POST, "/api/v1/emergency-calls/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/beaches/**").permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/stations/**",
+                                "/api/v1/flags/**",
+                                // A foto da sinalização aparece no mapa e na ficha: leitura pública.
+                                "/api/v1/media/**",
+                                "/api/v1/risk-zones/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/tides/**").permitAll()
                         // Ocupação é anônima por definição (RF10/RNF04): amostra e leitura
                         // públicas, sem sessão.
@@ -74,8 +80,21 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/management/**")
                         .hasAnyRole("COORDINATOR", "ADMIN")
+                        // Sinalização é lançada em campo pelo guarda-vidas; a foto
+                        // acompanha o lançamento e é enviada pelo mesmo operador.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/media/**")
+                        .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
+                        .requestMatchers("/api/v1/operations/flags/**",
+                                "/api/v1/operations/stations",
+                                "/api/v1/operations/stations/**")
+                        .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/operations/**").hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/dispatch/**")
+                        .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
+                        // Ocorrência: o guarda-vidas lê e encerra a ficha do que
+                        // atendeu; o escopo por `responder_id` é aplicado na
+                        // consulta (RN15).
+                        .requestMatchers("/api/v1/occurrences/**")
                         .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex

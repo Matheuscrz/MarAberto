@@ -11,8 +11,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * Implementação em memória da {@link ObjectStoragePort} para desenvolvimento e
- * testes. Não faz upload real: apenas registra metadados e devolve URLs
- * fictícias. A implementação S3 real entra na Etapa 11.
+ * testes. Não faz upload real: guarda bytes e metadados no processo e devolve
+ * URLs fictícias. A implementação S3 atende os ambientes que precisam durar
+ * mais que o processo.
  */
 @Component
 @ConditionalOnProperty(
@@ -24,6 +25,7 @@ public class StubObjectStorage implements ObjectStoragePort {
     private static final String STUB_SCHEME = "stub://";
 
     private final Map<String, ObjectMetadata> objects = new ConcurrentHashMap<>();
+    private final Map<String, byte[]> contents = new ConcurrentHashMap<>();
     private final Clock clock;
 
     public StubObjectStorage() {
@@ -50,6 +52,7 @@ public class StubObjectStorage implements ObjectStoragePort {
     @Override
     public void delete(String bucket, String key) {
         objects.remove(objectKey(bucket, key));
+        contents.remove(objectKey(bucket, key));
     }
 
     @Override
@@ -57,7 +60,13 @@ public class StubObjectStorage implements ObjectStoragePort {
         ObjectMetadata metadata = new ObjectMetadata(
                 bucket, key, content.length, contentType);
         objects.put(objectKey(bucket, key), metadata);
+        contents.put(objectKey(bucket, key), content.clone());
         return metadata;
+    }
+
+    @Override
+    public Optional<byte[]> get(String bucket, String key) {
+        return Optional.ofNullable(contents.get(objectKey(bucket, key)));
     }
 
     @Override
