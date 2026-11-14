@@ -14,6 +14,9 @@ public class SensitiveDataProtector {
 
     public static final String AAD_EMERGENCY_OUTBOX = "maraberto:emergency-outbox:v1";
     public static final String AAD_JPA_FIELD = "maraberto:jpa-field:v1";
+    public static final String AAD_OCCURRENCE_SUMMARY = "maraberto:occurrence-summary:v1";
+    public static final String AAD_OCCURRENCE_OUTCOME = "maraberto:occurrence-outcome:v1";
+    public static final String AAD_OCCURRENCE_VICTIM = "maraberto:occurrence-victim:v1";
     public static final String REDACTED = "[REDACTED]";
 
     private final FieldEncryptor encryptor;
@@ -38,6 +41,17 @@ public class SensitiveDataProtector {
 
     public String decrypt(String value, String aad) {
         return encryptor.decrypt(value, aad);
+    }
+
+    /**
+     * Decifra valor gravado por este serviço ou aceita texto legado em claro.
+     *
+     * <p>Use em leitura de coluna que já teve valor em claro antes da cifragem
+     * (migração gradual) e em campos escritos por converter JPA, nunca para
+     * validar autenticidade de um payload novo.
+     */
+    public String decryptOrPlaintext(String value, String aad) {
+        return encryptor.decryptOrPlaintext(value, aad);
     }
 
     public String blindIndex(String value) {

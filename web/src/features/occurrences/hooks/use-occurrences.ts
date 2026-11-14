@@ -53,7 +53,7 @@ export function useOccurrences(): OccurrencesState {
         return;
       }
       try {
-        const next = await fetchOccurrences();
+        const next = await fetchOccurrences(100);
         if (cancelled) return;
         setOccurrences(next);
         setStatus("ready");

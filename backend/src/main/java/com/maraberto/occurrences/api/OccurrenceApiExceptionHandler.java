@@ -1,6 +1,9 @@
 package com.maraberto.occurrences.api;
 
+import com.maraberto.occurrences.domain.OccurrenceAlreadyClosedException;
 import com.maraberto.occurrences.domain.OccurrenceNotFoundException;
+import com.maraberto.occurrences.domain.OccurrenceTransitionException;
+import com.maraberto.occurrences.domain.OccurrenceVictimNotFoundException;
 import com.maraberto.shared.api.FieldValidationError;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -65,6 +68,39 @@ public class OccurrenceApiExceptionHandler extends ResponseEntityExceptionHandle
                 HttpStatus.NOT_FOUND,
                 "https://maraberto.org/problems/occurrence-not-found",
                 "Ocorrência não encontrada",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    @ExceptionHandler(OccurrenceVictimNotFoundException.class)
+    public ResponseEntity<Object> handleVictimNotFound(
+            OccurrenceVictimNotFoundException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.NOT_FOUND,
+                "https://maraberto.org/problems/occurrence-victim-not-found",
+                "Sem dados de vítima",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    @ExceptionHandler(OccurrenceAlreadyClosedException.class)
+    public ResponseEntity<Object> handleAlreadyClosed(
+            OccurrenceAlreadyClosedException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.CONFLICT,
+                "https://maraberto.org/problems/occurrence-already-closed",
+                "Ocorrência já encerrada",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    @ExceptionHandler(OccurrenceTransitionException.class)
+    public ResponseEntity<Object> handleTransition(
+            OccurrenceTransitionException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.CONFLICT,
+                exception.problemType(),
+                "Pedido inconsistente com a ficha",
                 exception.getMessage(),
                 request), new HttpHeaders());
     }

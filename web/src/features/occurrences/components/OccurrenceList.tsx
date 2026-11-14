@@ -4,6 +4,7 @@ import {
   CIOSP_LABEL,
   NATURE_LABEL,
   ORIGIN_LABEL,
+  OUTCOME_LABEL,
   STATUS_LABEL,
   type Occurrence,
   type OccurrenceStatus,
@@ -12,6 +13,8 @@ import {
 interface OccurrenceListProps {
   readonly occurrences: readonly Occurrence[];
   readonly emptyMessage?: string;
+  /** Abre a ficha completa (encerramento/edição). */
+  readonly onSelect?: (occurrence: Occurrence) => void;
 }
 
 /**
@@ -24,6 +27,7 @@ interface OccurrenceListProps {
 export function OccurrenceList({
   occurrences,
   emptyMessage,
+  onSelect,
 }: OccurrenceListProps) {
   if (occurrences.length === 0) {
     return (
@@ -38,7 +42,7 @@ export function OccurrenceList({
     <ul className="grid gap-2">
       {occurrences.map((occurrence) => (
         <li key={occurrence.id}>
-          <OccurrenceCard occurrence={occurrence} />
+          <OccurrenceCard occurrence={occurrence} onSelect={onSelect} />
         </li>
       ))}
     </ul>
@@ -53,7 +57,13 @@ const STATUS_STYLE: Record<OccurrenceStatus, string> = {
   FALSE_ALARM: "border-ocean-200 bg-ocean-50 text-ocean-600",
 };
 
-function OccurrenceCard({ occurrence }: { readonly occurrence: Occurrence }) {
+function OccurrenceCard({
+  occurrence,
+  onSelect,
+}: {
+  readonly occurrence: Occurrence;
+  readonly onSelect?: (occurrence: Occurrence) => void;
+}) {
   const place =
     occurrence.beachName ??
     (occurrence.latitude !== null
@@ -67,7 +77,7 @@ function OccurrenceCard({ occurrence }: { readonly occurrence: Occurrence }) {
       ? "border-amber-300 bg-amber-50 text-amber-900"
       : "border-ocean-200 bg-ocean-50 text-ocean-600";
 
-  return (
+  const card = (
     <article className="rounded-xl border border-ocean-900/10 bg-white p-3 text-xs shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex flex-wrap items-center gap-1.5 font-bold text-ocean-950">
@@ -96,6 +106,12 @@ function OccurrenceCard({ occurrence }: { readonly occurrence: Occurrence }) {
             {occurrence.postName}
           </>
         ) : null}
+        {occurrence.responderName ? (
+          <>
+            <span aria-hidden="true">·</span>
+            {occurrence.responderName}
+          </>
+        ) : null}
       </p>
 
       <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-ocean-500">
@@ -104,6 +120,11 @@ function OccurrenceCard({ occurrence }: { readonly occurrence: Occurrence }) {
         >
           {CIOSP_LABEL[occurrence.ciospStatus]}
         </span>
+        {occurrence.outcome ? (
+          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-bold text-emerald-800">
+            {OUTCOME_LABEL[occurrence.outcome]}
+          </span>
+        ) : null}
         {occurrence.latitude !== null && occurrence.longitude !== null ? (
           <span>
             {occurrence.latitude.toFixed(5)},{" "}
@@ -120,6 +141,20 @@ function OccurrenceCard({ occurrence }: { readonly occurrence: Occurrence }) {
         ) : null}
       </p>
     </article>
+  );
+
+  if (!onSelect) {
+    return card;
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(occurrence)}
+      className="block w-full rounded-xl text-left transition hover:border-ocean-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-700"
+      aria-label={`Abrir a ocorrência ${occurrence.number}`}
+    >
+      {card}
+    </button>
   );
 }
 

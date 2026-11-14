@@ -15,7 +15,12 @@ import {
 import { formatAccuracy, formatDateTime } from "@/shared/lib/format";
 import { newRequestId } from "@/shared/lib/id";
 import { useNearbyBeaches } from "@/features/beaches";
-import { OccurrenceList, useOccurrences } from "@/features/occurrences";
+import {
+  OccurrenceList,
+  OccurrenceSheet,
+  isActiveOccurrence,
+  useOccurrences,
+} from "@/features/occurrences";
 import type {
   OccurrenceNature,
   OccurrenceOrigin,
@@ -44,6 +49,10 @@ interface Position {
  */
 export function OperatorOccurrencesPage() {
   const { occurrences, status, message: loadMessage, reload } = useOccurrences();
+  const [tab, setTab] = useState<"active" | "closed">("active");
+  const [selectedOccurrenceId, setSelectedOccurrenceId] = useState<
+    string | null
+  >(null);
   const [drafts, setDrafts] = useState<readonly OperatorOccurrence[]>([]);
   const [origin, setOrigin] = useState<OccurrenceOrigin>("FIELD_ATTENDED");
   const [nature, setNature] = useState<OccurrenceNature>("RESCUE");
@@ -66,13 +75,24 @@ export function OperatorOccurrencesPage() {
     return occurrences.reduce(
       (acc, occurrence) => {
         acc.total += 1;
-        if (occurrence.status === "IN_PROGRESS") acc.inProgress += 1;
+        if (isActiveOccurrence(occurrence)) acc.inProgress += 1;
         if (occurrence.ciospStatus === "PENDING") acc.ciosp += 1;
         return acc;
       },
       { total: 0, inProgress: 0, ciosp: 0 },
     );
   }, [occurrences]);
+
+  const activeOccurrences = useMemo(
+    () => occurrences.filter(isActiveOccurrence),
+    [occurrences],
+  );
+  const closedOccurrences = useMemo(
+    () => occurrences.filter((occurrence) => !isActiveOccurrence(occurrence)),
+    [occurrences],
+  );
+  const shownOccurrences =
+    tab === "active" ? activeOccurrences : closedOccurrences;
 
   const useMyLocation = async () => {
     setGeoMessage(null);
@@ -143,7 +163,7 @@ export function OperatorOccurrencesPage() {
     <div>
       <PageHeader
         title="Ocorrências"
-        subtitle="A ficha do chamado do SOS nasce quando você assume o atendimento. O registro do 193, do rádio e do atendimento feito sem chamado prepara a transcrição para o CIOSP."
+        subtitle="A ficha do chamado do SOS nasce quando você assume o atendimento. Encerre com o relato e o desfecho; a coordenação completa depois o que vier a mais (vítima, CIOSP)."
         actions={
           <span className="inline-flex items-center gap-1.5 rounded-full border border-ocean-200 bg-white px-3 py-1 text-xs font-bold text-ocean-800">
             <ClipboardList aria-hidden="true" className="size-3.5 text-ocean-600" />
@@ -162,7 +182,7 @@ export function OperatorOccurrencesPage() {
       <section className="mb-4">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-xs font-bold uppercase tracking-wider text-ocean-500">
-            Do chamado de socorro
+            Seus atendimentos
           </h2>
           <button
             type="button"
@@ -170,6 +190,39 @@ export function OperatorOccurrencesPage() {
             className="text-[11px] font-bold text-ocean-700 underline-offset-2 hover:underline"
           >
             Atualizar
+          </button>
+        </div>
+
+        <div
+          role="tablist"
+          aria-label="Situação das ocorrências"
+          className="mb-2 inline-flex rounded-xl border border-ocean-200 bg-white p-1"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "active"}
+            onClick={() => setTab("active")}
+            className={`rounded-lg px-3 py-1 text-[11px] font-bold transition ${
+              tab === "active"
+                ? "bg-ocean-950 text-white"
+                : "text-ocean-700 hover:bg-ocean-50"
+            }`}
+          >
+            Em atendimento ({activeOccurrences.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "closed"}
+            onClick={() => setTab("closed")}
+            className={`rounded-lg px-3 py-1 text-[11px] font-bold transition ${
+              tab === "closed"
+                ? "bg-ocean-950 text-white"
+                : "text-ocean-700 hover:bg-ocean-50"
+            }`}
+          >
+            Atendidas ({closedOccurrences.length})
           </button>
         </div>
 
@@ -185,11 +238,24 @@ export function OperatorOccurrencesPage() {
           </p>
         ) : (
           <OccurrenceList
-            occurrences={occurrences}
-            emptyMessage="Nenhum chamado assumido neste turno. Ao aceitar um SOS, a ficha do atendimento aparece aqui."
+            occurrences={shownOccurrences}
+            onSelect={(occurrence) => setSelectedOccurrenceId(occurrence.id)}
+            emptyMessage={
+              tab === "active"
+                ? "Nenhum atendimento em curso. Ao aceitar um SOS, a ficha aparece aqui para ser encerrada."
+                : "Nenhum atendimento encerrado ainda. Ao encerrar, a ficha sai da lista em atendimento e fica aqui com o desfecho."
+            }
           />
         )}
       </section>
+
+      {selectedOccurrenceId ? (
+        <OccurrenceSheet
+          occurrenceId={selectedOccurrenceId}
+          onClose={() => setSelectedOccurrenceId(null)}
+          onChanged={reload}
+        />
+      ) : null}
 
       <details className="rounded-2xl border border-ocean-900/10 bg-white p-4 shadow-sm">
         <summary className="flex cursor-pointer items-center gap-1.5 text-sm font-bold text-ocean-950">

@@ -1,7 +1,9 @@
 package com.maraberto.occurrences.application;
 
+import com.maraberto.occurrences.api.OccurrenceDetailView;
 import com.maraberto.occurrences.api.OccurrenceView;
 import com.maraberto.occurrences.domain.OccurrenceNotFoundException;
+import com.maraberto.occurrences.domain.OccurrenceStatus;
 import com.maraberto.occurrences.infra.OccurrenceRepository;
 import java.util.List;
 import java.util.UUID;
@@ -11,8 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Leitura da ocorrência para o console do operador e da coordenação.
  *
- * <p>O escopo é decidido no servidor (RN15): guarda-vidas vê o que é do seu
- * plantão e o que ele mesmo assumiu; coordenação e TI veem tudo.
+ * <p>O escopo é decidido no servidor (RN15): guarda-vidas vê o que ele mesmo
+ * atendeu; coordenação e TI veem tudo. O detalhe decifra o resumo do
+ * atendimento, mas nunca os dados de vítima.
  */
 @Service
 public class OccurrenceQueryService {
@@ -27,14 +30,16 @@ public class OccurrenceQueryService {
     }
 
     @Transactional(readOnly = true)
-    public List<OccurrenceView> list(UUID userId, boolean allScopes, int limit) {
-        return occurrenceRepository.findAll(userId, allScopes, clamp(limit));
+    public List<OccurrenceView> list(
+            UUID userId, boolean allScopes, OccurrenceStatus status, int limit) {
+        return occurrenceRepository.findAll(userId, allScopes, status, clamp(limit));
     }
 
     @Transactional(readOnly = true)
-    public OccurrenceView get(UUID occurrenceId, UUID userId, boolean allScopes) {
-        return occurrenceRepository.findById(occurrenceId, userId, allScopes)
-                .orElseThrow(() -> new OccurrenceNotFoundException(occurrenceId));
+    public OccurrenceDetailView get(UUID occurrenceId, UUID userId, boolean allScopes) {
+        return OccurrenceViews.detail(occurrenceRepository
+                .findDetail(occurrenceId, userId, allScopes, false)
+                .orElseThrow(() -> new OccurrenceNotFoundException(occurrenceId)));
     }
 
     private static int clamp(int limit) {

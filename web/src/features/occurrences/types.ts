@@ -28,6 +28,12 @@ export type OccurrenceStatus =
 
 export type CiospStatus = "PENDING" | "REGISTERED" | "NOT_REQUIRED";
 
+export type OccurrenceOutcome =
+  | "RESOLVED"
+  | "REFERRED"
+  | "FALSE_ALARM"
+  | "CANCELLED";
+
 export interface Occurrence {
   readonly id: string;
   /** Número interno legível, mostrado no console. */
@@ -35,6 +41,8 @@ export interface Occurrence {
   readonly origin: OccurrenceOrigin;
   readonly nature: OccurrenceNature;
   readonly status: OccurrenceStatus;
+  /** Preenchido quando a ocorrência é encerrada. */
+  readonly outcome: OccurrenceOutcome | null;
   /** Quando o fato ocorreu (abertura do SOS ou data informada no registro). */
   readonly occurredAt: string;
   /** Quando a ficha foi criada (instante do ack, no caso do SOS). */
@@ -49,10 +57,69 @@ export interface Occurrence {
   readonly sectorLabel: string | null;
   readonly postId: string | null;
   readonly postName: string | null;
+  /** Guarda-vidas que assumiu o atendimento. */
+  readonly responderId: string | null;
+  readonly responderName: string | null;
   readonly latitude: number | null;
   readonly longitude: number | null;
   readonly accuracyMeters: number | null;
   readonly ciospStatus: CiospStatus;
+}
+
+/**
+ * Ficha completa (`GET /api/v1/occurrences/{id}`).
+ *
+ * <p>O resumo é decifrado no servidor, mas a vítima continua mascarada: para
+ * ver os dados é preciso uma revelação explícita, com motivo.
+ */
+export interface OccurrenceDetail {
+  readonly occurrence: Occurrence;
+  readonly summary: string | null;
+  readonly outcomeNotes: string | null;
+  readonly referenceText: string | null;
+  readonly externalProtocol: string | null;
+  readonly ciospProtocol: string | null;
+  readonly ciospRegisteredAt: string | null;
+  readonly closedBy: string | null;
+  readonly closedByName: string | null;
+  readonly victim: VictimView;
+  readonly version: number;
+}
+
+export interface VictimView {
+  readonly recorded: boolean;
+  readonly revealed: boolean;
+  readonly name: string | null;
+  readonly age: string | null;
+  readonly contact: string | null;
+  readonly condition: string | null;
+}
+
+export interface CloseOccurrenceInput {
+  readonly outcome: OccurrenceOutcome;
+  readonly nature?: OccurrenceNature;
+  readonly summary: string;
+  readonly outcomeNotes?: string;
+  readonly referenceText?: string;
+  readonly externalProtocol?: string;
+  readonly ciospProtocol?: string;
+  readonly victimName?: string;
+  readonly victimAge?: string;
+  readonly victimContact?: string;
+  readonly victimCondition?: string;
+}
+
+export interface UpdateOccurrenceInput {
+  readonly nature?: OccurrenceNature;
+  readonly summary?: string;
+  readonly outcomeNotes?: string;
+  readonly referenceText?: string;
+  readonly externalProtocol?: string;
+  readonly ciospProtocol?: string;
+  readonly victimName?: string;
+  readonly victimAge?: string;
+  readonly victimContact?: string;
+  readonly victimCondition?: string;
 }
 
 export const ORIGIN_LABEL: Record<OccurrenceOrigin, string> = {
@@ -84,3 +151,15 @@ export const CIOSP_LABEL: Record<CiospStatus, string> = {
   REGISTERED: "CIOSP registrado",
   NOT_REQUIRED: "Sem CIOSP",
 };
+
+export const OUTCOME_LABEL: Record<OccurrenceOutcome, string> = {
+  RESOLVED: "Atendido e liberado no local",
+  REFERRED: "Encaminhado ao serviço de saúde",
+  FALSE_ALARM: "Falso alarme",
+  CANCELLED: "Cancelado",
+};
+
+/** O atendimento ainda está em curso e pode ser encerrado. */
+export function isActiveOccurrence(occurrence: Occurrence): boolean {
+  return occurrence.status === "OPEN" || occurrence.status === "IN_PROGRESS";
+}

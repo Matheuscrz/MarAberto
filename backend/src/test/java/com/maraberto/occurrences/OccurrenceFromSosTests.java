@@ -105,7 +105,8 @@ class OccurrenceFromSosTests extends PostgisIntegrationTest {
         ResponseEntity<String> ficha = get(
                 occurrence.get("id").asText(), lifeguard.accessToken());
         assertThat(ficha.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(objectMapper.readTree(ficha.getBody()).get("number").asLong())
+        assertThat(objectMapper.readTree(ficha.getBody())
+                .get("occurrence").get("number").asLong())
                 .isEqualTo(occurrence.get("number").asLong());
     }
 
@@ -187,6 +188,263 @@ class OccurrenceFromSosTests extends PostgisIntegrationTest {
 
         reconciliationJob.reconcile();
         assertThat(occurrenceCount(callId)).isEqualTo(1);
+    }
+
+    @Test
+    void closingTheOccurrenceEndsTheCallAndMovesItToTheClosedList() throws Exception {
+        Area area = createArea(-11.974, -38.501, "Setor Sul");
+        TestOperatorAuth.Session lifeguard = lifeguardAt(area, "LIFEGUARD");
+        UUID callId = createEmergencyCall(area.centerLatitude(), area.centerLongitude());
+        ack(callId, lifeguard.accessToken());
+
+        String occurrenceId = list(lifeguard.accessToken(), 50)[0].get("id").asText();
+        ResponseEntity<String> closed = post(
+                "/api/v1/occurrences/" + occurrenceId + "/close",
+                """
+                {
+                  "outcome": "RESOLVED",
+                  "nature": "FIRST_AID",
+                  "summary": "Banhista com cãibra na perna direita, retirado da água.",
+                  "outcomeNotes": "Orientado a não voltar à água hoje.",
+                  "ciospProtocol": "CIOSP-2026-001",
+                  "victimName": "Maria da Silva",
+                  "victimAge": "34",
+                  "victimContact": "(79) 99999-0000",
+                  "victimCondition": "Cãibra, consciente e orientada."
+                }
+                """,
+                lifeguard.accessToken());
+        assertThat(closed.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        JsonNode detail = objectMapper.readTree(closed.getBody());
+        JsonNode occurrence = detail.get("occurrence");
+        assertThat(occurrence.get("status").asText()).isEqualTo("CLOSED");
+        assertThat(occurrence.get("outcome").asText()).isEqualTo("RESOLVED");
+        assertThat(occurrence.get("closedAt").isNull()).isFalse();
+        assertThat(occurrence.get("ciospStatus").asText()).isEqualTo("REGISTERED");
+        assertThat(occurrence.get("responderId").asText())
+                .isEqualTo(lifeguard.userId().toString());
+        assertThat(occurrence.get("responderName").asText()).isNotBlank();
+        assertThat(detail.get("summary").asText()).contains("cãibra");
+        assertThat(detail.get("ciospProtocol").asText()).isEqualTo("CIOSP-2026-001");
+        assertThat(detail.get("victim").get("recorded").asBoolean()).isTrue();
+        assertThat(detail.get("victim").get("revealed").asBoolean()).isFalse();
+        assertThat(detail.get("victim").get("name").isNull()).isTrue();
+
+        // O chamado sai de "Em atendimento por você" e fica encerrado no banco.
+        assertThat(objectMapper.readValue(restTemplate.exchange(
+                        "/api/v1/dispatch/calls/assigned",
+                        HttpMethod.GET,
+                        new HttpEntity<>(authorization(lifeguard.accessToken())),
+                        String.class).getBody(), JsonNode[].class)).isEmpty();
+        Map<String, Object> call = jdbcTemplate.queryForMap(
+                "SELECT status, resolved_at, resolved_by FROM emergency_calls WHERE id = ?",
+                callId);
+        assertThat(call.get("status")).isEqualTo("RESOLVED");
+        assertThat(call.get("resolved_at")).isNotNull();
+        assertThat(call.get("resolved_by")).isEqualTo(lifeguard.userId());
+
+        // A lista em atendimento esvazia; a de encerradas recebe a ficha.
+        assertThat(listByStatus(lifeguard.accessToken(), "IN_PROGRESS")).isEmpty();
+        JsonNode[] closedList = listByStatus(lifeguard.accessToken(), "CLOSED");
+        assertThat(closedList).hasSize(1);
+        assertThat(closedList[0].get("outcome").asText()).isEqualTo("RESOLVED");
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM occurrence_events "
+                        + "WHERE occurrence_id = ? AND kind = 'STATUS_CHANGED'",
+                Integer.class, UUID.fromString(occurrenceId))).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM occurrence_events "
+                        + "WHERE occurrence_id = ? AND kind = 'CIOSP_REGISTERED'",
+                Integer.class, UUID.fromString(occurrenceId))).isEqualTo(1);
+
+        // Revelar a vítima é explícito, com motivo, e fica auditado.
+        ResponseEntity<String> reveal = post(
+                "/api/v1/occurrences/" + occurrenceId + "/victim/reveal",
+                "{\"reason\": \"Preenchimento da ficha do CIOSP\"}",
+                lifeguard.accessToken());
+        assertThat(reveal.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode victim = objectMapper.readTree(reveal.getBody());
+        assertThat(victim.get("revealed").asBoolean()).isTrue();
+        assertThat(victim.get("name").asText()).isEqualTo("Maria da Silva");
+        assertThat(victim.get("condition").asText()).contains("consciente");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT detail ->> 'reason' FROM occurrence_events "
+                        + "WHERE occurrence_id = ? AND kind = 'PERSON_REVEALED'",
+                String.class, UUID.fromString(occurrenceId)))
+                .isEqualTo("Preenchimento da ficha do CIOSP");
+        // O histórico não guarda o dado da vítima em claro.
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM occurrence_events "
+                        + "WHERE occurrence_id = ? AND detail::text LIKE '%Maria%'",
+                Integer.class, UUID.fromString(occurrenceId))).isZero();
+    }
+
+    @Test
+    void coordinationCompletesCiospAndVictimAfterTheClosure() throws Exception {
+        Area area = createArea(-11.774, -38.501, null);
+        TestOperatorAuth.Session lifeguard = lifeguardAt(area, "LIFEGUARD");
+        TestOperatorAuth.Session coordinator = TestOperatorAuth.registerAndLogin(
+                authenticationService, restTemplate, objectMapper, "COORDINATOR");
+        UUID callId = createEmergencyCall(area.centerLatitude(), area.centerLongitude());
+        ack(callId, lifeguard.accessToken());
+
+        String occurrenceId = list(lifeguard.accessToken(), 50)[0].get("id").asText();
+        assertThat(post(
+                "/api/v1/occurrences/" + occurrenceId + "/close",
+                """
+                {"outcome": "REFERRED", "summary": "Encaminhado ao hospital da capital."}
+                """,
+                lifeguard.accessToken()).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // Sem protocolo, o CIOSP continua pendente mesmo encerrando o atendimento.
+        JsonNode pending = getDetail(occurrenceId, coordinator.accessToken());
+        assertThat(pending.get("occurrence").get("status").asText()).isEqualTo("CLOSED");
+        assertThat(pending.get("occurrence").get("outcome").asText()).isEqualTo("REFERRED");
+        assertThat(pending.get("occurrence").get("ciospStatus").asText()).isEqualTo("PENDING");
+        assertThat(pending.get("victim").get("recorded").asBoolean()).isFalse();
+
+        // A coordenação completa o protocolo e os dados que só apareceram depois.
+        ResponseEntity<String> updated = patch(
+                "/api/v1/occurrences/" + occurrenceId,
+                """
+                {
+                  "ciospProtocol": "CIOSP-2026-777",
+                  "victimName": "João Pereira",
+                  "victimAge": "52",
+                  "victimCondition": "Imobilizado, encaminhado consciente."
+                }
+                """,
+                coordinator.accessToken());
+        assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode detail = objectMapper.readTree(updated.getBody());
+        assertThat(detail.get("occurrence").get("ciospStatus").asText())
+                .isEqualTo("REGISTERED");
+        assertThat(detail.get("ciospProtocol").asText()).isEqualTo("CIOSP-2026-777");
+        assertThat(detail.get("ciospRegisteredAt").isNull()).isFalse();
+        assertThat(detail.get("victim").get("recorded").asBoolean()).isTrue();
+        assertThat(detail.get("victim").get("revealed").asBoolean()).isFalse();
+
+        // Registrar sem protocolo é recusado com 409 e tipo estável.
+        Area other = createArea(-11.574, -38.501, null);
+        TestOperatorAuth.Session second = lifeguardAt(other, "LIFEGUARD");
+        UUID secondCall = createEmergencyCall(
+                other.centerLatitude(), other.centerLongitude());
+        ack(secondCall, second.accessToken());
+        String secondOccurrence = list(second.accessToken(), 50)[0].get("id").asText();
+        ResponseEntity<String> invalid = patch(
+                "/api/v1/occurrences/" + secondOccurrence,
+                "{\"ciospStatus\": \"REGISTERED\"}",
+                coordinator.accessToken());
+        assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(objectMapper.readTree(invalid.getBody()).get("type").asText())
+                .isEqualTo("https://maraberto.org/problems/ciosp-protocol-required");
+    }
+
+    @Test
+    void anotherGuardCannotCloseEditOrRevealWhatHeDidNotAttend() throws Exception {
+        Area area = createArea(-11.374, -38.501, null);
+        TestOperatorAuth.Session owner = lifeguardAt(area, "LIFEGUARD");
+        TestOperatorAuth.Session outsider = TestOperatorAuth.registerAndLogin(
+                authenticationService, restTemplate, objectMapper, "LIFEGUARD");
+        UUID callId = createEmergencyCall(area.centerLatitude(), area.centerLongitude());
+        ack(callId, owner.accessToken());
+
+        String occurrenceId = list(owner.accessToken(), 50)[0].get("id").asText();
+        assertThat(post(
+                "/api/v1/occurrences/" + occurrenceId + "/close",
+                """
+                {"outcome": "RESOLVED", "summary": "Atendimento concluído."}
+                """,
+                outsider.accessToken()).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(patch(
+                "/api/v1/occurrences/" + occurrenceId,
+                "{\"summary\": \"Tentativa de alteração\"}",
+                outsider.accessToken()).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(post(
+                "/api/v1/occurrences/" + occurrenceId + "/victim/reveal",
+                "{\"reason\": \"curiosidade\"}",
+                outsider.accessToken()).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(getDetail(occurrenceId, outsider.accessToken())).isNull();
+    }
+
+    @Test
+    void falseAlarmClosesTheCallWithoutCiosp() throws Exception {
+        Area area = createArea(-11.174, -38.501, null);
+        TestOperatorAuth.Session lifeguard = lifeguardAt(area, "LIFEGUARD");
+        UUID callId = createEmergencyCall(area.centerLatitude(), area.centerLongitude());
+        ack(callId, lifeguard.accessToken());
+
+        String occurrenceId = list(lifeguard.accessToken(), 50)[0].get("id").asText();
+        ResponseEntity<String> response = post(
+                "/api/v1/occurrences/" + occurrenceId + "/close",
+                """
+                {"outcome": "FALSE_ALARM", "summary": "Nada encontrado no ponto informado."}
+                """,
+                lifeguard.accessToken());
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode occurrence = objectMapper.readTree(response.getBody()).get("occurrence");
+        assertThat(occurrence.get("status").asText()).isEqualTo("FALSE_ALARM");
+        assertThat(occurrence.get("ciospStatus").asText()).isEqualTo("NOT_REQUIRED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM emergency_calls WHERE id = ?", String.class, callId))
+                .isEqualTo("FALSE_ALARM");
+
+        // A ficha continua existindo para consulta e edição: nada é apagado.
+        assertThat(listByStatus(lifeguard.accessToken(), "CLOSED")).isEmpty();
+        assertThat(listByStatus(lifeguard.accessToken(), "FALSE_ALARM")).hasSize(1);
+
+        ResponseEntity<String> again = post(
+                "/api/v1/occurrences/" + occurrenceId + "/close",
+                """
+                {"outcome": "RESOLVED", "summary": "Tentativa de encerrar de novo."}
+                """,
+                lifeguard.accessToken());
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(objectMapper.readTree(again.getBody()).get("type").asText())
+                .isEqualTo("https://maraberto.org/problems/occurrence-already-closed");
+    }
+
+    private JsonNode[] listByStatus(String accessToken, String status) throws Exception {
+        ResponseEntity<String> response = restTemplate.exchange(
+                "/api/v1/occurrences?status=" + status,
+                HttpMethod.GET,
+                new HttpEntity<>(authorization(accessToken)),
+                String.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return objectMapper.readValue(response.getBody(), JsonNode[].class);
+    }
+
+    private JsonNode getDetail(String occurrenceId, String accessToken) throws Exception {
+        ResponseEntity<String> response = get(occurrenceId, accessToken);
+        if (response.getStatusCode() == HttpStatus.NOT_FOUND) {
+            return null;
+        }
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return objectMapper.readTree(response.getBody());
+    }
+
+    private ResponseEntity<String> post(String path, String body, String accessToken) {
+        return restTemplate.exchange(
+                path,
+                HttpMethod.POST,
+                jsonEntity(body, accessToken),
+                String.class);
+    }
+
+    private ResponseEntity<String> patch(String path, String body, String accessToken) {
+        return restTemplate.exchange(
+                path,
+                HttpMethod.PATCH,
+                jsonEntity(body, accessToken),
+                String.class);
+    }
+
+    private static HttpEntity<String> jsonEntity(String body, String accessToken) {
+        HttpHeaders headers = authorization(accessToken);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new HttpEntity<>(body, headers);
     }
 
     private int occurrenceCount(UUID callId) {
