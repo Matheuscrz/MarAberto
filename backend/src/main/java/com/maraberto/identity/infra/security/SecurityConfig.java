@@ -84,13 +84,16 @@ public class SecurityConfig {
                         // acompanha o lançamento e é enviada pelo mesmo operador.
                         .requestMatchers(HttpMethod.POST, "/api/v1/media/**")
                         .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
-                        .requestMatchers("/api/v1/operations/flags/**", "/api/v1/operations/stations/**")
+                        .requestMatchers("/api/v1/operations/flags/**",
+                                "/api/v1/operations/stations",
+                                "/api/v1/operations/stations/**")
                         .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/operations/**").hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/dispatch/**")
                         .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
-                        // Ocorrência: o guarda-vidas lê a ficha do que atendeu; o
-                        // escopo por posto/praia é aplicado na consulta (RN15).
+                        // Ocorrência: o guarda-vidas lê e encerra a ficha do que
+                        // atendeu; o escopo por `responder_id` é aplicado na
+                        // consulta (RN15).
                         .requestMatchers("/api/v1/occurrences/**")
                         .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
                         .anyRequest().authenticated())

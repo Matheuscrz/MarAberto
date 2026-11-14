@@ -181,6 +181,30 @@ class FlagLifecycleIntegrationTests extends PostgisIntegrationTest {
     }
 
     @Test
+    void theBeachDetailListsTheNewestLaunchFirst() {
+        UUID beachId = importBeachWithTwoSectors();
+        UUID north = sectorId(beachId, "Setor Norte");
+        flagService.launch(operatorId, launch(beachId, null, FlagColor.RED, null));
+        flagService.launch(operatorId, launch(beachId, north, FlagColor.YELLOW, null));
+
+        // O relógio do teste pode empatar os dois lançamentos; a ordem é pelo
+        // instante gravado, então fixamos a diferença aqui.
+        jdbcTemplate.update("""
+                UPDATE flag_updates
+                   SET created_at = NOW() - INTERVAL '2 hours'
+                 WHERE beach_id = ? AND sector_id IS NULL
+                """, beachId);
+
+        List<PublicFlag> latest = flagService.publicFlags(beachId, true);
+
+        assertThat(latest).hasSize(2);
+        assertThat(latest.getFirst().sectorId())
+                .as("o lançamento mais novo aparece primeiro no console e na ficha")
+                .isEqualTo(north);
+        assertThat(latest.getLast().sectorId()).isNull();
+    }
+
+    @Test
     void theLatestFlagOfAScopeIsTheNewestOneEvenAfterThePreviousClosed() {
         UUID beachId = importBeachWithTwoSectors();
         flagService.launch(operatorId, launch(beachId, null, FlagColor.RED, null));

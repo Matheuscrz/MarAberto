@@ -149,5 +149,9 @@ export interface ShiftTarget {
   readonly beachName: string | null;
   readonly latitude: number;
   readonly longitude: number;
+  /** Quando a posição da estrutura foi registrada; nulo no cadastro antigo. */
+  readonly positionUpdatedAt: string | null;
+  /** Precisão da leitura que registrou a posição, em metros. */
+  readonly positionAccuracyM: number | null;
   readonly coverageRadiusMeters: number | null;
 }

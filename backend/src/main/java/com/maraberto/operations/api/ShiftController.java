@@ -196,6 +196,12 @@ public class ShiftController {
             double latitude,
             @Schema(description = "Longitude WGS84 da estrutura", example = "-35.7089")
             double longitude,
+            @Schema(description = "Quando a posição da estrutura foi registrada",
+                    example = "2026-11-13T18:42:00Z")
+            Instant positionUpdatedAt,
+            @Schema(description = "Precisão informada pela leitura do aparelho, em metros",
+                    example = "12.5")
+            Double positionAccuracyM,
             @Schema(description = "Raio de cobertura cadastrado, em metros; nulo usa o padrão",
                     example = "2000")
             Integer coverageRadiusMeters) {
@@ -208,6 +214,8 @@ public class ShiftController {
                     target.beachName(),
                     target.latitude(),
                     target.longitude(),
+                    target.positionUpdatedAt(),
+                    target.positionAccuracyM(),
                     target.coverageRadiusMeters());
         }
     }

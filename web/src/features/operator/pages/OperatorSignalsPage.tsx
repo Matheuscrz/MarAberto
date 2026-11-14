@@ -106,6 +106,17 @@ export function OperatorSignalsPage() {
     [beachMap.map],
   );
 
+  // A lista é sempre da mais nova para a mais antiga. O servidor já responde
+  // nessa ordem (`ORDER BY created_at DESC`); a ordenação explícita mantém o
+  // contrato da tela visível no cliente também.
+  const orderedSignals = useMemo(
+    () =>
+      [...signals.signals].sort(
+        (a, b) => Date.parse(b.postedAt) - Date.parse(a.postedAt),
+      ),
+    [signals.signals],
+  );
+
   // Setor escolhido só vale enquanto existir na praia carregada; trocar de
   // praia (ou de mapa) cai para "praia inteira" sem um efeito de sincronização.
   const effectiveSectorId = sectors.some((sector) => sector.id === sectorId)
@@ -651,7 +662,7 @@ export function OperatorSignalsPage() {
           </Card>
         ) : (
           <ul className="grid gap-2">
-            {signals.signals.map((signal) => {
+            {orderedSignals.map((signal) => {
               const state = signalState(signal);
               return (
                 <li key={signal.id}>

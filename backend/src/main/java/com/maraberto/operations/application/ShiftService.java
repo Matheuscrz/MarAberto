@@ -51,6 +51,8 @@ public class ShiftService {
                    b.name AS beach_name,
                    ST_Y(p.location::geometry) AS latitude,
                    ST_X(p.location::geometry) AS longitude,
+                   p.position_updated_at,
+                   p.position_accuracy_m,
                    p.coverage_radius_m
             FROM lifeguard_posts p
             JOIN beaches b ON b.id = p.beach_id
@@ -62,6 +64,8 @@ public class ShiftService {
                    NULL AS beach_name,
                    ST_Y(m.location::geometry) AS latitude,
                    ST_X(m.location::geometry) AS longitude,
+                   m.position_updated_at,
+                   m.position_accuracy_m,
                    m.coverage_radius_m
             FROM mobile_bases m
             WHERE m.active
@@ -136,7 +140,21 @@ public class ShiftService {
                 resultSet.getString("beach_name"),
                 resultSet.getDouble("latitude"),
                 resultSet.getDouble("longitude"),
+                instant(resultSet, "position_updated_at"),
+                accuracy(resultSet, "position_accuracy_m"),
                 resultSet.getObject("coverage_radius_m", Integer.class)));
+    }
+
+    private static Instant instant(java.sql.ResultSet resultSet, String column)
+            throws java.sql.SQLException {
+        java.sql.Timestamp value = resultSet.getTimestamp(column);
+        return value == null ? null : value.toInstant();
+    }
+
+    private static Double accuracy(java.sql.ResultSet resultSet, String column)
+            throws java.sql.SQLException {
+        java.math.BigDecimal value = resultSet.getBigDecimal(column);
+        return value == null ? null : value.doubleValue();
     }
 
     @Transactional

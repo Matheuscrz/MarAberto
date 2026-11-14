@@ -167,6 +167,41 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
     }
 
     @Test
+    void theFieldConsoleListsStructuresEvenWhenTheMobileBaseIsOffTheMap() throws Exception {
+        jdbcTemplate.update("""
+                UPDATE shift_sessions
+                   SET last_seen_at = NOW() - INTERVAL '20 minutes'
+                 WHERE mobile_base_id = ?
+                """, mobileBaseId);
+        jdbcTemplate.update("""
+                UPDATE mobile_bases
+                   SET position_updated_at = NOW(), position_accuracy_m = 12.5
+                 WHERE id = ?
+                """, mobileBaseId);
+
+        JsonNode stations = publicJson("/api/v1/operations/stations", lifeguard);
+
+        assertThat(findStationByName(publicStations(), "Base Teste Móvel")).isNull();
+        JsonNode mobile = findStationByName(stations, "Base Teste Móvel");
+        assertThat(mobile).as("base sem plantão vivo continua no console de campo").isNotNull();
+        assertThat(mobile.get("active").asBoolean()).isTrue();
+        // A lista de campo usa a posição cadastrada da estrutura, não a do turno.
+        assertThat(mobile.get("latitude").asDouble()).isEqualTo(-10.040, within(0.0001));
+        assertThat(mobile.get("longitude").asDouble()).isEqualTo(-35.040, within(0.0001));
+        assertThat(mobile.get("positionAccuracyM").asDouble()).isEqualTo(12.5);
+        assertThat(mobile.get("positionUpdatedAt").isNull()).isFalse();
+        assertThat(findStationByName(stations, "Posto Teste Fixo")).isNotNull();
+    }
+
+    @Test
+    void theFieldConsoleIsNotPublic() {
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                "/api/v1/operations/stations", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
     void aLifeguardLaunchesAFlagAndThePublicMapOnlyShowsItWhileItIsValid() throws Exception {
         ResponseEntity<String> launched = restTemplate.exchange(
                 "/api/v1/operations/flags",

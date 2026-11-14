@@ -23,6 +23,17 @@ export async function fetchAdminStations(): Promise<readonly AdminStation[]> {
   return apiRequest<readonly AdminStation[]>("/api/v1/admin/stations", {});
 }
 
+/**
+ * Estruturas no console de campo, inclusive a base móvel sem plantão vivo.
+ *
+ * <p>A lista pública esconde a base sem turno aberto; aqui ela aparece com a
+ * posição cadastrada e a data, para o operador saber onde a estrutura fica e
+ * por que ela não está no mapa agora.
+ */
+export async function fetchFieldStations(): Promise<readonly AdminStation[]> {
+  return apiRequest<readonly AdminStation[]>("/api/v1/operations/stations", {});
+}
+
 /** Estrutura única no console de campo, inclusive desativada. */
 export async function fetchStation(
   kind: StationKind,

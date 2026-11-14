@@ -142,6 +142,11 @@ class ShiftControllerTests extends PostgisIntegrationTest {
     void listsActiveTargetsForShift() throws Exception {
         UUID baseId = EmergencyTestData.createMobileBase(
                 jdbcTemplate, LATITUDE, LONGITUDE, 900);
+        jdbcTemplate.update("""
+                UPDATE mobile_bases
+                   SET position_updated_at = NOW(), position_accuracy_m = 9.5
+                 WHERE id = ?
+                """, baseId);
         UUID inactivePost = EmergencyTestData.createPost(jdbcTemplate, LATITUDE, LONGITUDE, 500);
         jdbcTemplate.update("UPDATE lifeguard_posts SET active = FALSE WHERE id = ?", inactivePost);
 
@@ -162,6 +167,8 @@ class ShiftControllerTests extends PostgisIntegrationTest {
         JsonNode base = findTarget(targets, baseId.toString());
         assertThat(base.get("kind").asText()).isEqualTo("MOBILE_BASE");
         assertThat(base.get("beachName").isNull()).isTrue();
+        assertThat(base.get("positionUpdatedAt").isNull()).isFalse();
+        assertThat(base.get("positionAccuracyM").asDouble()).isEqualTo(9.5);
         assertThat(base.get("coverageRadiusMeters").asInt()).isEqualTo(900);
 
         assertThat(findTargetOrNull(targets, inactivePost.toString()))

@@ -115,6 +115,19 @@ public class StationService {
     }
 
     /**
+     * Estruturas no console de campo, inclusive a base móvel sem plantão vivo.
+     *
+     * <p>A lista pública esconde a base móvel sem turno aberto; o operador
+     * precisa dela aqui para saber onde o posto/base foi cadastrado e por que
+     * ele não está no mapa agora. Ler não altera permissão: a ativação em campo
+     * continua restrita à estrutura do próprio plantão (ADR-024).
+     */
+    @Transactional(readOnly = true)
+    public List<StationAdminView> fieldStations() {
+        return adminStations();
+    }
+
+    /**
      * Cadastra a estrutura na posição atual do aparelho (RF11).
      *
      * <p>Posto fixo exige a área de banho: ele pertence ao mapeamento e é o
