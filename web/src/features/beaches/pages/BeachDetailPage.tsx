@@ -29,6 +29,7 @@ import {
 import type { BeachesOutletContext } from "@/features/beaches";
 import { sanitizeText } from "@/shared/lib/sanitize";
 import { NotFoundCard } from "@/shared/components/NotFoundCard";
+import { BeachFlagCard } from "@/features/signals";
 
 /**
  * Ficha da área de banho importada do KML: tipo, município, setores na ordem do
@@ -212,6 +213,8 @@ export function BeachDetailPage() {
           Ver no mapa
         </Link>
       </Card>
+
+      <BeachFlagCard beachId={detail.id} />
 
       <section aria-labelledby="setores" className="grid gap-2.5">
         <h2

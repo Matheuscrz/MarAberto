@@ -1,61 +1,93 @@
-import { ClipboardList, FileCheck2, Filter } from "lucide-react";
+import { useMemo } from "react";
+import { ClipboardList, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/shared/components/Card";
+import { OccurrenceList, useOccurrences } from "@/features/occurrences";
 
 /**
- * Visão da coordenação sobre as ocorrências (ADR-013): revisar o que foi
- * registrado pelos guarda-vidas e acompanhar o status no CIOSP. A lista real
- * chega junto com o módulo `occurrences`; até lá, esta tela documenta o fluxo.
+ * Visão da coordenação sobre as ocorrências (ADR-013).
+ *
+ * <p>A coordenação vê todas as ocorrências; o guarda-vidas vê as do seu posto,
+ * praia e as que assumiu. O recorte é aplicado pelo servidor, não pela tela.
+ * A ficha de transcrição do CIOSP e o encerramento com desfecho entram na
+ * próxima fatia — aqui já aparecem o número interno e a pendência.
  */
 export function ManagementOccurrencesPage() {
+  const { occurrences, status, message, reload } = useOccurrences();
+
+  const counts = useMemo(() => {
+    return occurrences.reduce(
+      (acc, occurrence) => {
+        acc.total += 1;
+        if (occurrence.status === "IN_PROGRESS") acc.inProgress += 1;
+        if (occurrence.ciospStatus === "PENDING") acc.ciosp += 1;
+        return acc;
+      },
+      { total: 0, inProgress: 0, ciosp: 0 },
+    );
+  }, [occurrences]);
+
   return (
     <div>
       <PageHeader
         title="Ocorrências da operação"
-        subtitle="Acompanhe os atendimentos registrados pela equipe e o andamento no CIOSP."
+        subtitle="Atendimentos assumidos pela equipe, com o número interno e a pendência de transcrição para o CIOSP."
+        actions={
+          <button
+            type="button"
+            onClick={reload}
+            className="inline-flex items-center gap-1.5 rounded-full border border-ocean-200 bg-white px-3 py-1 text-xs font-bold text-ocean-800 transition hover:bg-ocean-50"
+          >
+            <RefreshCw aria-hidden="true" className="size-3.5 text-ocean-600" />
+            Atualizar
+          </button>
+        }
       />
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <FeatureCard
-          icon={ClipboardList}
-          title="Revisão do registro"
-          description="Cada ocorrência traz origem, horário, praia/posto, desfecho e os dados de pessoas quando houver — sempre mascarados na listagem."
-        />
-        <FeatureCard
-          icon={FileCheck2}
-          title="Status no CIOSP"
-          description="Pendente, registrado ou não aplicável. A ficha de transcrição é copiada manualmente, sem integração automática (ADR-007)."
-        />
-        <FeatureCard
-          icon={Filter}
-          title="Filtros por escopo"
-          description="A coordenação vê apenas as praias e postos do seu escopo; a autorização é aplicada pelo servidor, não pela tela."
-        />
-      </div>
+      <dl className="mb-4 grid grid-cols-3 gap-2">
+        <SummaryTile label="Ocorrências" value={counts.total} />
+        <SummaryTile label="Em atendimento" value={counts.inProgress} />
+        <SummaryTile label="CIOSP pendente" value={counts.ciosp} />
+      </dl>
 
-      <p className="mt-4 rounded-xl border border-dashed border-ocean-300 bg-white p-4 text-center text-xs font-semibold text-ocean-600">
-        Nenhuma ocorrência para revisar. A lista será preenchida quando o módulo
-        de ocorrências entrar no ar.
+      {message ? (
+        <output className="mb-2 block rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+          {message} A lista abaixo é a última que chegou.
+        </output>
+      ) : null}
+
+      {status === "loading" && occurrences.length === 0 ? (
+        <p className="rounded-xl border border-ocean-200 bg-white p-4 text-center text-xs font-semibold text-ocean-600">
+          Carregando as ocorrências…
+        </p>
+      ) : (
+        <OccurrenceList
+          occurrences={occurrences}
+          emptyMessage="Nenhuma ocorrência no período. Ela aparece aqui assim que um guarda-vidas assume um chamado do SOS."
+        />
+      )}
+
+      <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-ocean-500">
+        <ClipboardList aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+        A localização precisa do atendimento é restrita à operação e não aparece
+        em listagem pública. Dados de pessoas são opcionais, cifrados e
+        mascarados por padrão.
       </p>
     </div>
   );
 }
 
-interface FeatureCardProps {
-  readonly icon: typeof ClipboardList;
-  readonly title: string;
-  readonly description: string;
+interface SummaryTileProps {
+  readonly label: string;
+  readonly value: number;
 }
 
-function FeatureCard({ icon: Icon, title, description }: FeatureCardProps) {
+function SummaryTile({ label, value }: SummaryTileProps) {
   return (
-    <section className="rounded-2xl border border-ocean-900/10 bg-white p-4 shadow-sm">
-      <h2 className="flex items-center gap-1.5 text-sm font-bold text-ocean-950">
-        <Icon aria-hidden="true" className="size-4 text-ocean-600" />
-        {title}
-      </h2>
-      <p className="mt-1.5 text-xs leading-relaxed text-ocean-700">
-        {description}
-      </p>
-    </section>
+    <div className="rounded-xl border border-ocean-200 bg-white p-3 text-center text-ocean-900">
+      <dt className="text-[10px] font-bold uppercase tracking-wider text-ocean-500">
+        {label}
+      </dt>
+      <dd className="text-xl font-black">{value}</dd>
+    </div>
   );
 }

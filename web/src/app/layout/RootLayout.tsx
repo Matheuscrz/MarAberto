@@ -29,14 +29,14 @@ import {
   BeachSheet,
   areaShapes,
   boundsTuple,
-  riskZonesOf,
   sectorShapes,
   useBeachMap,
   useNearbyBeaches,
+  useRiskZones,
 } from "@/features/beaches";
 import type { Beach, BeachesOutletContext } from "@/features/beaches";
-import { SignalSheet, beachFlagSignals } from "@/features/signals";
-import { StationSheet, lifeguardStations } from "@/features/stations";
+import { SignalSheet, useSignals } from "@/features/signals";
+import { StationSheet, usePublicStations } from "@/features/stations";
 import { MapLegend, type MapFocus, type MapMarker } from "@/features/map";
 import { DEMO_DATA_NOTICE } from "@/shared/lib/notices";
 import { FLAG_COLORS } from "@/shared/lib/flags";
@@ -94,6 +94,11 @@ export function RootLayout() {
 
   // As praias vêm da importação do mapa, restritas a 30 km da posição atual.
   const nearby = useNearbyBeaches();
+  // Postos, bases e bandeiras são decididos pelo servidor: posto inativo, base
+  // sem plantão vivo e bandeira vencida não chegam nesta resposta.
+  const { signals } = useSignals();
+  const { stations } = usePublicStations();
+  const { zones: riskZones } = useRiskZones();
 
   const isPanelExpanded = !isHome || searchOpen;
 
@@ -101,32 +106,28 @@ export function RootLayout() {
   // Praia não tem marcador; ela é acessada pela lista e pela ficha.
   const markers = useMemo<readonly MapMarker[]>(
     () => [
-      ...lifeguardStations.map((station) => ({
+      ...stations.map((station) => ({
         id: `${STATION_PREFIX}${station.id}`,
         kind:
-          station.type === "MOBILE"
+          station.kind === "MOBILE"
             ? ("STATION_MOBILE" as const)
             : ("STATION_FIXED" as const),
         latitude: station.latitude,
         longitude: station.longitude,
         label: station.name,
       })),
-      ...beachFlagSignals.map((signal) => ({
+      ...signals.map((signal) => ({
         id: `${SIGNAL_PREFIX}${signal.id}`,
         kind: "SIGNAL" as const,
         latitude: signal.latitude,
         longitude: signal.longitude,
-        label: signal.beachName,
+        label: signal.sectorLabel
+          ? `${signal.beachName} · ${signal.sectorLabel}`
+          : signal.beachName,
         color: FLAG_COLORS[signal.flag],
-        hasPhoto: signal.photoUrls.length > 0,
       })),
     ],
-    [],
-  );
-
-  const riskZones = useMemo(
-    () => riskZonesOf(nearby.beaches),
-    [nearby.beaches],
+    [stations, signals],
   );
 
   // A praia selecionada mora na URL (`?praia=<id>`), não em estado paralelo:
@@ -143,14 +144,14 @@ export function RootLayout() {
   const selectedSignal = useMemo(() => {
     if (!selectedMarkerId?.startsWith(SIGNAL_PREFIX)) return null;
     const id = selectedMarkerId.slice(SIGNAL_PREFIX.length);
-    return beachFlagSignals.find((signal) => signal.id === id) ?? null;
-  }, [selectedMarkerId]);
+    return signals.find((signal) => signal.id === id) ?? null;
+  }, [selectedMarkerId, signals]);
 
   const selectedStation = useMemo(() => {
     if (!selectedMarkerId?.startsWith(STATION_PREFIX)) return null;
     const id = selectedMarkerId.slice(STATION_PREFIX.length);
-    return lifeguardStations.find((station) => station.id === id) ?? null;
-  }, [selectedMarkerId]);
+    return stations.find((station) => station.id === id) ?? null;
+  }, [selectedMarkerId, stations]);
 
   // Geometria da praia selecionada: buscada uma vez por praia e desenhada pelo mapa.
   const beachMapState = useBeachMap(selectedBeach?.id ?? null);

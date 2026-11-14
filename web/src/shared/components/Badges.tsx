@@ -16,6 +16,11 @@ const flagStyles: Record<FlagColor, { label: string; className: string; dot: str
     className: 'border-red-300 bg-red-50 text-red-950',
     dot: 'bg-red-500',
   },
+  PURPLE: {
+    label: 'Bandeira roxa (animais marinhos)',
+    className: 'border-violet-300 bg-violet-50 text-violet-950',
+    dot: 'bg-violet-500',
+  },
   BLACK: {
     label: 'Bandeira preta',
     className: 'border-slate-700 bg-slate-900 text-white',

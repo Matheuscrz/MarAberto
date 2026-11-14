@@ -1,22 +1,43 @@
-import type { MultiPolygon, Polygon } from "geojson";
-import type { FlagColor, RiskLevel } from "@/shared/types/flags";
+import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
+import type { FlagColor } from "@/shared/types/flags";
 
+/** Tipos de risco do backend (`RiskType` de `beaches`). */
 export type RiskType =
   | "RIP_CURRENT"
-  | "RIVER_MOUTH"
-  | "ROCKS"
-  | "DEEP_WATER"
-  | "WILDLIFE"
-  | "POLLUTION";
+  | "SUBMERGED_DROP_OFF"
+  | "STRONG_WAVES"
+  | "ROCKS_AND_PIERS"
+  | "WHIRLPOOL_OR_DEEP_POOL"
+  | "MARINE_ANIMALS"
+  | "WATER_POLLUTION"
+  | "EXTREME_WEATHER"
+  | "OTHER";
 
-export interface RiskZone {
+/** Zona permanente nunca expira; semipermanente vence em `validUntil`. */
+export type RiskPersistence = "PERMANENT" | "SEMI_PERMANENT";
+
+/**
+ * Propriedades da zona de risco no GeoJSON público (`GET /risk-zones`).
+ *
+ * <p>A cor vem pronta do servidor por tipo de risco: o mapa só pinta. Zona
+ * vencida não é publicada — o servidor filtra `active` e a validade, e o
+ * histórico continua na tabela.
+ */
+export interface RiskZoneProperties {
   readonly id: string;
-  readonly type: RiskType;
-  readonly label: string;
-  readonly description: string;
-  readonly severity: RiskLevel;
-  readonly guidance: readonly string[];
+  readonly name: string;
+  readonly riskType: RiskType;
+  readonly persistence: RiskPersistence;
+  readonly color: string;
+  readonly beachId: string;
+  readonly beachName: string;
+  readonly description: string | null;
+  readonly validUntil: string | null;
+  readonly lastConfirmedAt: string | null;
 }
+
+/** Coleção pronta para a camada de riscos do mapa. */
+export type RiskZoneCollection = FeatureCollection<Polygon, RiskZoneProperties>;
 
 /** Tipo de corpo d'água da área de banho (ADR-021), como vem do backend. */
 export type BeachKind = "BEACH" | "RIVER" | "DAM" | "LAGOON" | "OTHER";

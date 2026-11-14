@@ -78,3 +78,33 @@ export interface ImportReport {
   readonly rejected: number;
   readonly changes: readonly FeatureChange[];
 }
+
+/**
+ * Área de banho ativa na lista de escolha da coordenação
+ * (`GET /api/v1/management/bathing-areas`).
+ *
+ * <p>É o catálogo para apontar uma área existente num formulário — por
+ * exemplo, ao identificar uma sinalização registrada fora do mapeamento.
+ */
+export interface BathingAreaOption {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: "BEACH" | "RIVER" | "DAM" | "LAGOON" | "OTHER";
+  readonly municipality: string;
+  readonly stateCode: string;
+  readonly sectorCount: number;
+}
+
+/** Decisão da coordenação sobre um registro de área não identificada. */
+export type UnmappedSignalDecision =
+  | "PENDING"
+  | "IDENTIFIED"
+  | "NEEDS_MAPPING"
+  | "DISCARDED";
+
+export interface UnmappedSignalDecisionInput {
+  readonly decision: UnmappedSignalDecision;
+  readonly beachId?: string | null;
+  readonly sectorId?: string | null;
+  readonly notes?: string;
+}

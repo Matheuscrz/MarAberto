@@ -341,11 +341,10 @@ export function MapView({
 
     const southWest: [number, number] = [focus.bbox[0], focus.bbox[1]];
     const northEast: [number, number] = [focus.bbox[2], focus.bbox[3]];
-    const viewport = map.getBounds();
 
-    // Quem já está com a área enquadrada não perde o zoom; só o destaque muda.
-    if (viewport.contains(southWest) && viewport.contains(northEast)) return;
-
+    // `focus` só muda quando o usuário pede ("Ver no mapa"/seleção de setor),
+    // não a cada render. Enquadrar sempre: com o mapa aberto no Brasil inteiro
+    // todo bbox de praia já está "visível" e o pedido não pode virar no-op.
     map.fitBounds([southWest, northEast], {
       padding: 48,
       maxZoom: 16,

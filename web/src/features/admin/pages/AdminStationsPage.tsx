@@ -1,19 +1,21 @@
 import { PageHeader } from "@/shared/components/Card";
-import { StationRegistry } from "@/features/stations";
+import { StationAdminTable } from "@/features/stations";
 
 /**
- * Cadastro de postos fixos e bases móveis pela TI. O formulário é o mesmo do
- * guarda-vidas em campo (`/operador/postos`), para não duplicar regra de
- * posição/foto (RF11/RF39).
+ * Postos fixos e bases móveis no painel da TI.
+ *
+ * <p>Ativar/desativar é decisão do órgão, não do campo: a estrutura inativa sai
+ * do mapa público e da lista de destinos do plantão, mas plantões e ocorrências
+ * já registrados continuam apontando para a mesma linha.
  */
 export function AdminStationsPage() {
   return (
     <div>
       <PageHeader
         title="Postos e bases"
-        subtitle="Cadastre pontos de salvamento e mantenha as fotos que o banhista usa para reconhecer o local."
+        subtitle="Tire do mapa público a estrutura inoperante. Desativar não apaga o histórico de plantões e ocorrências."
       />
-      <StationRegistry />
+      <StationAdminTable />
     </div>
   );
 }

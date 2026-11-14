@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/shared/components/Card";
 import { adminUsers } from "@/features/admin/api/demo-users";
-import { lifeguardStations } from "@/features/stations";
+import { useAdminStations } from "@/features/stations";
 
 /**
  * Visão da TI: o que ela administra na instalação. Sem roadmap, status de
@@ -20,9 +20,8 @@ export function AdminHomePage() {
   const activeUsers = adminUsers.filter(
     (user) => user.status === "ACTIVE",
   ).length;
-  const activeStations = lifeguardStations.filter(
-    (station) => station.status === "ACTIVE",
-  ).length;
+  const { stations, status } = useAdminStations();
+  const activeStations = stations.filter((station) => station.active).length;
 
   return (
     <div>
@@ -41,8 +40,12 @@ export function AdminHomePage() {
         <StatCard
           icon={ShieldCheck}
           label="Postos e bases ativos"
-          value={activeStations}
-          hint={`${lifeguardStations.length} no total`}
+          value={status === "ready" ? activeStations : "—"}
+          hint={
+            status === "ready"
+              ? `${stations.length} no total`
+              : "Carregando as estruturas"
+          }
         />
         <StatCard
           icon={UserCog}
@@ -62,8 +65,8 @@ export function AdminHomePage() {
             <li>Cadastrar e convidar usuários, definindo o papel inicial.</li>
             <li>Ativar, desativar e corrigir o papel de qualquer usuário.</li>
             <li>
-              Manter postos fixos e bases móveis, com fotos que o banhista
-              reconhece.
+              Manter postos fixos e bases móveis, tirando do mapa público a
+              estrutura inoperante sem perder o histórico.
             </li>
             <li>
               Toda ação administrativa é auditada; a exclusão de usuário
@@ -118,7 +121,7 @@ export function AdminHomePage() {
 interface StatCardProps {
   readonly icon: typeof Users;
   readonly label: string;
-  readonly value: number;
+  readonly value: number | string;
   readonly hint: string;
 }
 

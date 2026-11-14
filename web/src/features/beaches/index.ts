@@ -8,8 +8,12 @@ export type {
   NearbyBeachesStatus,
 } from "@/features/beaches/hooks/use-nearby-beaches";
 export { useBeachMap } from "@/features/beaches/hooks/use-beach-map";
+export {
+  useRiskZones,
+  type RiskZonesState,
+  type RiskZonesStatus,
+} from "@/features/beaches/hooks/use-risk-zones";
 export { areaShapes, sectorShapes } from "@/features/beaches/lib/beach-map";
-export { riskZonesOf } from "@/features/beaches/lib/risk-zones";
 export {
   BEACH_KIND_LABEL,
   boundsTuple,
@@ -25,6 +29,8 @@ export {
   type BeachSector,
   type BoundsTuple,
   type NearbyBeaches,
+  type RiskPersistence,
   type RiskType,
-  type RiskZone,
+  type RiskZoneCollection,
+  type RiskZoneProperties,
 } from "@/features/beaches/types";

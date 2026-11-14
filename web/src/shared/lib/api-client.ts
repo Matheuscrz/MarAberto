@@ -4,6 +4,20 @@ import type { NativeHttpResponse } from "@/shared/lib/native";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
+/**
+ * URL absoluta de um recurso servido pelo backend (foto, tile, anexo).
+ *
+ * <p>As respostas da API trazem caminhos relativos (`/api/v1/media/…`), o que
+ * funciona na mesma origem. No app empacotado a API é outra origem e uma tag
+ * `<img>` não passa pelo cliente HTTP: o caminho precisa ser prefixado aqui.
+ */
+export function apiAssetUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly problem?: ApiProblem;
