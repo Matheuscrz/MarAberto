@@ -11,7 +11,7 @@ balnear: mapa de riscos, bandeiramento, tábua de marés, reportes comunitários
 quórum, estimativa anônima de ocupação e **SOS cidadão** para guarda-vidas.
 Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 
-## Direção atual (2026-11-11)
+## Direção atual (2026-11-13)
 
 - **Área de banho é a unidade territorial**: praia, rio e barragem, com **setores**
   operacionais dentro dela (ADR-016 + ADR-021). Nada regional no código.
@@ -50,6 +50,12 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
   de "em atendimento". O guarda-vidas vê e encerra **o que ele atendeu** (`responder_id`);
   coordenação/TI editam qualquer ficha depois (CIOSP, vítima). Vítima é cifrada e mascarada
   — revelar exige motivo e grava `PERSON_REVEALED`.
+- **Próximo ciclo (backlog 2026-11-13)**: ordem do SOS e encerramento na própria tela,
+  base móvel que nasce e morre com o plantão, paginação de ocorrências, mapa de situação da
+  coordenação (equipe, estruturas, sinalizações e ocorrências em camadas), administração de
+  identidade com senha temporária e trilha de auditoria, e amostra anônima de ocupação no
+  cliente. Plano em `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md`, decisões
+  propostas nas ADRs 025–027.
 
 ## Ler antes de trabalhar
 
@@ -59,11 +65,15 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
   (geoindexação e despacho), §8.2 (bandeiramento), §8.5 (ocupação), §8.6 (upload de foto),
   §8.7 (ocorrências) e §9 (cache).
 - `docs/Requirements.md` — RF/RN/RNF; **RF41** é a importação de mapeamento.
-- `docs/adr/` — ADRs 001–024. Mais usadas: 012 (dados sensíveis), 013 (ocorrências, gatilho
+- `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` — backlog detalhado das
+  próximas quatro fatias (SOS/ocorrências, mapa da coordenação, identidade/auditoria e
+  ocupação pública), com o diagnóstico do que hoje é mock ou está incompleto.
+- `docs/adr/` — ADRs 001–027. Mais usadas: 012 (dados sensíveis), 013 (ocorrências, gatilho
   no ack), 016 (importação), 017/018 (SOS), 019 (Capacitor), 020 (escala), 021 (área de
   banho), 022 (ciclo de vida da sinalização e das estruturas), 023 (sinalização por
-  localização, mídia e estruturas de campo) e 024 (fila fora do mapeamento, estrutura em
-  campo e foto do posto).
+  localização, mídia e estruturas de campo), 024 (fila fora do mapeamento, estrutura em
+  campo e foto do posto) e 025–027 (propostas: base móvel, mapa de situação, identidade e
+  auditoria).
 - `docs/kml/Areas_Banho_Sergipe.kml` — mapeamento real de SE (fonte da Fatia 1); não
   editar à mão, reexportar do QGIS.
 
@@ -391,8 +401,8 @@ os dados mocados de praias pelos dados da importação.
 
 ## Fatia 3 — geometria no mapa e ocupação por setor
 
-**Status:** implementada no working tree (backend + testes + frontend + docs); falta o aval
-para commitar. **Plano detalhado:** `docs/plan/fatia-3-mapa-e-ocupacao.md` (2026-11-12).
+**Status:** commitada (`5afaa34`, `5c84378`, `8b255b5`). **Plano detalhado:**
+`docs/plan/fatia-3-mapa-e-ocupacao.md` (2026-11-12).
 
 A geometria **já era armazenada** (`beaches.boundary`, `beach_sectors.geometry`, projetada em
 `beach_map_features`), mas o cliente só recebia o centroide e a ocupação só agregava por área.
@@ -436,8 +446,8 @@ tempo de consulta e as amostras já têm `sector_id`. PostGIS emite `"type":"Pol
 
 ## Fatia 4 — sinalização e estruturas operacionais
 
-**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
-aval para commitar. **Decisão:** ADR-022 · **migração:** `V15`. Substituiu os dados mocados
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-022 · **migração:** `V15`. Substituiu os dados mocados
 de postos, bases e bandeiras por leitura real, com ciclo de vida explícito.
 
 ### O que está no ar
@@ -485,8 +495,8 @@ A foto da sinalização e o cadastro/reposição de estrutura fecharam na Fatia 
 
 ## Fatia 5 — sinalização e estruturas ancoradas no aparelho (`V16`, ADR-023)
 
-**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
-aval para commitar. **Decisão:** ADR-023 · **migração:** `V16`. Duas formas de sinalizar e de
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-023 · **migração:** `V16`. Duas formas de sinalizar e de
 cadastrar estrutura, com foto servida pelo backend.
 
 ### O que está no ar
@@ -540,8 +550,8 @@ cadastrar estrutura, com foto servida pelo backend.
 
 ## Fatia 6 — ocorrência aberta no aceite do SOS (`V17`, ADR-013 emendada)
 
-**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
-aval para commitar. **Decisão:** ADR-013 emendada · **migração:** `V17`. Escopo original
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-013 emendada · **migração:** `V17`. Escopo original
 desta fatia: **nascer e ler** a ficha. O encerramento, o desfecho e o protocolo CIOSP foram
 entregues na Fatia 9 (`V20`) — ver abaixo.
 
@@ -572,8 +582,8 @@ entregues na Fatia 9 (`V20`) — ver abaixo.
 
 ## Fatia 7 — sinalização fora do mapeamento em triagem (`V18`, ADR-024)
 
-**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
-aval para commitar. **Decisão:** ADR-024 · **migração:** `V18`. Ponto fora do KML não é
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-024 · **migração:** `V18`. Ponto fora do KML não é
 recusado: vira registro para a coordenação decidir o que fazer.
 
 ### Backend
@@ -607,8 +617,8 @@ recusado: vira registro para a coordenação decidir o que fazer.
 
 ## Fatia 8 — estrutura em campo e foto do posto (`V19`, ADR-024)
 
-**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
-aval para commitar. **Decisão:** ADR-024 · **migração:** `V19`. O guarda-vidas gerencia a
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-024 · **migração:** `V19`. O guarda-vidas gerencia a
 estrutura do próprio plantão e a população vê a foto do posto.
 
 ### Backend
@@ -647,8 +657,8 @@ estrutura do próprio plantão e a população vê a foto do posto.
 
 ## Fatia 9 — encerramento e edição da ocorrência (`V20`, ADR-013 emendada)
 
-**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
-aval para commitar. **Decisão:** ADR-013 emendada · **migração:** `V20`. O atendimento
+**Status:** commitada (`3dd3b4c`, `80856c6`).
+**Decisão:** ADR-013 emendada · **migração:** `V20`. O atendimento
 assumido deixa de ficar "em atendimento" para sempre: o guarda-vidas encerra com relato e
 desfecho, o chamado do SOS fecha junto e a coordenação completa depois o CIOSP e a vítima.
 
@@ -705,20 +715,52 @@ desfecho, o chamado do SOS fecha junto e a coordenação completa depois o CIOSP
 - Anexos/fotos da ocorrência não existem; o histórico mostra os eventos, não uma linha do
   tempo na UI.
 
+## Próximas fatias (10–13) — backlog detalhado, nada implementado
+
+**Plano:** `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` (2026-11-13, sobre
+`80856c6`). **ADRs propostas:** 025 (base móvel), 026 (mapa de situação), 027 (identidade e
+auditoria). Cada fatia é uma branch; nenhuma foi iniciada.
+
+| Fatia | Branch | Entrega | Migração |
+| :-- | :-- | :-- | :-- |
+| 10 | `30-fix-console-de-campo-sos-e-ocorrencias` | ordem do SOS, encerrar na tela do SOS, base móvel efêmera, paginação de ocorrências | — (ou `V21` só com índice medido) |
+| 11 | `31-feature-painel-de-situacao-da-coordenacao` | equipe real, mapa de situação com camadas, home da gestão, aba de postos | — |
+| 12 | `32-feature-administracao-de-identidade-e-auditoria` | usuários reais, senha temporária, `audit_log` e consulta na TI | `V22`, `V23` |
+| 13 | `33-feature-ocupacao-anonima-no-mapa-publico` | amostra anônima de ocupação enviada pelo cliente | — |
+
+**Problemas verificados que originaram o backlog** (detalhe e arquivos no plano):
+
+- `DispatchService` ordena fila e "em atendimento" **ASC** (`created_at`/`acknowledged_at`);
+  o console não tem ação de encerrar — só um texto mandando para `/operador/ocorrencias`.
+- `ShiftService.TARGETS_SQL` lista **toda** base `active`: bases antigas voltam ao seletor
+  mesmo sem plantão. Decisão proposta: base móvel nasce/morre com o plantão (ADR-025).
+- `GET /occurrences` só tem `limit` (teto 100), sem página/cursor; a tela pede 100 fixo.
+- `ManagementTeamPage` e `AdminUsersPage` são **mock em memória** (`INITIAL_TEAM`,
+  `demo-users.ts`); `identity` só expõe `/auth/*` e o módulo `audit` é só `package-info`.
+- `/gestao` abre na importação; não há mapa de situação nem aba de postos na coordenação.
+- `recordOccupancySample()` existe e **nunca é chamado** — a ocupação é sempre
+  `INSUFFICIENT`. O servidor (`V14`, HMAC, janela de 15 min, `k=5`) está correto e não muda.
+
+**Decisões que valem para as quatro:** paginação por cursor antes de particionar (gatilhos
+da ADR-020 intocados); mapa da coordenação é **polling de 60 s** com um único ponto por
+plantão, sem histórico de trajeto (RN17 emendada, ADR-026); administração de identidade não
+tem convite por e-mail (sem SMTP) e nunca exclui usuário (ADR-027); ocupação continua
+anônima e cada cliente só contribui com a própria posição (RNF04).
+
 ## Roadmap conhecido (curto)
 
 - `beaches` — depois da Fatia 3: GeoJSON público por viewport com ETag/Redis e
   importação de postos/bases/zonas (as zonas e a leitura pública por área já existem).
 - `occurrences` — registro manual (`POST /api/v1/occurrences`, `FIELD_ATTENDED`), busca por
-  número/protocolo/período e anexos (ADR-013; encerramento já entregue na `V20`).
+  número/protocolo/período e anexos (ADR-013; encerramento na `V20`, paginação na Fatia 10).
 - `operations` — `rip_current_markings` para correntes efêmeras (RF13); contadores de
-  sinalização no painel da coordenação (RF40).
+  sinalização no painel da coordenação entram com a Fatia 11 (RF40).
 - `region` — `installation_settings` e Region Pack.
 - `tides`/`content`/`search` — endpoints públicos de marés/vídeos e `pg_trgm` (ADR-014).
 - `emergency` — perfil `rabbit` com DLQ, Web Push com o app fechado, métricas/k6
   (gatilhos da ADR-020); a transição de saída já existe pela porta `SosCallCloser` no
   encerramento da ocorrência.
-- Frontend — painel da gestão com posição e contadores de sinalização,
-  formulário de ocorrência, tiles PMTiles e ícones padronizados.
+- Frontend — formulário de ocorrência, tiles PMTiles e ícones padronizados (o painel da
+  gestão entra na Fatia 11).
 - App mobile — câmera/push, ícone/splash próprios, keystore e teste em aparelho físico.
 - CI — lint/build do frontend, Testcontainers Garage, SAST/SCA e cobertura.
