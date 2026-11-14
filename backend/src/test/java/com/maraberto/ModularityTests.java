@@ -19,6 +19,7 @@ class ModularityTests {
             "region",
             "beaches",
             "operations",
+            "occurrences",
             "emergency",
             "safety",
             "tides",

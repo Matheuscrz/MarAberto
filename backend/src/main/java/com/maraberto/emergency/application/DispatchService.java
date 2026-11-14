@@ -1,5 +1,6 @@
 package com.maraberto.emergency.application;
 
+import com.maraberto.emergency.api.SosAcknowledged;
 import com.maraberto.emergency.domain.CallAlreadyAcknowledgedException;
 import com.maraberto.emergency.domain.DispatchNotAssignedException;
 import com.maraberto.emergency.domain.EmergencyCallStatus;

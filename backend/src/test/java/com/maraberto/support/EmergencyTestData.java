@@ -26,6 +26,9 @@ public final class EmergencyTestData {
      * login.
      */
     public static void clearDispatchState(JdbcTemplate jdbc) {
+        // A ocorrência aberta no ack referencia o chamado: sai primeiro.
+        jdbc.update("DELETE FROM occurrence_events");
+        jdbc.update("DELETE FROM occurrences");
         jdbc.update("DELETE FROM emergency_outbox_events");
         jdbc.update("DELETE FROM emergency_dispatches");
         jdbc.update("DELETE FROM emergency_calls");

@@ -1,6 +1,7 @@
 package com.maraberto.emergency.application;
 
 import com.maraberto.emergency.api.EmergencyCallNotification;
+import com.maraberto.emergency.api.SosAcknowledged;
 import com.maraberto.realtime.api.SosNotifierPort;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
