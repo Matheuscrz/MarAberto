@@ -25,12 +25,16 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 - **Sessão**: `/login` único e três áreas por papel; refresh em cookie
   `__Secure-maraberto_rt; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict` e access
   token **só em memória**.
-- **Estado**: backend com **188 testes** (`./gradlew clean check`); frontend com
+- **Estado**: backend com **195 testes** (`./gradlew clean check`); frontend com
   `npm run build` e `npm run lint` verdes; app Android (Capacitor 8) com APK debug gerado.
 - **Sinalização e estruturas (ADR-022)**: `flag_updates` append-only com validade (12 h,
   teto 24 h) e `closed_at`; bandeira vencida sai do mapa e a ficha mostra a última cor com
-  selo "desatualizada". Posto/base tem `active`/`deactivated_at`/`status_note`; base móvel
-  só aparece com plantão vivo. Nada é apagado por tempo: a vigência é decidida na consulta.
+  selo "desatualizada". A lista de lançamentos (console e histórico da ficha) é **da mais
+  nova para a mais antiga** — `created_at DESC` no servidor e ordenação explícita no
+  cliente. Posto/base tem `active`/`deactivated_at`/`status_note`; base móvel só aparece no
+  **mapa** com plantão vivo, mas o **console de campo** lista todas as estruturas (inclusive
+  sem plantão e desativadas) com distância, idade e precisão da posição. Nada é apagado por
+  tempo: a vigência é decidida na consulta.
 - **Campo ancorado no aparelho (ADR-023/ADR-024)**: a bandeira pode ser lançada por
   praia/setor **ou** pela posição atual (o PostGIS resolve praia/setor) e, **fora do
   mapeamento, não é recusada** — vira registro de área não identificada (`V18`) para a
@@ -41,7 +45,11 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 - **Ocorrências (ADR-013 emendada)**: o **aceite do SOS** abre a ficha (`V17`) —
   `origin=SOS_CITIZEN`, `IN_PROGRESS`, `ciosp_status=PENDING`; chamado sem ack não gera
   ocorrência. Criação por evento depois do commit, idempotente por `emergency_call_id`, com
-  job de reconciliação.
+  job de reconciliação. **Encerrar a ocorrência** (`V20`) grava desfecho/relato/vítima
+  opcional, fecha o chamado do SOS na mesma transação (porta `emergency/api`) e tira a ficha
+  de "em atendimento". O guarda-vidas vê e encerra **o que ele atendeu** (`responder_id`);
+  coordenação/TI editam qualquer ficha depois (CIOSP, vítima). Vítima é cifrada e mascarada
+  — revelar exige motivo e grava `PERSON_REVEALED`.
 
 ## Ler antes de trabalhar
 
@@ -93,8 +101,10 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
   e mídia (`signal_position`/`position_source`, `media_assets`, `flag_media`, origem da
   posição das estruturas) · `V17` ocorrências (`occurrences` + `occurrence_events`) ·
   `V18` fila de áreas não identificadas (`unmapped_signals` + `unmapped_signal_media`) ·
-  `V19` fotos das estruturas (`lifeguard_post_media` + `mobile_base_media`).
-  **Próxima livre: `V20`**.
+  `V19` fotos das estruturas (`lifeguard_post_media` + `mobile_base_media`) · `V20`
+  encerramento e vítima da ocorrência (`responder_id`, `closed_by`, `victim_*`,
+  `outcome_type` com `REFERRED`, `emergency_calls.resolved_at/resolved_by`).
+  **Próxima livre: `V21`**.
 - `application.yml` único. Chaves relevantes: `maraberto.dispatch.*` (raio padrão, teto
   `max-radius-m: 15000`, `position-stale-after: PT30M`, `shift-idle-timeout: PT15M`,
   `escalation.rings: 5000,7000,10000,12000,15000,20000` e `escalation.delay: PT20S`),
@@ -457,9 +467,11 @@ de postos, bases e bandeiras por leitura real, com ciclo de vida explícito.
   `StationList`, `StationAdminTable`, `StationSheet`) são as features reais; `demo-signals`,
   `demo-stations`, `StationRegistry` e `lib/risk-zones.ts` foram removidos.
 - `/operador/sinalizacao` lança e encerra bandeira (praia/setor, validade, observação) e
-  lista o último lançamento de cada escopo; `/operador/postos` cadastra, reposiciona e
-  ativa/desativa a estrutura do plantão; `/admin/postos` alterna qualquer estrutura e
-  corrige a posição; a ficha da praia mostra a bandeira vigente ou "desatualizada".
+  lista os lançamentos **da mais nova para a mais antiga** (`created_at DESC` no servidor e
+  `orderedSignals` no cliente), incluindo o recém-criado no topo; `/operador/postos` cadastra,
+  reposiciona e ativa/desativa a estrutura do plantão; `/admin/postos` alterna qualquer
+  estrutura e corrige a posição; a ficha da praia mostra a bandeira vigente ou
+  "desatualizada".
 - `RootLayout` compõe os marcadores a partir de `useSignals`/`usePublicStations`; o
   `SignalsState`/`StationsState` mantém a chave da consulta para não exibir dado da praia
   anterior durante o carregamento.
@@ -529,8 +541,9 @@ cadastrar estrutura, com foto servida pelo backend.
 ## Fatia 6 — ocorrência aberta no aceite do SOS (`V17`, ADR-013 emendada)
 
 **Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
-aval para commitar. **Decisão:** ADR-013 emendada · **migração:** `V17`. Escopo desta fatia:
-**nascer e ler** a ficha; encerramento, desfecho e protocolo CIOSP ficam para a próxima.
+aval para commitar. **Decisão:** ADR-013 emendada · **migração:** `V17`. Escopo original
+desta fatia: **nascer e ler** a ficha. O encerramento, o desfecho e o protocolo CIOSP foram
+entregues na Fatia 9 (`V20`) — ver abaixo.
 
 ### Backend
 
@@ -542,9 +555,10 @@ aval para commitar. **Decisão:** ADR-013 emendada · **migração:** `V17`. Esc
   NOTHING`; `OccurrenceReconciliationJob` abre a ficha de todo chamado assumido há mais de
   `maraberto.occurrences.reconciliation.*` e sem par. `emergency` não depende de
   `occurrences` e o SOS nunca espera a ficha.
-- **Leitura (RN15):** `GET /api/v1/occurrences` e `GET /{id}`; `LIFEGUARD` vê o que está no
-  escopo do seu plantão aberto (posto/praia) e o que assumiu; `COORDINATOR`/`ADMIN` veem
-  tudo; fora do escopo → `404`. Erros em RFC 9457.
+- **Leitura (RN15):** `GET /api/v1/occurrences` e `GET /{id}`; `LIFEGUARD` lê o que está no
+  escopo do seu plantão aberto e o que assumiu (na `V20` o escopo passou a ser
+  `responder_id`, emenda da RN15); `COORDINATOR`/`ADMIN` veem tudo; fora do escopo → `404`.
+  Erros em RFC 9457.
 
 ### Frontend
 
@@ -553,8 +567,8 @@ aval para commitar. **Decisão:** ADR-013 emendada · **migração:** `V17`. Esc
 
 ### Dívidas conhecidas
 
-- Encerramento com `outcome_type`, transição a partir de `RESOLVED`/`FALSE_ALARM`,
-  `FIELD_ATTENDED` e ficha/protocolo do CIOSP ainda não existem.
+- O registro manual de ocorrência (`FIELD_ATTENDED`, 193, rádio) continua pendente; o
+  encerramento, o desfecho e o protocolo do CIOSP chegaram na Fatia 9 (`V20`).
 
 ## Fatia 7 — sinalização fora do mapeamento em triagem (`V18`, ADR-024)
 
@@ -604,6 +618,12 @@ estrutura do próprio plantão e a população vê a foto do posto.
   `COORDINATOR`/`ADMIN` alternam qualquer uma. Desativar carimba `deactivated_at` e a nota;
   reativar limpa a data e preserva a nota. Nada é apagado.
 - `GET /api/v1/operations/stations/{kind}/{id}` devolve a estrutura mesmo desativada.
+- `GET /api/v1/operations/stations` lista **todas** as estruturas no console de campo
+  (`LIFEGUARD`/`COORDINATOR`/`ADMIN`), inclusive a base móvel sem plantão vivo e as
+  desativadas, com posição, origem, precisão, data e fotos. É leitura: não amplia a
+  permissão de escrita (ADR-024). `ShiftTarget` ganhou `positionUpdatedAt`/
+  `positionAccuracyM` para o seletor mostrar onde o destino fica e há quanto tempo o ponto
+  foi registrado.
 - `CreateStationRequest.mediaIds` (até 3) anexa `media_assets` via `lifeguard_post_media` /
   `mobile_base_media` (`V19`); `photoUrls` aparece em `PublicStation` e `StationAdminView`.
   O upload e a normalização são os mesmos da sinalização.
@@ -612,6 +632,11 @@ estrutura do próprio plantão e a população vê a foto do posto.
 
 - `ShiftStationCard` em `/operador/postos` lê o plantão (`useShift`), busca a estrutura e
   oferece desativar (com motivo opcional) ou reativar; o pin sai do mapa na hora.
+- `/operador/postos` usa `useFieldStations` (`/api/v1/operations/stations`) e
+  `FieldStationList`: mostra posto/base ativo, base móvel "aguardando plantão" e estrutura
+  fora do mapa, com distância da leitura pontual do aparelho (`useStationPosition` +
+  `shared/lib/geo.ts`), data/precisão da posição, coordenada e "como chegar". O seletor de
+  plantão em `ShiftPanel` mostra a mesma distância e a posição registrada do destino.
 - `StationList`, `StationSheet`, `StationAdminTable` e `NewStationForm` mostram/enviem fotos
   com a `PhotoGallery` compartilhada.
 
@@ -620,18 +645,79 @@ estrutura do próprio plantão e a população vê a foto do posto.
 - Não há troca de foto depois do cadastro nesta fatia (só novo cadastro/reposição anexa).
 - A galeria não tem zoom por gesto; a foto órfã segue sem rotina de retenção.
 
+## Fatia 9 — encerramento e edição da ocorrência (`V20`, ADR-013 emendada)
+
+**Status:** implementada no working tree (backend + testes + frontend + docs), pendente de
+aval para commitar. **Decisão:** ADR-013 emendada · **migração:** `V20`. O atendimento
+assumido deixa de ficar "em atendimento" para sempre: o guarda-vidas encerra com relato e
+desfecho, o chamado do SOS fecha junto e a coordenação completa depois o CIOSP e a vítima.
+
+### Backend
+
+- `POST /api/v1/occurrences/{id}/close` (`CloseOccurrenceRequest`): desfecho
+  (`RESOLVED`/`REFERRED`/`FALSE_ALARM`/`CANCELLED`), relato obrigatório, observações,
+  protocolos de canal/CIOSP e vítima opcional. `RESOLVED`/`REFERRED` → `CLOSED`;
+  `FALSE_ALARM`/`CANCELLED` → status homônimo; encerrar de novo → `409`
+  `occurrence-already-closed`.
+- **Encerrar fecha o chamado do SOS na mesma transação** pela porta
+  `emergency/api/SosCallCloser` (`SosCallOutcome`): `UPDATE` compare-and-set de
+  `ACKNOWLEDGED`/`EN_ROUTE`/`ON_SCENE` para `RESOLVED`/`FALSE_ALARM`/`CANCELLED`, com
+  `resolved_at`/`resolved_by`. `emergency` continua sem depender de `occurrences`.
+- **Escopo (RN15 emendada):** guarda-vidas vê/encerra por `responder_id` (quem deu o ack;
+  fallback pelo despacho `ACKNOWLEDGED` nas fichas antigas). Coordenação/TI veem e editam
+  tudo. Fora do escopo → `404`.
+- `PATCH /api/v1/occurrences/{id}` (`UpdateOccurrenceRequest`): edição parcial, inclusive
+  depois do encerramento — protocolo do CIOSP, vítima identificada depois, correção do
+  relato. Campo nulo não altera; `REGISTERED` sem protocolo → `409`
+  `ciosp-protocol-required`; protocolo marca `REGISTERED` e carimba
+  `ciosp_registered_at/by`.
+- `POST /api/v1/occurrences/{id}/victim/reveal` (`RevealVictimRequest`, motivo obrigatório)
+  decifra nome/idade/contato/condição e grava `PERSON_REVEALED`; a ficha devolve só
+  `recorded`. Resumo/observações têm AAD próprio; nada de PII em claro em
+  `occurrence_events`.
+- `OccurrenceRepository` reescrito (escopo, detalhe, `close`, `update` dinâmico, eventos,
+  vítima cifrada); `OccurrenceCommandService`/`OccurrenceQueryService`/`OccurrenceViews`;
+  `CloseOccurrenceRequest`/`UpdateOccurrenceRequest`/`RevealVictimRequest` com `@Sanitized`;
+  `GET /occurrences?status=` filtra o histórico. Erros em RFC 9457 (404/409).
+- `V20`: `responder_id`, `closed_by`, `victim_*`, `REFERRED` no check de desfecho, backfill
+  do responsável pelo dispatch `ACKNOWLEDGED` e `emergency_calls.resolved_at/resolved_by`.
+- Testes em `OccurrenceFromSosTests`: encerramento + chamado fechado + listas por status +
+  revelação auditada, coordenação completando CIOSP/vítima, outro guarda bloqueado, falso
+  alarme (sem CIOSP) e encerramento duplicado.
+
+### Frontend
+
+- `features/occurrences`: `OccurrenceSheet` (ficha com encerrar, editar e revelar vítima com
+  motivo), `OccurrenceList` clicável, `fetchOccurrence`/`closeOccurrence`/
+  `updateOccurrence`/`revealOccurrenceVictim` e tipos do detalhe/desfecho.
+- `/operador/ocorrencias` ganhou abas **Em atendimento**/**Atendidas**, contadores por
+  `isActiveOccurrence` e abertura da ficha; encerrar recarrega a lista e o chamado some de
+  "Em atendimento por você" no console do SOS.
+- `/gestao/ocorrencias` filtra Em atendimento/Encerradas/CIOSP pendente e edita qualquer
+  ficha (protocolo do CIOSP, vítima, relato).
+- Texto do console do SOS aponta o encerramento na tela de ocorrências.
+
+### Dívidas conhecidas
+
+- `POST /api/v1/occurrences` (registro manual 193/rádio/campo, `FIELD_ATTENDED`) continua
+  rascunho local no frontend; a ficha e o protocolo do CIOSP existem, o registro manual não.
+- Sem busca por número/protocolo/período na lista; a consulta é por status e limite.
+- Anexos/fotos da ocorrência não existem; o histórico mostra os eventos, não uma linha do
+  tempo na UI.
+
 ## Roadmap conhecido (curto)
 
 - `beaches` — depois da Fatia 3: GeoJSON público por viewport com ETag/Redis e
   importação de postos/bases/zonas (as zonas e a leitura pública por área já existem).
-- `occurrences` — `V20`: encerramento/desfecho, `FIELD_ATTENDED`, ficha e protocolo CIOSP,
-  atualização de status a partir de `RESOLVED`/`FALSE_ALARM` (ADR-013).
+- `occurrences` — registro manual (`POST /api/v1/occurrences`, `FIELD_ATTENDED`), busca por
+  número/protocolo/período e anexos (ADR-013; encerramento já entregue na `V20`).
 - `operations` — `rip_current_markings` para correntes efêmeras (RF13); contadores de
   sinalização no painel da coordenação (RF40).
 - `region` — `installation_settings` e Region Pack.
 - `tides`/`content`/`search` — endpoints públicos de marés/vídeos e `pg_trgm` (ADR-014).
-- `emergency` — transição `RESOLVED`/`FALSE_ALARM`, perfil `rabbit` com DLQ, Web Push
-  com o app fechado, métricas/k6 (gatilhos da ADR-020).
+- `emergency` — perfil `rabbit` com DLQ, Web Push com o app fechado, métricas/k6
+  (gatilhos da ADR-020); a transição de saída já existe pela porta `SosCallCloser` no
+  encerramento da ocorrência.
 - Frontend — painel da gestão com posição e contadores de sinalização,
   formulário de ocorrência, tiles PMTiles e ícones padronizados.
 - App mobile — câmera/push, ícone/splash próprios, keystore e teste em aparelho físico.

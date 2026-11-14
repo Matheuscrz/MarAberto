@@ -33,7 +33,8 @@ O lançamento por localização que não cai em nenhuma área ativa é **aceito*
 - `COORDINATOR`/`ADMIN` alternam qualquer estrutura. A TI continua com `/api/v1/admin/stations` para o cadastro administrativo.
 - Desativar carimba `deactivated_at` e a nota; reativar limpa a data e **preserva** a nota (histórico do painel). **Nada é apagado**: plantões e ocorrências continuam apontando para a linha; o que muda é a visibilidade no mapa e na lista de destinos do plantão.
 - `GET /api/v1/operations/stations/{kind}/{id}` devolve a estrutura mesmo desativada, para o console do operador mostrar o estado e oferecer "Reativar".
-- A base móvel segue a regra da ADR-022: só aparece no mapa com plantão vivo e lease válido. Desativar é decisão explícita; encerrar o plantão já a retira.
+- `GET /api/v1/operations/stations` lista **todas** as estruturas no console de campo, inclusive a base móvel sem plantão vivo e as desativadas, com posição, origem, precisão, data e fotos. É leitura: não amplia a permissão de escrita. No seletor de plantão (`GET /api/v1/dispatch/shifts/targets`), cada destino traz `positionUpdatedAt`/`positionAccuracyM` e o console mostra a distância da leitura atual do aparelho — a base móvel deixa de ser só um nome na lista.
+- A base móvel segue a regra da ADR-022: só aparece no mapa com plantão vivo e lease válido. Desativar é decisão explícita; encerrar o plantão já a retira. Encerrar o turno **não** apaga o cadastro: a base continua no console de campo, com a posição registrada, até ser desativada pela coordenação/TI.
 
 ### 3. Foto do posto e base, com a mesma normalização da sinalização
 

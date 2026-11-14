@@ -737,9 +737,14 @@ CREATE TABLE occurrences (
     beach_sector_id     UUID REFERENCES beach_sectors(id),             -- setor operacional (ADR-016)
     reference_text      TEXT,                                          -- ponto de referência (sanitizado)
     post_id             UUID REFERENCES lifeguard_posts(id),
+    responder_id        UUID REFERENCES operational_users(id),        -- quem assumiu o chamado (escopo do guarda-vidas)
     summary             TEXT,                                          -- cifrado (EncryptedStringConverter)
-    outcome_type        VARCHAR(30),                                   -- preenchido ao encerrar (RF28)
+    outcome_type        VARCHAR(30),                                   -- preenchido ao encerrar (RF28): RESOLVED, REFERRED, FALSE_ALARM, CANCELLED
     outcome_notes       TEXT,                                          -- cifrado
+    victim_name         TEXT,                                          -- opcional, cifrado com AAD próprio
+    victim_age          TEXT,
+    victim_contact      TEXT,
+    victim_condition    TEXT,                                          -- dado de saúde
     ciosp_status        VARCHAR(20) NOT NULL DEFAULT 'PENDING',        -- PENDING, REGISTERED, NOT_REQUIRED
     ciosp_protocol      VARCHAR(40),
     ciosp_registered_at TIMESTAMPTZ,
@@ -749,12 +754,14 @@ CREATE TABLE occurrences (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     closed_at           TIMESTAMPTZ,
+    closed_by           UUID REFERENCES operational_users(id),         -- quem encerrou
     CONSTRAINT chk_occ_sos_link CHECK (origin <> 'SOS_CITIZEN' OR emergency_call_id IS NOT NULL),
     CONSTRAINT chk_occ_place   CHECK (location IS NOT NULL OR (beach_id IS NOT NULL AND reference_text IS NOT NULL))
 );
-CREATE INDEX idx_occ_loc     ON occurrences USING GIST(location);
-CREATE INDEX idx_occ_pending ON occurrences (occurred_at DESC) WHERE ciosp_status = 'PENDING';
-CREATE INDEX idx_occ_post    ON occurrences (post_id, occurred_at DESC);
+CREATE INDEX idx_occ_loc       ON occurrences USING GIST(location);
+CREATE INDEX idx_occ_pending   ON occurrences (occurred_at DESC) WHERE ciosp_status = 'PENDING';
+CREATE INDEX idx_occ_post      ON occurrences (post_id, occurred_at DESC);
+CREATE INDEX idx_occ_responder ON occurrences (responder_id, occurred_at DESC);
 
 CREATE TABLE occurrence_events (               -- histórico append-only da ocorrência
     id            BIGSERIAL PRIMARY KEY,
@@ -783,8 +790,10 @@ CREATE TABLE occurrence_people (               -- tudo opcional e cifrado; sem �
 - **O gatilho é o aceite (`SosAcknowledged`), não a criação do chamado.** SOS sem atendente não vira ocorrência: a ficha nasce `IN_PROGRESS` quando o guarda-vidas assume, já com praia/setor, coordenada do chamado (sensível) e `ciosp_status = PENDING`. A criação roda depois do commit do ack (`AFTER_COMMIT` + `REQUIRES_NEW`) e o job de reconciliação cobre falha do listener — ver §8.7.
 - **`FIELD_ATTENDED`** é o atendimento feito pelo guarda-vidas **sem** chamado no 193 ou no SOS; ele registra depois, com data/hora do fato e `client_request_id` para idempotência. A origem `CBM_193` exige `external_protocol` recomendado (não obrigatório) e `EXTERNAL_OTHER` cobre rádio/presencial/outro posto.
 - A restrição `chk_occ_place` impõe RN12: sem coordenada, é obrigatório informar praia + ponto de referência. `beach_sector_id`, quando houver, é o recorte operacional usado no painel da coordenação.
-- Nome, contato, condição, resumo e observações usam `EncryptedStringConverter` (ADR-012). Por serem cifrados, **não** entram em `LIKE`, ordenação nem em `search_documents`; a busca de ocorrência é por número, protocolo (igualdade), praia, período e natureza.
+- Nome, contato, condição, resumo e observações usam `EncryptedStringConverter` (ADR-012). Por serem cifrados, **não** entram em `LIKE`, ordenação nem em `search_documents`; a busca de ocorrência é por número, protocolo (igualdade), praia, período e natureza. Os dados de vítima da ocorrência usam AAD próprio (`maraberto:occurrence-victim:v1`) e são decifrados só na revelação auditada; a ficha devolve apenas `recorded`.
+- **Encerramento (V20):** `responder_id` é quem assumiu o chamado e define o escopo do guarda-vidas (emenda da RN15); `closed_by` preserva quem encerrou. `RESOLVED`/`REFERRED` levam a `CLOSED`, `FALSE_ALARM`/`CANCELLED` aos status homônimos, e `NOT_REQUIRED` no CIOSP só para os dois últimos sem protocolo. Encerrar é uma vez só (409 na segunda); completar depois (CIOSP, vítima) é `PATCH`, que não muda o estado e grava `EDITED`/`CIOSP_REGISTERED`.
 - Detalhe de `occurrence_events.detail` e `audit_log` nunca contém PII em claro. Revelar dados de pessoas grava `PERSON_REVEALED` e uma linha de auditoria com o motivo.
+- **Listas do console** vêm por `occurred_at DESC, number DESC` (a mais recente primeiro), com `status` opcional como filtro; a ficha separa "em atendimento" de "atendidas" pela mesma regra no cliente.
 
 ### 7.10 Busca tolerante a erros (ADR-014)
 
@@ -850,7 +859,7 @@ CREATE INDEX idx_shift_scope       ON shift_sessions (beach_id, beach_sector_id,
 - `uq_shift_open` impede dois plantões abertos para o mesmo operador (§17, concorrência) e é o índice que a consulta de elegibilidade do SOS usa (§7.5).
 - No código atual a tabela de usuários é `operational_users` (`V6`); o DDL acima usa `app_users`, que é o nome do modelo-alvo (§7.3).
 - **A `V8` materializa esta tabela** junto de `coverage_radius_m` e do dispatch por destinatário (§7.13). Sem plantão aberto não há como saber "quem está perto", então esta é a primeira dependência do despacho do SOS. O ciclo está implementado em `operations` (`GET /api/v1/dispatch/shifts/targets`, `POST /api/v1/dispatch/shifts`, `GET /api/v1/dispatch/shifts/current`, `PUT /api/v1/dispatch/shifts/current/position`, `POST /api/v1/dispatch/shifts/current/close`).
-- **Só estrutura ativa é destino de plantão.** `GET /api/v1/dispatch/shifts/targets` devolve postos fixos (com praia) e bases móveis ativos, com a posição e o raio de cobertura; o console só permite abrir plantão nessa lista. Plantão em posto/base inativo continuaria no banco e sumiria da seleção do SOS sem aviso.
+- **Só estrutura ativa é destino de plantão.** `GET /api/v1/dispatch/shifts/targets` devolve postos fixos (com praia) e bases móveis ativos, com a posição, a origem/precisão/data do ponto e o raio de cobertura; o console só permite abrir plantão nessa lista. Plantão em posto/base inativo continuaria no banco e sumiria da seleção do SOS sem aviso. O seletor mostra a distância da leitura atual do aparelho até cada destino, para o guarda-vidas saber exatamente onde a base está antes de abrir o turno.
 - **Check-in/check-out explícito:** o operador inicia e encerra o plantão; o encerramento remove a posição da visão da coordenação (o histórico fica só como duração, sem trajeto). O `ended_reason` (`MANUAL`, `IDLE_TIMEOUT`, `LOGOUT`) separa o turno encerrado pelo próprio operador do que caiu sozinho, porque os dois casos significam coisas diferentes para a coordenação.
 - **Plantão sem sinal de vida cai (`V9`).** `last_seen_at` funciona como *lease*: o console renova a cada 5 min enquanto está aberto e visível (`POST /api/v1/dispatch/shifts/current/heartbeat`, `204`, sem payload, ou a própria atualização de posição) e a elegibilidade do SOS ignora plantão cujo último sinal passou de 15 min. A expiração é **preguiçosa** — avaliada na consulta e na leitura do plantão —, e o `ShiftIdleExpiryJob` apenas carimba `ended_at`/`ended_reason` a cada 10 min nas linhas vencidas (índice parcial `idx_shift_open_last_seen`). Fechar o app à força, desligar o aparelho ou perder rede **encerra o turno**, que é o comportamento correto: um console fechado não vê o alerta (medido no emulador: app minimizado ou tela bloqueada não toca nem notifica) e um "plantão fantasma" continuaria sendo escolhido pelo PostGIS. O único custo é um batimento minúsculo a cada 5 minutos por console aberto.
 - **Atualização da posição:** no início do plantão (GPS do aparelho, com ajuste manual), sob ação explícita ("atualizar minha localização") e por renovação a cada 5 min **enquanto o console está aberto e visível**, com `position_accuracy_m`. Sem _background geolocation_, sem `watchPosition` e sem persistência de coordenada no navegador — a renovação existe para a base móvel não envelhecer além de `position-stale-after` (30 min) e é, ao mesmo tempo, o sinal de vida do turno (posição e lease na mesma requisição, com jitter para não sincronizar consoles). Aba escondida não envia nada; se ficar escondida além do lease, o turno cai — e ao voltar o console revalida o plantão e avisa "encerrado por inatividade" em vez de mostrar um turno que não recebe mais chamados.
@@ -866,10 +875,12 @@ A vigência da sinalização e a visibilidade das estruturas são decididas **na
 - **`flag_updates` é append-only.** Cada lançamento tem validade própria (padrão `maraberto.flags.validity: PT12H`, teto de 24 h e piso de 0,5 h). Lançar de novo no mesmo escopo fecha o anterior com `closed_at`/`closed_by` sob `pg_advisory_xact_lock(hashtextextended(beach_id || ':' || sector_id))`; a validade original do anterior permanece registrada.
 - **Vigente = `closed_at IS NULL AND valid_until > now()`.** É esse predicado que o mapa público usa (`GET /api/v1/flags`); a bandeira vencida continua no histórico e não aparece entre os pins.
 - **A ficha não apaga a sinalização.** `GET /api/v1/flags?beachId=<id>&includeExpired=true` devolve o último lançamento de cada escopo (praia inteira e cada setor), mesmo vencido ou encerrado, para a ficha mostrar a última cor com o selo **"desatualizada"** (RN01). `includeExpired` sem `beachId` é `400` em RFC 9457.
+- **A lista é da mais nova para a mais antiga.** `GET /api/v1/flags` e o histórico da ficha ordenam por `created_at DESC` (empate por `id DESC`) e o console ordena explicitamente os lançamentos recebidos (`orderedSignals`) — a ordem não depende do banco nem do navegador. O lançamento recém-criado aparece no topo de `/operador/sinalizacao` sem recarregar.
 - **Bandeira por setor, fallback para a área.** `sector_id` nulo vale para a praia inteira; setor sem lançamento próprio herda a bandeira da praia na ficha. Dois setores podem ter o mesmo nome — o escopo é o `sector_id`.
 - **O pin não é a posição do operador.** Lançamento de setor usa o centroide do setor; lançamento da área usa `ST_PointOnSurface(boundary)`. A posição do guarda-vidas continua fora da resposta pública (RN17).
 - **Estruturas têm estado explícito.** `lifeguard_posts` e `mobile_bases` ganham `active`, `deactivated_at` e `status_note`: posto inativo some do mapa público e da lista de destinos do plantão, e o histórico de plantões/ocorrências continua apontando para a linha. Reativar limpa `deactivated_at` e **preserva** a nota.
 - **Base móvel só existe no mapa com plantão vivo.** A consulta pública usa `last_position` do plantão aberto (fallback: posição cadastrada) e exige `last_seen_at` dentro do lease. Sem turno aberto ou com lease vencido, a base some; nada é apagado.
+- **O console de campo não perde o cadastro.** `GET /api/v1/operations/stations` (`LIFEGUARD`/`COORDINATOR`/`ADMIN`) devolve todas as estruturas, inclusive a base móvel sem plantão vivo e as desativadas, com posição, origem, precisão, data e fotos. A tela `/operador/postos` calcula a distância de uma leitura pontual do aparelho e mostra a coordenada e o "como chegar"; ler a lista não amplia a permissão de escrita — ativar/desativar em campo continua restrito à estrutura do próprio plantão (ADR-024).
 - **Polling do cliente:** 30 s para pins de estação/sinalização e 60 s para zonas de risco e ficha, pausado com a aba escondida e revalidado ao voltar. O servidor é a fonte da verdade; o cache HTTP é curto (30 s no mapa, 60 s na ficha).
 
 #### Sinalização e estruturas ancoradas no aparelho (`V16`, ADR-023)
@@ -1120,7 +1131,7 @@ sequenceDiagram
 1. Guarda-vidas autenticado lança a bandeira (`POST /api/v1/operations/flags`). O local vem do escopo escolhido (praia/setor) **ou** da leitura atual do aparelho; no segundo caso o servidor resolve praia e setor por `ST_Contains`. **Fora do mapeamento não recusa:** responde `201` com `outcome=UNMAPPED` e manda o registro para a fila da coordenação (`unmapped_signals`), sem publicar pin (ADR-024). A foto é opcional (até 3), enviada antes para `POST /api/v1/media` e anexada ao lançamento ou ao registro da fila.
 2. Transação grava `flag_updates` (+ `flag_media`) e encerra o lançamento anterior do mesmo escopo sob `pg_advisory_xact_lock`.
 3. O mapa público (`GET /api/v1/flags`) publica só `closed_at IS NULL AND valid_until > now()`; o pin é o ponto enviado (modo localização) ou o centroide/`ST_PointOnSurface` do escopo. Nada é invalidado por job: a vigência é decidida na consulta.
-4. Banhistas veem a mudança em até 30 s (polling do mapa) e operacionais em até 30 s na lista do console.
+4. Banhistas veem a mudança em até 30 s (polling do mapa) e operacionais em até 30 s na lista do console. A lista da ficha e do console é sempre **da mais nova para a mais antiga** (`ORDER BY created_at DESC` no último lançamento de cada escopo); o cliente mantém a mesma ordem na renderização.
 5. **Expiração:** vencida, a sinalização sai do mapa e a ficha mostra a última cor com o selo "desatualizada" (RN01).
 6. **Fora do mapeamento:** o registro não tem pin nem ficha; a coordenação identifica a área, pede novo mapeamento ou descarta na fila de `/gestao/areas-nao-identificadas`. A decisão é registrada com autor e data e não publica bandeira retroativamente.
 
@@ -1194,16 +1205,19 @@ sequenceDiagram
     S-->>O: SosAcknowledged (after commit)
     O->>DB: INSERT occurrence (origin=SOS_CITIZEN) ON CONFLICT DO NOTHING
     O-->>G: ficha disponível em /operador/ocorrencias e /gestao/ocorrencias
-    S-->>O: …Resolved / …FalseAlarm → atualiza status e desfecho
+    G->>O: POST /api/v1/occurrences/{id}/close (desfecho, relato, CIOSP e vítima opcionais)
+    O->>DB: UPDATE occurrence → CLOSED/FALSE_ALARM/CANCELLED + STATUS_CHANGED
+    O->>S: SosCallCloser.closeFromOccurrence (mesma transação)
+    S->>DB: UPDATE emergency_calls → RESOLVED/FALSE_ALARM/CANCELLED + resolved_at
     Note over G,O: Ocorrência externa (193, rádio, presencial)
     G->>O: POST /api/v1/occurrences (client_request_id, origem, fato, local, natureza)
     O->>DB: busca duplicata ≤ 200 m e ≤ 30 min (RN13) → aviso, não bloqueio
     O->>DB: INSERT occurrence (ciosp_status=PENDING) + audit
-    G->>O: GET /occurrences?ciospStatus=PENDING
-    G->>O: GET /occurrences/{id}/ciosp-sheet (campos na ordem do CIOSP)
+    G->>O: GET /occurrences?status=CLOSED
+    G->>O: GET /occurrences/{id} (ficha; vítima mascarada)
     G->>C: transcreve manualmente (copiar/colar)
-    G->>O: PATCH /occurrences/{id}/ciosp {protocol}
-    O->>DB: ciosp_status=REGISTERED + OccurrenceCiospRegistered + audit
+    G->>O: PATCH /api/v1/occurrences/{id} {ciospProtocol}
+    O->>DB: ciosp_status=REGISTERED + CIOSP_REGISTERED + audit
 ```
 
 **Pontos de projeto**
@@ -1214,8 +1228,9 @@ sequenceDiagram
 4. **Idempotência dos dois lados:** `emergency_call_id UNIQUE` no SOS; `client_request_id` no registro manual (duplo toque em tela de rede ruim).
 5. **Duplicata é aviso.** O guarda-vidas decide entre vincular ao registro existente (`LINKED`) ou criar outro. Bloquear seria pior que duplicar quando há vítima.
 6. **Sem integração com o CIOSP (D-07).** O sistema monta a ficha e controla a pendência. O campo `ciosp-sheet` é um modelo de leitura, e os rótulos e a ordem vêm de configuração da instalação (cada CBM tem seu formulário).
-7. **Escopo de acesso (RN15):** guarda-vidas veem ocorrências do seu posto/praia; coordenação, todas. Dados de pessoas vêm mascarados; revelar grava `PERSON_REVEALED` + auditoria.
-8. **Estados:** a ocorrência de SOS nasce `IN_PROGRESS` no ack (já há atendente) e segue o ciclo do chamado (`RESOLVED`→`CLOSED`, `FALSE_ALARM`, `CANCELLED`); a externa nasce `OPEN` ou `CLOSED` (registro após o fato). `CLOSED` exige `outcome_type`.
+7. **Escopo de acesso (RN15, emendada na V20):** o guarda-vidas vê e encerra **o que ele atendeu** (`responder_id`) — o responsável é quem deu o ack, e fichas antigas caem no fallback pelo despacho `ACKNOWLEDGED`; coordenação e TI veem e editam todas. Fora do escopo responde 404, sem distinguir "não existe" de "não é sua". Dados de pessoas vêm mascarados; revelar exige motivo e grava `PERSON_REVEALED` + auditoria.
+8. **Encerrar o atendimento encerra o chamado.** O `POST /{id}/close` grava o desfecho e o relato, muda o status da ocorrência e fecha o `emergency_calls` na **mesma transação**, atrás da porta `emergency/api/SosCallCloser` — o `UPDATE` é compare-and-set por estado e o chamado sai de "Em atendimento por você". Se o chamado já estava resolvido, nada é reescrito. Completar depois (protocolo do CIOSP, vítima identificada) é `PATCH`, não reabertura: `REGISTERED` sem protocolo responde 409.
+9. **Estados:** a ocorrência de SOS nasce `IN_PROGRESS` no ack (já há atendente) e sai por `RESOLVED`/`REFERRED` → `CLOSED`, `FALSE_ALARM` ou `CANCELLED`; a externa nasce `OPEN` ou `CLOSED` (registro após o fato). `CLOSED` exige `outcome_type`.
 
 ---
 
@@ -1369,9 +1384,9 @@ Registro, login e papéis vivem **dentro do sistema** (módulo `identity`), sem 
 | Moderar reportes / demarcar correntes                 |    ✘    |    ✘     |    ✔ (sua área)     |               ✔               |           ✔            |
 | Receber/atender SOS                                   |    ✘    |    ✘     |          ✔          |               ✔               |           ✔            |
 | Registrar ocorrência externa (193/outros)             |    ✘    |    ✘     |    ✔ (seu posto)    |               ✔               |           ✔            |
-| Ver ocorrências e ficha CIOSP                         |    ✘    |    ✘     | ✔ (seu posto/praia) |               ✔               |           ✔            |
+| Ver ocorrências e ficha CIOSP                         |    ✘    |    ✘     | ✔ (o que atendeu)   |               ✔               |           ✔            |
 | Revelar dados de pessoas da ocorrência                |    ✘    |    ✘     |    ✔ (auditado)     |         ✔ (auditado)          |           ✘            |
-| Informar protocolo do CIOSP                           |    ✘    |    ✘     |    ✔ (seu posto)    |               ✔               |           ✘            |
+| Informar protocolo do CIOSP                           |    ✘    |    ✘     | ✔ (o que atendeu)   |               ✔               |           ✘            |
 | Cadastrar base móvel                                  |    ✘    |    ✘     |      ✔ (a sua)      |               ✔               |           ✔            |
 | Cadastrar/remover posto fixo                          |    ✘    |    ✘     |          ✘          |               ✔               |           ✔            |
 | Acompanhar o trabalho em campo (`/gestao`)            |    ✘    |    ✘     |          ✘          |               ✔               |           ✔            |
@@ -1380,7 +1395,8 @@ Registro, login e papéis vivem **dentro do sistema** (módulo `identity`), sem 
 | Importar/atualizar o mapa de áreas de banho (KML)     |    ✘    |    ✘     |          ✘          |        ✔ (primeira aba)       |   ✘ (só usuários)      |
 | Gestão de usuários e configuração regional (`/admin`) |    ✘    |    ✘     |          ✘          | ativar/desativar guarda-vidas | ✔ (cadastra e convida) |
 
-Autorização por **papel + escopo** (posto/praia) validada no servidor, nunca só no cliente.
+Autorização por **papel + escopo** validada no servidor, nunca só no cliente: plantão/posto para a
+operação de campo e **responsável pelo atendimento** (`responder_id`) para a ocorrência.
 
 ### 13.3 Modelo de ameaças (resumo)
 
@@ -1399,7 +1415,7 @@ Autorização por **papel + escopo** (posto/praia) validada no servidor, nunca s
 | Adulteração de auditoria            | Tabela append-only, encadeamento de hash, backup separado.                                                                                       |
 | Roubo de token por XSS              | Access token só em memória; refresh em cookie `HttpOnly`; CSP sem inline; nada de token em `localStorage`/`sessionStorage`.                      |
 | CSRF no refresh/logout              | `SameSite=Strict`, verificação de `Origin`, cookie restrito a `/api/v1/auth`.                                                                    |
-| Vazamento de dados de vítima        | Campos cifrados e mascarados por padrão, acesso por posto/praia, revelação auditada, sem PII em logs, outbox, cache ou métricas.                 |
+| Vazamento de dados de vítima        | Campos cifrados e mascarados por padrão, acesso pelo responsável pelo atendimento, revelação auditada, sem PII em logs, outbox, cache ou métricas. |
 | Ocorrência de SOS perdida           | Criação por evento com Outbox + job de reconciliação + alerta.                                                                                   |
 
 ### 13.4 LGPD (resumo técnico)
