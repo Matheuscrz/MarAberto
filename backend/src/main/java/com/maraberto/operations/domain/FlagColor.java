@@ -1,10 +1,11 @@
-package com.maraberto.beaches.domain;
+package com.maraberto.operations.domain;
 
 /**
- * Cores da sinalização de bandeira adotada pelos guarda-vidas.
+ * Cores da sinalização de bandeira adotada pelos guarda-vidas (RF12).
  *
- * <p>O lançamento/histórico de bandeiras será modelado na issue de operações
- * (tabela {@code flag_updates}); este enum apenas fixa o vocabulário do domínio.
+ * <p>O histórico é append-only: cada lançamento é uma linha em
+ * {@code flag_updates} com validade própria (RN01). O vocabulário mora no
+ * módulo que escreve a sinalização — o mapa público apenas o consome.
  */
 public enum FlagColor {
 

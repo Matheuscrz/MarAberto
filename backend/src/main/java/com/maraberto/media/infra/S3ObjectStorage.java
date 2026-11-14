@@ -79,6 +79,20 @@ public class S3ObjectStorage implements ObjectStoragePort {
     }
 
     @Override
+    public Optional<byte[]> get(String bucket, String key) {
+        try {
+            return Optional.of(s3.getObjectAsBytes(
+                            GetObjectRequest.builder().bucket(bucket).key(key).build())
+                    .asByteArray());
+        } catch (S3Exception exception) {
+            if (exception.statusCode() == 404) {
+                return Optional.empty();
+            }
+            throw exception;
+        }
+    }
+
+    @Override
     public Optional<ObjectMetadata> head(String bucket, String key) {
         try {
             var head = s3.headObject(HeadObjectRequest.builder().bucket(bucket).key(key).build());

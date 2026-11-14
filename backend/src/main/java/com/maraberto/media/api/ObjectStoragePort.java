@@ -41,6 +41,15 @@ public interface ObjectStoragePort {
     ObjectMetadata put(String bucket, String key, String contentType, byte[] content);
 
     /**
+     * Lê o conteúdo do objeto.
+     *
+     * <p>Usado para servir mídia pública pelo backend: a foto da sinalização
+     * aparece no mapa do banhista e não pode depender de uma URL pré-assinada
+     * que expira. Objeto ausente devolve {@link Optional#empty()}.
+     */
+    Optional<byte[]> get(String bucket, String key);
+
+    /**
      * Consulta metadados do objeto, se ele existir.
      */
     Optional<ObjectMetadata> head(String bucket, String key);
