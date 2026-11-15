@@ -6,6 +6,16 @@
 server:
   forward-headers-strategy: native
 
+# Swagger e o documento OpenAPI são ferramenta de desenvolvimento: em produção
+# eles expõem o contrato inteiro da API a quem alcançar o host. O
+# `SecurityConfig` libera essas rotas sem autenticação, então o desligamento vem
+# do springdoc — com ele `false` os endpoints respondem 404, em vez de 200.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
 maraberto:
   security:
     cookie:

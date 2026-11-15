@@ -1,0 +1,28 @@
+# Extensão para testes públicos via Cloudflare Quick Tunnel.
+# Uso: docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+
+services:
+  backend:
+    environment:
+      # Garante que o Spring entenda o X-Forwarded-Proto: https enviado pelo túnel
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      # Garante que cookies de sessão funcionem em HTTPS pelo túnel
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # Permite WebSocket STOMP e requisições vindas da URL pública do túnel
+      REALTIME_ALLOWED_ORIGINS: ${REALTIME_ALLOWED_ORIGINS:-http://localhost:3000}
+      # Ativa usuários e postos de demonstração para o QA conseguir logar e testar
+      IDENTITY_DEV_SEED: ${IDENTITY_DEV_SEED:-true}
+      OPERATIONS_DEV_SEED: ${OPERATIONS_DEV_SEED:-true}
+
+  web:
+    volumes:
+      # Sobrescreve apenas no container de teste o nginx.conf original
+      - ./web/nginx.tunnel.conf:/etc/nginx/conf.d/default.conf:ro
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: maraberto-tunnel
+    command: tunnel --no-autoupdate --url http://web:80
+    depends_on:
+      - web
+    restart: unless-stopped
