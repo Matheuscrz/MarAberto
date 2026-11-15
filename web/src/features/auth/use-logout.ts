@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { logoutRequest } from "@/features/auth/api";
 import { DEMO_AUTH_ENABLED } from "@/features/auth/demo";
 import { useAuthSession } from "@/features/auth/session";
+import { stopPushNotifications } from "@/shared/lib/push";
 
 /**
  * Encerra a sessão: pede o logout ao servidor (revoga o refresh) e limpa o
@@ -27,6 +28,8 @@ export function useLogout(): {
       // Sessão local é descartada de qualquer forma.
     } finally {
       clearSession();
+      // O aparelho para de receber push da sessão encerrada (sem efeito no PWA).
+      void stopPushNotifications();
       setPending(false);
       navigate("/login", { replace: true });
     }

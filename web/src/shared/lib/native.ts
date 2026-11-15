@@ -2,6 +2,10 @@ import { CapacitorHttp } from '@capacitor/core';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { Geolocation } from '@capacitor/geolocation';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import {
+  PushNotifications,
+  type PushNotificationSchema,
+} from '@capacitor/push-notifications';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { appPlatform } from '@/shared/lib/platform';
 
@@ -162,6 +166,92 @@ async function ensureSosChannel(): Promise<void> {
     // Canal já existe ou a versão do Android não usa canais; o schedule
     // continua funcionando com o canal padrão.
   }
+}
+
+export interface NativePushMessage {
+  readonly title: string;
+  readonly body: string;
+  readonly data: Record<string, string>;
+}
+
+export interface NativePushHandlers {
+  readonly onToken: (token: string) => void;
+  readonly onTokenError?: (message: string) => void;
+  /** Chega com o app aberto; no Android o sistema não a exibe sozinho. */
+  readonly onMessage?: (message: NativePushMessage) => void;
+  /** Toque na notificação (app fechado ou em segundo plano). */
+  readonly onAction?: (message: NativePushMessage) => void;
+}
+
+export interface NativePushRegistration {
+  /** Remove os ouvintes e invalida o token no Firebase (Android). */
+  readonly stop: () => Promise<void>;
+}
+
+export async function nativePushPermission(): Promise<NativePermission> {
+  const status = await PushNotifications.checkPermissions();
+  return normalizePermission(status.receive);
+}
+
+export async function nativePushRequestPermission(): Promise<NativePermission> {
+  const status = await PushNotifications.requestPermissions();
+  return normalizePermission(status.receive);
+}
+
+/**
+ * Assina os eventos do FCM e registra o aparelho.
+ *
+ * <p>O `google-services.json` só existe no build Android; no navegador esta
+ * função nunca é chamada (`shared/lib/push.ts` filtra pela plataforma). O
+ * token chega de forma assíncrona em `onToken` — o registro não o devolve.
+ */
+export async function nativeRegisterPush(
+  handlers: NativePushHandlers,
+): Promise<NativePushRegistration> {
+  const handles = await Promise.all([
+    PushNotifications.addListener('registration', (token) =>
+      handlers.onToken(token.value),
+    ),
+    PushNotifications.addListener('registrationError', (error) =>
+      handlers.onTokenError?.(error.error),
+    ),
+    PushNotifications.addListener('pushNotificationReceived', (notification) =>
+      handlers.onMessage?.(toPushMessage(notification)),
+    ),
+    PushNotifications.addListener(
+      'pushNotificationActionPerformed',
+      (action) => handlers.onAction?.(toPushMessage(action.notification)),
+    ),
+  ]);
+  await PushNotifications.register();
+  return {
+    stop: async () => {
+      await PushNotifications.unregister().catch(() => undefined);
+      await Promise.all(
+        handles.map((handle) => handle.remove().catch(() => undefined)),
+      );
+    },
+  };
+}
+
+function toPushMessage(notification: PushNotificationSchema): NativePushMessage {
+  return {
+    title: notification.title ?? 'MarAberto',
+    body: notification.body ?? '',
+    data: normalizePushData(notification.data),
+  };
+}
+
+/** O FCM entrega `data` como objeto; o resto do app só lida com string. */
+function normalizePushData(value: unknown): Record<string, string> {
+  if (value === null || typeof value !== 'object') {
+    return {};
+  }
+  const data: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    data[key] = typeof item === 'string' ? item : JSON.stringify(item);
+  }
+  return data;
 }
 
 export async function nativeKeepAwake(): Promise<boolean> {
