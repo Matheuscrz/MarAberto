@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { OfflineBanner } from "@/app/layout/OfflineBanner";
+import { BackendUnavailableBanner } from "@/app/layout/BackendUnavailableBanner";
 import { InstallPrompt } from "@/app/layout/InstallPrompt";
 import { homePathForRole, useCurrentUser } from "@/features/auth";
 import { SosFab } from "@/features/sos";
@@ -366,6 +367,8 @@ export function RootLayout() {
             {user ? "Minha área" : "Entrar"}
           </Link>
         </div>
+
+        <BackendUnavailableBanner />
 
         {isPanelExpanded ? (
           <section

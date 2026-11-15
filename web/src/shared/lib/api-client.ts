@@ -1,5 +1,6 @@
 import type { ApiProblem } from "@/shared/types/api";
 import { isNativeApp } from "@/shared/lib/platform";
+import { reportBackendReachable, reportBackendUnreachable } from "@/shared/lib/backend-status";
 import type { NativeHttpResponse } from "@/shared/lib/native";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
@@ -225,7 +226,23 @@ async function sendRequest(
   timeoutMs: number,
   allowRefresh: boolean,
 ): Promise<Response> {
-  const response = await execute(path, init, timeoutMs);
+  let response: Response;
+  try {
+    response = await execute(path, init, timeoutMs);
+  } catch (error) {
+    // Sem resposta: backend fora do ar, DNS/rede caídos ou timeout. O aviso da
+    // tela inicial depende deste sinal.
+    reportBackendUnreachable();
+    throw error;
+  }
+
+  // Resposta de gateway (Nginx sem upstream) é indisponibilidade do backend;
+  // erro de aplicação (4xx/500) prova que o servidor respondeu.
+  if (response.status === 502 || response.status === 503 || response.status === 504) {
+    reportBackendUnreachable();
+  } else {
+    reportBackendReachable();
+  }
 
   if (
     response.status === 401 &&
