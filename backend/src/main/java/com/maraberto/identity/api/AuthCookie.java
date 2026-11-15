@@ -52,14 +52,21 @@ public final class AuthCookie {
                 .build();
     }
 
-    /** Lê o refresh token do cookie, aceitando o nome seguro e o de dev. */
-    public static String read(HttpServletRequest request) {
+    /**
+     * Lê o refresh token do cookie com o nome do ambiente corrente.
+     *
+     * <p>Só o nome configurado é aceito. Aceitar os dois nomes deixaria um
+     * {@code maraberto_rt} plantado por outro host sombrear o cookie
+     * {@code __Secure-} (o navegador envia os dois e a ordem não é confiável).
+     */
+    public static String read(HttpServletRequest request, boolean secure) {
         Cookie[] cookies = request.getCookies();
         if (cookies == null) {
             return null;
         }
+        String expected = name(secure);
         for (Cookie cookie : cookies) {
-            if (NAME.equals(cookie.getName()) || INSECURE_NAME.equals(cookie.getName())) {
+            if (expected.equals(cookie.getName())) {
                 String value = cookie.getValue();
                 return value == null || value.isBlank() ? null : value;
             }

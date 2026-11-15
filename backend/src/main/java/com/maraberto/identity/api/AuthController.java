@@ -95,8 +95,8 @@ public class AuthController {
     public ResponseEntity<AuthResponse> refresh(
             HttpServletRequest request) {
         originVerifier.verify(request);
-        AuthenticationService.LoginResult result =
-                authenticationService.refresh(AuthCookie.read(request), metadata(request));
+        AuthenticationService.LoginResult result = authenticationService.refresh(
+                AuthCookie.read(request, cookieProperties.isSecure()), metadata(request));
         return withRefreshCookie(result, jwtProperties.getRefreshTokenTtl());
     }
 
@@ -106,7 +106,7 @@ public class AuthController {
     @ApiResponse(responseCode = "204", description = "Sessão encerrada")
     public ResponseEntity<Void> logout(HttpServletRequest request) {
         originVerifier.verify(request);
-        authenticationService.logout(AuthCookie.read(request));
+        authenticationService.logout(AuthCookie.read(request, cookieProperties.isSecure()));
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, AuthCookie.clear(cookieProperties.isSecure()).toString())
                 .build();
