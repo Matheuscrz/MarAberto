@@ -763,6 +763,16 @@ Correções de borda que fecham superfícies abertas sem mudar o fluxo funcional
   não significa praia segura, repete o 193 e desaparece quando o backend volta (sondagem de
   15 s em `/api/v1/flags`).
 
+### Pendências deste endurecimento
+
+- **Validação no aparelho Android**: o emulador está parado; falta abrir o app (Capacitor 8)
+  e conferir login, refresh, SSE/STOMP e o aviso de backend fora do ar em aparelho físico.
+- **PR**: a branch `35-bug-tópico-stomp-aberto` ainda não foi enviada nem tem PR aberto.
+- **Push com o app fechado**: continua dependendo de projeto Firebase e
+  `google-services.json`; não é bloqueio desta branch.
+- **Fora desta branch** (backlog da ADR-027): MFA/TOTP, convite/cadastro de usuários com
+  senha temporária, recuperação de senha e trilha de auditoria consultável.
+
 ## Próximas fatias (10–13) — backlog detalhado, nada implementado
 
 **Plano:** `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` (2026-11-13, sobre
@@ -771,9 +781,9 @@ auditoria). Cada fatia é uma branch; nenhuma foi iniciada.
 
 | Fatia | Branch | Entrega | Migração |
 | :-- | :-- | :-- | :-- |
-| 10 | `30-fix-console-de-campo-sos-e-ocorrencias` | ordem do SOS, encerrar na tela do SOS, base móvel efêmera, paginação de ocorrências | — (ou `V21` só com índice medido) |
+| 10 | `30-fix-console-de-campo-sos-e-ocorrencias` | ordem do SOS, encerrar na tela do SOS, base móvel efêmera, paginação de ocorrências | — (ou `V22` só com índice medido) |
 | 11 | `31-feature-painel-de-situacao-da-coordenacao` | equipe real, mapa de situação com camadas, home da gestão, aba de postos | — |
-| 12 | `32-feature-administracao-de-identidade-e-auditoria` | usuários reais, senha temporária, `audit_log` e consulta na TI | `V22`, `V23` |
+| 12 | `32-feature-administracao-de-identidade-e-auditoria` | usuários reais, senha temporária, `audit_log` e consulta na TI | `V23`, `V24` |
 | 13 | `33-feature-ocupacao-anonima-no-mapa-publico` | amostra anônima de ocupação enviada pelo cliente | — |
 
 **Problemas verificados que originaram o backlog** (detalhe e arquivos no plano):

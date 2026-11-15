@@ -40,7 +40,7 @@ Nada aqui depende de troca de banco ou de broker. As decisões de escala continu
 
 **Branch:** `30-fix-console-de-campo-sos-e-ocorrencias`
 **Migração:** nenhuma (o índice de `occurrences` já atende à paginação por
-`responder_id`; se o `EXPLAIN` mostrar *sort* caro, entra `V21` só com o índice).
+`responder_id`; se o `EXPLAIN` mostrar *sort* caro, entra `V22` só com o índice).
 
 ### 1.1 Ordem das listas do console do SOS
 
@@ -184,7 +184,7 @@ Registro manual (`POST /occurrences`, `FIELD_ATTENDED`), busca por protocolo do 
 ## 3. Fatia 12 — administração da TI: identidade e auditoria
 
 **Branch:** `32-feature-administracao-de-identidade-e-auditoria`
-**Migrações:** `V22` (usuário: senha temporária e troca obrigatória) e `V23` (`audit_log`).
+**Migrações:** `V23` (usuário: senha temporária e troca obrigatória) e `V24` (`audit_log`).
 **Decisão:** ADR-027.
 
 ### 3.1 Usuários reais, com ativação e desativação
@@ -281,18 +281,18 @@ coordenada**. Nenhum identificador persistente, nenhum histórico, nenhum IP.
 
 | Ordem | Branch | Fatia | Migração |
 | :-- | :-- | :-- | :-- |
-| 1 | `30-fix-console-de-campo-sos-e-ocorrencias` | 10 — ordem do SOS, encerrar no console, base móvel, paginação | — (ou `V21` só com índice medido) |
+| 1 | `30-fix-console-de-campo-sos-e-ocorrencias` | 10 — ordem do SOS, encerrar no console, base móvel, paginação | — (ou `V22` só com índice medido) |
 | 2 | `31-feature-painel-de-situacao-da-coordenacao` | 11 — equipe real, mapa de situação, home, aba de postos | — |
-| 3 | `32-feature-administracao-de-identidade-e-auditoria` | 12 — usuários, senha temporária, auditoria | `V22`, `V23` |
+| 3 | `32-feature-administracao-de-identidade-e-auditoria` | 12 — usuários, senha temporária, auditoria | `V23`, `V24` |
 | 4 | `33-feature-ocupacao-anonima-no-mapa-publico` | 13 — amostra anônima no cliente | — |
 
 Regras para todas:
 
 - **Branch a partir de `main`**, depois do merge da branch atual
-  (`29-feature-implementacao-de-sinalizacao-e-postos-de-guarda-vidas`). Não empilhar uma
-  fatia sobre a outra: cada PR parte do `main` atualizado.
+  (`35-bug-tópico-stomp-aberto`). Não empilhar uma fatia sobre a outra: cada PR parte do
+  `main` atualizado.
 - Commit em pt-BR (Conventional Commits), um assunto por commit; **não commitar sem aval**.
-- `./gradlew clean check` (hoje 195 testes), `npm run lint` e `npm run build` verdes antes
+- `./gradlew clean check` (hoje 219 testes), `npm run lint` e `npm run build` verdes antes
   de abrir o PR.
 - Documento e código no mesmo PR: `Requirements.md`, `Architecture.md` (§7.9, §7.11, §7.12,
   §8.x, §9, §13.2) e `AGENTS.md`.
