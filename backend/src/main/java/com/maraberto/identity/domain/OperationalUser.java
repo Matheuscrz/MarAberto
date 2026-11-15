@@ -9,6 +9,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
@@ -65,6 +66,20 @@ public class OperationalUser {
     @Column(nullable = false)
     private boolean active;
 
+    /**
+     * Tentativas de senha errada desde o último login bem-sucedido. Cresce até
+     * virar bloqueio; um acerto zera. Nunca é exposto na API.
+     */
+    @Column(name = "failed_login_attempts", nullable = false)
+    private int failedLoginAttempts;
+
+    /**
+     * Fim do bloqueio por força bruta. {@code null} ou instante passado
+     * significam conta liberada — não há job para "desbloquear".
+     */
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -119,5 +134,47 @@ public class OperationalUser {
     public void changePasswordHash(String passwordHash) {
         this.passwordHash = Objects.requireNonNull(passwordHash, "Hash de senha não pode ser nulo");
         this.updatedAt = Instant.now();
+    }
+
+    /** A conta só está bloqueada dentro da janela gravada; o passado libera. */
+    public boolean isLockedAt(Instant now) {
+        return lockedUntil != null && lockedUntil.isAfter(now);
+    }
+
+    public void resetFailedLogins() {
+        if (failedLoginAttempts != 0 || lockedUntil != null) {
+            this.failedLoginAttempts = 0;
+            this.lockedUntil = null;
+            this.updatedAt = Instant.now();
+        }
+    }
+
+    /**
+     * Registra uma senha errada e calcula o bloqueio progressivo.
+     *
+     * <p>Antes do limiar a conta continua tentável (o operador pode ter só
+     * errado a senha). A partir dele, cada tentativa dobra a espera até o teto:
+     * o atacante paga caro e o dono da conta volta em minutos, não em horas.
+     *
+     * @return instante em que a conta volta a aceitar senha
+     */
+    public Instant registerFailedLogin(
+            Instant now,
+            int maxAttempts,
+            Duration baseLock,
+            Duration maxLock) {
+        this.failedLoginAttempts = failedLoginAttempts + 1;
+        this.updatedAt = now;
+        if (failedLoginAttempts < maxAttempts) {
+            this.lockedUntil = null;
+            return now;
+        }
+        int expoent = failedLoginAttempts - maxAttempts;
+        long baseMillis = baseLock.toMillis();
+        long maxMillis = maxLock.toMillis();
+        long multiplier = 1L << Math.min(expoent, 20);
+        long lockMillis = Math.min(maxMillis, baseMillis * multiplier);
+        this.lockedUntil = now.plusMillis(Math.max(baseMillis, lockMillis));
+        return this.lockedUntil;
     }
 }

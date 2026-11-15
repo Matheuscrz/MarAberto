@@ -4,7 +4,9 @@ import com.maraberto.identity.api.dto.AuthResponse;
 import com.maraberto.identity.api.dto.AuthenticatedUserResponse;
 import com.maraberto.identity.api.dto.LoginCommand;
 import com.maraberto.identity.application.AuthenticationService;
+import com.maraberto.identity.application.OriginVerifier;
 import com.maraberto.identity.application.RequestMetadata;
+import com.maraberto.identity.infra.security.CookieProperties;
 import com.maraberto.identity.infra.security.JwtProperties;
 import com.maraberto.shared.api.ApiProblem;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,7 +24,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -43,10 +44,18 @@ public class AuthController {
 
     private final AuthenticationService authenticationService;
     private final JwtProperties jwtProperties;
+    private final CookieProperties cookieProperties;
+    private final OriginVerifier originVerifier;
 
-    public AuthController(AuthenticationService authenticationService, JwtProperties jwtProperties) {
+    public AuthController(
+            AuthenticationService authenticationService,
+            JwtProperties jwtProperties,
+            CookieProperties cookieProperties,
+            OriginVerifier originVerifier) {
         this.authenticationService = authenticationService;
         this.jwtProperties = jwtProperties;
+        this.cookieProperties = cookieProperties;
+        this.originVerifier = originVerifier;
     }
 
     @PostMapping("/login")
@@ -84,10 +93,10 @@ public class AuthController {
                             schema = @Schema(implementation = ApiProblem.class)))
     })
     public ResponseEntity<AuthResponse> refresh(
-            @CookieValue(name = AuthCookie.NAME, required = false) String refreshToken,
             HttpServletRequest request) {
+        originVerifier.verify(request);
         AuthenticationService.LoginResult result =
-                authenticationService.refresh(refreshToken, metadata(request));
+                authenticationService.refresh(AuthCookie.read(request), metadata(request));
         return withRefreshCookie(result, jwtProperties.getRefreshTokenTtl());
     }
 
@@ -95,11 +104,11 @@ public class AuthController {
     @Operation(summary = "Encerrar a sessão",
             description = "Revoga a família de refresh e apaga o cookie. Idempotente.")
     @ApiResponse(responseCode = "204", description = "Sessão encerrada")
-    public ResponseEntity<Void> logout(
-            @CookieValue(name = AuthCookie.NAME, required = false) String refreshToken) {
-        authenticationService.logout(refreshToken);
+    public ResponseEntity<Void> logout(HttpServletRequest request) {
+        originVerifier.verify(request);
+        authenticationService.logout(AuthCookie.read(request));
         return ResponseEntity.noContent()
-                .header(HttpHeaders.SET_COOKIE, AuthCookie.clear().toString())
+                .header(HttpHeaders.SET_COOKIE, AuthCookie.clear(cookieProperties.isSecure()).toString())
                 .build();
     }
 
@@ -123,15 +132,15 @@ public class AuthController {
             Duration maxAge) {
         return ResponseEntity.status(HttpStatus.OK)
                 .header(HttpHeaders.SET_COOKIE,
-                        AuthCookie.create(result.refreshToken(), maxAge).toString())
+                        AuthCookie.create(result.refreshToken(), maxAge, cookieProperties.isSecure())
+                                .toString())
                 .body(result.response());
     }
 
     private RequestMetadata metadata(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        String clientIp = forwardedFor == null || forwardedFor.isBlank()
-                ? request.getRemoteAddr()
-                : forwardedFor.split(",")[0].trim();
-        return new RequestMetadata(request.getHeader(HttpHeaders.USER_AGENT), clientIp);
+        // O container resolve X-Forwarded-For apenas de proxy confiável
+        // (`server.forward-headers-strategy=native`); ler o cabeçalho à mão
+        // permitiria que qualquer cliente forjasse o próprio IP.
+        return new RequestMetadata(request.getHeader(HttpHeaders.USER_AGENT), request.getRemoteAddr());
     }
 }

@@ -1,0 +1,14 @@
+# Perfil de produção. Suba com `SPRING_PROFILES_ACTIVE=prod`.
+#
+# As validações de boot recusam: chave de cifragem/JWT de desenvolvimento, seed
+# de dev, storage `stub` e cookie de refresh sem `Secure`.
+
+server:
+  forward-headers-strategy: native
+
+maraberto:
+  security:
+    cookie:
+      # Em produção o refresh token só trafega por HTTPS. A aplicação falha ao
+      # subir com `false` (SecuritySettingsConfiguration).
+      secure: true

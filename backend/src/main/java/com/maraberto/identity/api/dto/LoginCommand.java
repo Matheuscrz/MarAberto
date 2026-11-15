@@ -24,6 +24,6 @@ public record LoginCommand(
         @Schema(description = "Senha do operador", example = "demo1234",
                 requiredMode = Schema.RequiredMode.REQUIRED)
         @NotBlank
-        @Size(min = 8, max = 128)
+        @Size(max = 128)
         String password) {
 }

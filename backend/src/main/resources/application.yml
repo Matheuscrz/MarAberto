@@ -120,6 +120,23 @@ maraberto:
       # instância (ou o sweep) pode reassumir a publicação.
       claim-lease: ${EMERGENCY_OUTBOX_CLAIM_LEASE:PT30S}
   security:
+    cookie:
+      # `true` exige HTTPS e é o único valor aceito no perfil `prod`. Em dev
+      # sobre HTTP, defina SECURITY_COOKIE_SECURE=false: o nome perde o prefixo
+      # `__Secure-` para o navegador não rejeitar o cookie.
+      secure: ${SECURITY_COOKIE_SECURE:true}
+      # Origens aceitas em /refresh e /logout. Precisa incluir o app Capacitor
+      # (`https://localhost` e `capacitor://localhost`) e o dev local.
+      allowed-origins: ${SECURITY_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://localhost,capacitor://localhost}
+    login:
+      # Força bruta: limite por origem (token bucket) e bloqueio progressivo
+      # por conta (persistido em `operational_users`).
+      ip-enabled: ${LOGIN_IP_LIMIT_ENABLED:true}
+      ip-capacity: ${LOGIN_IP_LIMIT_CAPACITY:30}
+      ip-window: ${LOGIN_IP_LIMIT_WINDOW:PT5M}
+      account-max-attempts: ${LOGIN_ACCOUNT_MAX_ATTEMPTS:5}
+      account-base-lock: ${LOGIN_ACCOUNT_BASE_LOCK:PT30S}
+      account-max-lock: ${LOGIN_ACCOUNT_MAX_LOCK:PT15M}
     crypto:
       # Chave de desenvolvimento (32 bytes em base64). NUNCA use em produção:
       # defina CRYPTO_MASTER_KEY com um segredo gerado e mantido fora do repositório.
@@ -190,6 +207,13 @@ maraberto:
 server:
   port: 8080
   max-http-request-header-size: 16KB
+  # O tomcat só aceita X-Forwarded-For/Proto/Host vindos de proxy confiável
+  # (`server.tomcat.remoteip.internal-proxies`; o padrão cobre as faixas
+  # privadas, que é o caso do Nginx no Compose). Clientes diretos têm o
+  # cabeçalho ignorado, então `getRemoteAddr()` é a origem real e pode ser
+  # usada em rate limit e bloqueio de login. Sobrescreva por env quando o
+  # proxy estiver fora dessas faixas.
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:native}
   tomcat:
     max-http-form-post-size: 64KB
     max-swallow-size: 64KB
