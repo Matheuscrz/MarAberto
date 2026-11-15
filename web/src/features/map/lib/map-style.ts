@@ -36,13 +36,19 @@ export const DEFAULT_MAP_BOUNDS:
 
 export function buildMapStyle(pmtilesUrl?: string | null): StyleSpecification {
   if (pmtilesUrl) {
+    // O protocolo `pmtiles://` precisa do template `{z}/{x}/{y}`: sem ele o
+    // MapLibre pede a mesma URL para todos os tiles e o basemap fica em branco.
+    const archive = pmtilesUrl.replace(/\/$/, "");
+    const template = archive.includes("{z}")
+      ? archive
+      : `${archive}/{z}/{x}/{y}`;
     return {
       version: 8,
       sources: {
         graticule: { type: "geojson", data: graticuleGeoJson() },
         basemap: {
           type: "raster",
-          tiles: [`pmtiles://${pmtilesUrl}`],
+          tiles: [`pmtiles://${template}`],
           tileSize: 256,
         },
       },
