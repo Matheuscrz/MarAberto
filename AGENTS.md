@@ -193,7 +193,10 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
   `@capacitor/*`; no nativo o `api-client` usa `CapacitorHttp` e o cookie é tratado pelo
   `CookieHandler` do processo. O backend **não muda** por causa do app (sem CORS,
   `SameSite=Strict` intacto); `REALTIME_ALLOWED_ORIGINS` precisa listar
-  `https://localhost`/`capacitor://localhost`. `mobile/` (Flutter) está congelado.
+  `https://localhost`/`capacitor://localhost`. `push-notifications` registra o aparelho no
+  FCM via `shared/lib/push.ts` (o `google-services.json` mora em `web/android/app/` e é
+  ignorado pelo git); o envio pelo servidor ainda não existe. `mobile/` (Flutter) está
+  congelado.
 
 ## Fatia 1 — importador de áreas de banho (KML → PostGIS)
 
@@ -494,7 +497,11 @@ de postos, bases e bandeiras por leitura real, com ciclo de vida explícito.
 ### Dívidas conhecidas
 
 - **Sem contadores de sinalização** por operador/praia/setor no painel da coordenação (RF40).
-- **Push com o app fechado** continua dependendo de projeto Firebase (`google-services.json`).
+- **Push** — o app já registra o aparelho no FCM e exibe a mensagem recebida
+  (`@capacitor/push-notifications` + `shared/lib/push.ts`), mas nada é enviado pelo
+  servidor: falta o registro do token (`V22`), o endpoint autenticado e o envio FCM HTTP v1
+  com a chave de service account. Sem isso o push só serve para teste pelo console do
+  Firebase.
 
 A foto da sinalização e o cadastro/reposição de estrutura fecharam na Fatia 5 (ADR-023).
 
@@ -771,8 +778,9 @@ Correções de borda que fecham superfícies abertas sem mudar o fluxo funcional
 - **Validação no aparelho Android**: o emulador está parado; falta abrir o app (Capacitor 8)
   e conferir login, refresh, SSE/STOMP e o aviso de backend fora do ar em aparelho físico.
 - **PR**: a branch `35-bug-tópico-stomp-aberto` ainda não foi enviada nem tem PR aberto.
-- **Push com o app fechado**: continua dependendo de projeto Firebase e
-  `google-services.json`; não é bloqueio desta branch.
+- **Push com o app fechado**: o lado do app está pronto (plugin instalado, `google-services.json`
+  presente e ignorado pelo git, registro e exibição da mensagem em `shared/lib/push.ts`);
+  falta o envio pelo backend, que exige chave de service account — não é bloqueio desta branch.
 - **Fora desta branch** (backlog da ADR-027): MFA/TOTP, convite/cadastro de usuários com
   senha temporária, recuperação de senha e trilha de auditoria consultável.
 

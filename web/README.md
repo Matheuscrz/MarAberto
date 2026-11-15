@@ -128,8 +128,38 @@ O que muda no build nativo e **não pode ser esquecido**:
 - **STOMP no app** — o handshake leva `Origin: https://localhost` (Android) /
   `capacitor://localhost` (iOS); o backend precisa listar essas origens em
   `REALTIME_ALLOWED_ORIGINS` (allow-list do WebSocket, não CORS).
+- **Push (Firebase)** — o `google-services.json` do projeto fica em
+  `android/app/google-services.json` e **não é versionado** (a API key do app é pública,
+  mas o arquivo é por projeto/ambiente). Copie do console do Firebase antes de gerar o
+  APK: o `app/build.gradle` aplica o plugin `com.google.gms.google-services` só quando o
+  arquivo existe, e sem ele o app compila normalmente, porém sem push.
 - `android:allowBackup="false"` no `AndroidManifest.xml` (o backup levaria o storage do
   WebView), permissões mínimas declaradas e sem cleartext em release.
+
+### Push no app (registro e recebimento)
+
+`@capacitor/push-notifications` já está instalado e o `shared/lib/push.ts` é o único ponto
+que fala com ele. O registro acontece dentro do gesto de **armar o alerta do SOS**
+(`armSosAlerts`, em `features/operator/lib/sos-alarm.ts`): pede a permissão, registra o
+aparelho no FCM e, com o app aberto, transforma a mensagem recebida em notificação local no
+canal do SOS (o Android não exibe sozinho a mensagem entregue ao processo). O toque na
+notificação abre `data.url` quando for caminho interno do app.
+
+Para conferir que o `google-services.json` está correto, sem backend envolvido:
+
+```bash
+# token FCM no logcat (aparece só com VITE_PUSH_DEBUG=true ou em dev)
+adb logcat -s Capacitor/Console | grep '\[push\] token'
+```
+
+Com o token em mãos, use **Firebase Console → Messaging → Nova campanha → Mensagem de
+teste** (ou `POST https://fcm.googleapis.com/v1/projects/<projeto>/messages:send` com um
+token OAuth de service account).
+
+**O que ainda não existe:** o **envio pelo servidor**. O `google-services.json` é
+configuração do *cliente* e não autoriza envio; falta no backend a tabela de tokens, o
+endpoint autenticado de registro e o envio FCM HTTP v1 com a chave de service account
+(ADR-018, item 6). Até lá, push não substitui o polling de reconciliação do console.
 
 ### Ainda pendente no app
 
@@ -143,17 +173,20 @@ O projeto nativo já está gerado, sincroniza e gera **APK debug**
    túnel HTTPS (ver abaixo). Falta repetir em **aparelho físico** (login, reload com
    refresh e logout).
 2. **Plugins restantes** — já integrados por `shared/lib/native.ts`: `geolocation`
-   (posição pontual), `local-notifications` (SOS) e `@capacitor-community/keep-awake`.
-   Faltam `camera` (captura de foto) e `push-notifications` (app fechado, ADR-018 item 6);
-   `browser` não é necessário porque o `Bridge` já abre `http(s)`/`tel:` no app externo.
+   (posição pontual), `local-notifications` (SOS), `@capacitor-community/keep-awake` e
+   `push-notifications` (registro no FCM, ver seção acima). Falta `camera` (captura de
+   foto); `browser` não é necessário porque o `Bridge` já abre `http(s)`/`tel:` no app
+   externo.
 3. **Ícone, splash, versão e keystore** de release (`versionCode`/`versionName`).
 4. **iOS** — `npx cap add ios` em macOS; avaliar App Store x app não listado (diretriz 4.2).
 5. **Teste em aparelho físico** — refresh, GPS, notificação, sirene e keep-awake no
    Android real (o login já foi validado no emulador).
 6. **Alerta com o app fechado** — hoje o popup/sirene/notificação só acontecem com a mesa
    em **primeiro plano**. Medido no emulador: 60 s minimizado ou tela bloqueada → nenhum
-   alerta; o chamado aparece ao voltar ao app. Resolver com push FCM de prioridade alta +
-   `fullScreenIntent` (ADR-018 item 6) ou foreground service de plantão.
+   alerta; o chamado aparece ao voltar ao app. O app já registra no FCM e recebe a
+   mensagem; falta o **envio pelo backend** (tabela de tokens + endpoint + FCM HTTP v1 com
+   service account) para push de prioridade alta + `fullScreenIntent` (ADR-018 item 6) ou
+   um foreground service de plantão.
 
 Detalhes e checklist completo em `docs/adr/019-app-mobile-com-capacitor.md`
 e em `docs/Architecture.md` §6.1–§6.2.
