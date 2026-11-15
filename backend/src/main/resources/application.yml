@@ -126,7 +126,9 @@ maraberto:
       # `__Secure-` para o navegador não rejeitar o cookie.
       secure: ${SECURITY_COOKIE_SECURE:true}
       # Origens aceitas em /refresh e /logout. Precisa incluir o app Capacitor
-      # (`https://localhost` e `capacitor://localhost`) e o dev local.
+      # (`https://localhost` e `capacitor://localhost`) e o dev local. O perfil
+      # `prod` recusa Origem sem HTTPS — a lista de desenvolvimento abaixo não
+      # sobe em produção.
       allowed-origins: ${SECURITY_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://localhost,capacitor://localhost}
     login:
       # Força bruta: limite por origem (token bucket) e bloqueio progressivo

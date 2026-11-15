@@ -12,3 +12,7 @@ maraberto:
       # Em produção o refresh token só trafega por HTTPS. A aplicação falha ao
       # subir com `false` (SecuritySettingsConfiguration).
       secure: true
+      # Obrigatório: `SECURITY_ALLOWED_ORIGINS=https://<domínio>,https://localhost,
+      # capacitor://localhost`. Sem a variável o boot falha em
+      # SecuritySettingsConfiguration com mensagem explícita, em vez de aceitar a
+      # lista de desenvolvimento e responder 403 no domínio real.
