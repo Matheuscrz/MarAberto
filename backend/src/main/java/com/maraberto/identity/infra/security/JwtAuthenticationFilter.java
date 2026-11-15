@@ -56,8 +56,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             Claims claims = jwtService.validateAndExtractClaims(token);
             String userId = claims.getSubject();
-            Role role = Role.valueOf(claims.get("role", String.class));
-            if (userId == null) {
+            String roleClaim = claims.get("role", String.class);
+            if (userId == null || userId.isBlank() || roleClaim == null || roleClaim.isBlank()) {
+                // Token sem as claims mínimas não autentica: seguir anônimo é
+                // melhor do que estourar 500 em toda requisição autenticada.
+                SecurityContextHolder.clearContext();
+                return;
+            }
+            Role role;
+            try {
+                role = Role.valueOf(roleClaim);
+            } catch (IllegalArgumentException unknownRole) {
+                SecurityContextHolder.clearContext();
                 return;
             }
             var authentication = new UsernamePasswordAuthenticationToken(

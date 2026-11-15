@@ -62,7 +62,7 @@ disponível.
 - **Criação sem senha** (para o próprio usuário definir no primeiro acesso) não é oferecida
   nesta fatia: exigiria canal de entrega de token que o perfil mínimo não tem.
 
-### 1.3 Migração `V22`
+### 1.3 Migração `V23`
 
 `operational_users` ganha `must_change_password boolean not null default false`,
 `temporary_password_expires_at timestamptz`, `password_changed_at timestamptz`.
@@ -70,7 +70,7 @@ Nenhum backfill além do default: contas existentes continuam válidas.
 
 ## Decisão — parte 2: trilha de auditoria
 
-### 2.1 Tabela `audit_log` (`V23`)
+### 2.1 Tabela `audit_log` (`V24`)
 
 ```
 id uuid pk · occurred_at timestamptz not null · actor_id uuid null

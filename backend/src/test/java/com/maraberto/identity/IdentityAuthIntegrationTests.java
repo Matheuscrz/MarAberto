@@ -240,6 +240,80 @@ class IdentityAuthIntegrationTests extends PostgisIntegrationTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void shortPasswordIsRejectedAsInvalidCredentialsNotAsBadRequest() throws Exception {
+        createUser("operador@maraberto.dev", "BM-10492", "11144477735", Role.LIFEGUARD, true);
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"identifier":"operador@maraberto.dev","password":"123"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.type").value(IdentityApiExceptionHandler.INVALID_CREDENTIALS));
+    }
+
+    @Test
+    void repeatedWrongPasswordsLockTheAccountEvenForTheCorrectPassword() throws Exception {
+        createUser("operador@maraberto.dev", "BM-10492", "11144477735", Role.LIFEGUARD, true);
+
+        for (int attempt = 0; attempt < 5; attempt += 1) {
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(APPLICATION_JSON)
+                            .content("""
+                                    {"identifier":"operador@maraberto.dev","password":"senhaerrada"}
+                                    """))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.type").value(IdentityApiExceptionHandler.INVALID_CREDENTIALS));
+        }
+
+        // A conta está bloqueada: a senha correta também recebe 401, com o
+        // mesmo problema — quem ataca não descobre que acertou a senha.
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"identifier":"operador@maraberto.dev","password":"%s"}
+                                """.formatted(PASSWORD)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.type").value(IdentityApiExceptionHandler.INVALID_CREDENTIALS));
+    }
+
+    @Test
+    void refreshRejectsAnOriginOutsideTheAllowlist() throws Exception {
+        createUser("operador@maraberto.dev", "BM-10492", "11144477735", Role.LIFEGUARD, true);
+        String refreshToken = loginAndGetRefreshToken("operador@maraberto.dev");
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .header(HttpHeaders.ORIGIN, "https://malicioso.example")
+                        .cookie(new Cookie(AuthCookie.NAME, refreshToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.type").value(IdentityApiExceptionHandler.ORIGIN_NOT_ALLOWED));
+
+        // A mesma origem do frontend é aceita (e a sessão continua válida).
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .header(HttpHeaders.ORIGIN, "http://localhost:3000")
+                        .cookie(new Cookie(AuthCookie.NAME, refreshToken)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void logoutRejectsAnOriginOutsideTheAllowlist() throws Exception {
+        createUser("operador@maraberto.dev", "BM-10492", "11144477735", Role.LIFEGUARD, true);
+        String refreshToken = loginAndGetRefreshToken("operador@maraberto.dev");
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .header(HttpHeaders.ORIGIN, "https://malicioso.example")
+                        .cookie(new Cookie(AuthCookie.NAME, refreshToken)))
+                .andExpect(status().isForbidden());
+
+        // O cookie não foi revogado por uma origem estranha: a sessão segue.
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie(AuthCookie.NAME, refreshToken)))
+                .andExpect(status().isOk());
+    }
+
     private void createUser(
             String email,
             String badgeNumber,

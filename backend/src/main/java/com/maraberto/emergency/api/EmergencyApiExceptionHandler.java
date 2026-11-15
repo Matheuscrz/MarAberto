@@ -1,5 +1,6 @@
 package com.maraberto.emergency.api;
 
+import com.maraberto.emergency.domain.SosRateLimitedException;
 import com.maraberto.shared.api.FieldValidationError;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -11,6 +12,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
@@ -50,6 +52,22 @@ public class EmergencyApiExceptionHandler extends ResponseEntityExceptionHandler
                 "JSON inválido",
                 "O corpo da requisição não pôde ser interpretado.",
                 requestUri(request));
+        return response(problem, headers);
+    }
+
+    @ExceptionHandler(SosRateLimitedException.class)
+    protected ResponseEntity<Object> handleSosRateLimited(
+            SosRateLimitedException exception,
+            org.springframework.web.context.request.WebRequest request) {
+        ProblemDetail problem = problem(
+                HttpStatus.TOO_MANY_REQUESTS,
+                "https://maraberto.org/problems/sos-rate-limited",
+                "Muitos chamados em sequência",
+                "O limite de chamados de emergência foi atingido. Aguarde "
+                        + exception.retryAfterSeconds() + " segundo(s) e tente de novo.",
+                requestUri(request));
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.RETRY_AFTER, Long.toString(exception.retryAfterSeconds()));
         return response(problem, headers);
     }
 

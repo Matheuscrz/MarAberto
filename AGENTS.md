@@ -25,7 +25,7 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 - **Sessão**: `/login` único e três áreas por papel; refresh em cookie
   `__Secure-maraberto_rt; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict` e access
   token **só em memória**.
-- **Estado**: backend com **195 testes** (`./gradlew clean check`); frontend com
+- **Estado**: backend com **229 testes** (`./gradlew clean check`); frontend com
   `npm run build` e `npm run lint` verdes; app Android (Capacitor 8) com APK debug gerado.
 - **Sinalização e estruturas (ADR-022)**: `flag_updates` append-only com validade (12 h,
   teto 24 h) e `closed_at`; bandeira vencida sai do mapa e a ficha mostra a última cor com
@@ -113,12 +113,17 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
   `V18` fila de áreas não identificadas (`unmapped_signals` + `unmapped_signal_media`) ·
   `V19` fotos das estruturas (`lifeguard_post_media` + `mobile_base_media`) · `V20`
   encerramento e vítima da ocorrência (`responder_id`, `closed_by`, `victim_*`,
-  `outcome_type` com `REFERRED`, `emergency_calls.resolved_at/resolved_by`).
-  **Próxima livre: `V21`**.
-- `application.yml` único. Chaves relevantes: `maraberto.dispatch.*` (raio padrão, teto
+  `outcome_type` com `REFERRED`, `emergency_calls.resolved_at/resolved_by`) · `V21`
+  bloqueio de força bruta do login (`failed_login_attempts`, `locked_until`).
+  **Próxima livre: `V22`**.
+- `application.yml` único, com `application-prod.yml` sobrepondo apenas o necessário
+  (cookie seguro e forwarded headers). Chaves relevantes: `maraberto.dispatch.*` (raio padrão, teto
   `max-radius-m: 15000`, `position-stale-after: PT30M`, `shift-idle-timeout: PT15M`,
   `escalation.rings: 5000,7000,10000,12000,15000,20000` e `escalation.delay: PT20S`),
-  `maraberto.emergency.outbox.*`, `maraberto.security.crypto.*`, `maraberto.security.jwt.*`,
+  `maraberto.emergency.outbox.*`, `maraberto.emergency.rate-limit.*` (capacidade `3` por
+  `PT10M`, desligável em teste), `maraberto.security.crypto.*`, `maraberto.security.jwt.*`,
+  `maraberto.security.cookie.*` (`secure` e `allowed-origins`) e
+  `maraberto.security.login.*` (limite por IP e bloqueio progressivo da conta),
   `maraberto.storage.*` (provider `stub`/`s3`, endpoint/região/credenciais e `path-style`
   do Garage), `maraberto.occupancy.*` (janela `PT15M`, `minimum-sample: 5`, limiares
   `moderate/high/extreme`, retenção `PT24H`), `maraberto.flags.validity: PT12H` (validade
@@ -188,7 +193,10 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
   `@capacitor/*`; no nativo o `api-client` usa `CapacitorHttp` e o cookie é tratado pelo
   `CookieHandler` do processo. O backend **não muda** por causa do app (sem CORS,
   `SameSite=Strict` intacto); `REALTIME_ALLOWED_ORIGINS` precisa listar
-  `https://localhost`/`capacitor://localhost`. `mobile/` (Flutter) está congelado.
+  `https://localhost`/`capacitor://localhost`. `push-notifications` registra o aparelho no
+  FCM via `shared/lib/push.ts` (o `google-services.json` mora em `web/android/app/` e é
+  ignorado pelo git); o envio pelo servidor ainda não existe. `mobile/` (Flutter) está
+  congelado.
 
 ## Fatia 1 — importador de áreas de banho (KML → PostGIS)
 
@@ -489,7 +497,11 @@ de postos, bases e bandeiras por leitura real, com ciclo de vida explícito.
 ### Dívidas conhecidas
 
 - **Sem contadores de sinalização** por operador/praia/setor no painel da coordenação (RF40).
-- **Push com o app fechado** continua dependendo de projeto Firebase (`google-services.json`).
+- **Push** — o app já registra o aparelho no FCM e exibe a mensagem recebida
+  (`@capacitor/push-notifications` + `shared/lib/push.ts`), mas nada é enviado pelo
+  servidor: falta o registro do token (`V22`), o endpoint autenticado e o envio FCM HTTP v1
+  com a chave de service account. Sem isso o push só serve para teste pelo console do
+  Firebase.
 
 A foto da sinalização e o cadastro/reposição de estrutura fecharam na Fatia 5 (ADR-023).
 
@@ -715,6 +727,63 @@ desfecho, o chamado do SOS fecha junto e a coordenação completa depois o CIOSP
 - Anexos/fotos da ocorrência não existem; o histórico mostra os eventos, não uma linha do
   tempo na UI.
 
+## Endurecimento de segurança (`V21`, branch `35-bug-tópico-stomp-aberto`)
+
+Correções de borda que fecham superfícies abertas sem mudar o fluxo funcional:
+
+- **STOMP**: o `CONNECT` já exigia JWT; agora o `SUBSCRIBE` também é autorizado no
+  `StompAuthenticationInterceptor`. Allowlist: `/user/queue/sos` para
+  `LIFEGUARD`/`COORDINATOR`/`ADMIN` e `/topic/operational.emergency.calls` só para
+  coordenação/TI. Qualquer outro destino é recusado; `SEND` para `/topic`, `/queue` e
+  `/user` é bloqueado (o cliente não publica no broker).
+- **SOS anônimo (RN05)**: token bucket atômico no Redis (`shared/ratelimit`, script Lua),
+  **falha aberta** — o chamado nunca depende do Redis. A chave é o HMAC do IP
+  (`BlindIndexer`), nunca o IP em claro. Reenvio do mesmo `clientRequestId` não consome
+  ficha. Excedeu → `429` RFC 9457 com `Retry-After` (documentado no OpenAPI).
+  Config: `maraberto.emergency.rate-limit.*`.
+- **Idempotência do SOS**: `CreateEmergencyCallService` consulta antes de criar;
+  `EmergencyCallRegistrar` grava em transação própria com `saveAndFlush`, e a violação de
+  `client_request_id` é capturada fora dela, devolvendo o chamado vencedor. Teste concorrente
+  cobre a corrida.
+- **Login**: bloqueio por conta persistido (`failed_login_attempts`/`locked_until`) com
+  espera progressiva (5 falhas → 30 s, dobrando até 15 min) e limite por IP com Redis +
+  balde local (`LocalTokenBucketRateLimiter`) para o Redis não ser o único limite. O login
+  saiu de `@Transactional` de propósito: a exceção de credencial não pode desfazer o
+  contador. Respostas continuam uniformes (401 `invalid-credentials`, sem revelar conta
+  bloqueada) e senha curta agora é 401, não 400. `@Size(min=8)` removido do `LoginCommand`.
+- **Cookie e origem**: `maraberto.security.cookie.secure` decide o atributo e o prefixo do
+  nome (`__Secure-maraberto_rt` só em HTTPS; `maraberto_rt` em dev), e `AuthCookie.read`
+  aceita **somente** o nome do ambiente corrente — um `maraberto_rt` plantado não sombreia
+  o cookie seguro. `prod` recusa `secure=false` e recusa allowlist com `Origin` sem HTTPS
+  (a lista de desenvolvimento não sobe); `SECURITY_ALLOWED_ORIGINS` é obrigatória em
+  produção. `/refresh` e `/logout` verificam `Origin` contra a allowlist; ausência de
+  `Origin` é aceita para clientes nativos.
+- **IP real**: `server.forward-headers-strategy=native` (Tomcat confia em
+  `X-Forwarded-For` apenas de proxy interno, o padrão das faixas privadas). O
+  `AuthController` parou de ler o cabeçalho à mão; `getRemoteAddr()` é a origem usada em
+  rate limit e lockout. Perfil `prod` em `application-prod.yml`.
+- **`JwtAuthenticationFilter`**: claim `role` ausente/desconhecida deixa a requisição
+  anônima em vez de estourar 500.
+- **Mapa/CSP**: o estilo PMTiles passou a montar `tiles` com `{z}/{x}/{y}` (sem isso o
+  MapLibre não busca tile nenhum); a CSP nativa inclui a origem da API e do PMTiles em
+  `img-src` para as fotos.
+- **Aviso de sistema indisponível**: `shared/lib/backend-status.ts` centraliza o estado;
+  `api-client` marca indisponível em falha de rede/502/503/504 e disponível em qualquer
+  resposta. `BackendUnavailableBanner` no `RootLayout` avisa que a ausência de sinalização
+  não significa praia segura, repete o 193 e desaparece quando o backend volta (sondagem de
+  15 s em `/api/v1/flags`).
+
+### Pendências deste endurecimento
+
+- **Validação no aparelho Android**: o emulador está parado; falta abrir o app (Capacitor 8)
+  e conferir login, refresh, SSE/STOMP e o aviso de backend fora do ar em aparelho físico.
+- **PR**: a branch `35-bug-tópico-stomp-aberto` ainda não foi enviada nem tem PR aberto.
+- **Push com o app fechado**: o lado do app está pronto (plugin instalado, `google-services.json`
+  presente e ignorado pelo git, registro e exibição da mensagem em `shared/lib/push.ts`);
+  falta o envio pelo backend, que exige chave de service account — não é bloqueio desta branch.
+- **Fora desta branch** (backlog da ADR-027): MFA/TOTP, convite/cadastro de usuários com
+  senha temporária, recuperação de senha e trilha de auditoria consultável.
+
 ## Próximas fatias (10–13) — backlog detalhado, nada implementado
 
 **Plano:** `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` (2026-11-13, sobre
@@ -723,9 +792,9 @@ auditoria). Cada fatia é uma branch; nenhuma foi iniciada.
 
 | Fatia | Branch | Entrega | Migração |
 | :-- | :-- | :-- | :-- |
-| 10 | `30-fix-console-de-campo-sos-e-ocorrencias` | ordem do SOS, encerrar na tela do SOS, base móvel efêmera, paginação de ocorrências | — (ou `V21` só com índice medido) |
+| 10 | `30-fix-console-de-campo-sos-e-ocorrencias` | ordem do SOS, encerrar na tela do SOS, base móvel efêmera, paginação de ocorrências | — (ou `V22` só com índice medido) |
 | 11 | `31-feature-painel-de-situacao-da-coordenacao` | equipe real, mapa de situação com camadas, home da gestão, aba de postos | — |
-| 12 | `32-feature-administracao-de-identidade-e-auditoria` | usuários reais, senha temporária, `audit_log` e consulta na TI | `V22`, `V23` |
+| 12 | `32-feature-administracao-de-identidade-e-auditoria` | usuários reais, senha temporária, `audit_log` e consulta na TI | `V23`, `V24` |
 | 13 | `33-feature-ocupacao-anonima-no-mapa-publico` | amostra anônima de ocupação enviada pelo cliente | — |
 
 **Problemas verificados que originaram o backlog** (detalhe e arquivos no plano):

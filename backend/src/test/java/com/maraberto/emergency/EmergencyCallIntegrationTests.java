@@ -7,9 +7,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.maraberto.emergency.application.CreateEmergencyCallService;
 import com.maraberto.support.EmergencyTestData;
 import com.maraberto.support.PostgisIntegrationTest;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +41,9 @@ class EmergencyCallIntegrationTests extends PostgisIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private CreateEmergencyCallService createEmergencyCallService;
 
     @BeforeEach
     void cleanDispatchState() {
@@ -100,6 +110,48 @@ class EmergencyCallIntegrationTests extends PostgisIntegrationTest {
         assertThat(count("SELECT count(*) FROM emergency_outbox_events e "
                 + "JOIN emergency_calls c ON c.id = e.aggregate_id "
                 + "WHERE c.client_request_id = ?", clientRequestId)).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentRequestsWithTheSameClientRequestIdCreateOnlyOneCall() throws Exception {
+        double latitude = -9.6600;
+        double longitude = -35.7200;
+        UUID operatorId = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
+        UUID postId = EmergencyTestData.createPost(jdbcTemplate, latitude, longitude, 500);
+        EmergencyTestData.openPostShift(jdbcTemplate, operatorId, postId);
+
+        String clientRequestId = UUID.randomUUID().toString();
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<UUID>> futures = List.of(
+                    pool.submit(() -> {
+                        start.await();
+                        return createEmergencyCallService.create(command(clientRequestId, latitude, longitude)).getId();
+                    }),
+                    pool.submit(() -> {
+                        start.await();
+                        return createEmergencyCallService.create(command(clientRequestId, latitude, longitude)).getId();
+                    }));
+            start.countDown();
+
+            UUID first = futures.get(0).get(10, TimeUnit.SECONDS);
+            UUID second = futures.get(1).get(10, TimeUnit.SECONDS);
+
+            // Os dois pedidos devolvem o mesmo chamado; o perdedor da corrida
+            // não vira 500 e não cria um segundo registro.
+            assertThat(first).isEqualTo(second);
+            assertThat(count("SELECT count(*) FROM emergency_calls WHERE client_request_id = ?",
+                    clientRequestId)).isEqualTo(1);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private static CreateEmergencyCallService.CreateEmergencyCallCommand command(
+            String clientRequestId, double latitude, double longitude) {
+        return new CreateEmergencyCallService.CreateEmergencyCallCommand(
+                clientRequestId, latitude, longitude, null, "203.0.113.10");
     }
 
     @Test

@@ -61,8 +61,13 @@ captures/
 .externalNativeBuild
 .cxx/
 
-# Google Services (e.g. APIs or Firebase)
-# google-services.json
+# Google Services (Firebase). O arquivo é por projeto/ambiente (contém a API key
+# do app) e vem do console do Firebase; sem ele o plugin Gradle não é aplicado e
+# o app sobe sem push (app/build.gradle já trata a ausência). Para o app de dev,
+# copie o `google-services.json` de `org.maraberto.app` para `android/app/`.
+google-services.json
+# Marca de download do Windows (ADS), não é conteúdo do projeto.
+*:Zone.Identifier
 
 # Freeline
 freeline.py

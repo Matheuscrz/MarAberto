@@ -60,9 +60,11 @@ function nativeCspPlugin(
     api.origin,
     `${api.protocol === 'https:' ? 'wss' : 'ws'}://${api.host}`,
   ]);
-  const img = new Set<string>(["'self'", 'data:', 'blob:']);
+  const img = new Set<string>(["'self'", 'data:', 'blob:', api.origin]);
   if (pmtilesUrl) {
-    connect.add(new URL(pmtilesUrl).origin);
+    const pmtilesOrigin = new URL(pmtilesUrl).origin;
+    connect.add(pmtilesOrigin);
+    img.add(pmtilesOrigin);
   }
   const tiles = tileOrigin(demoTileUrl);
   if (tiles) {

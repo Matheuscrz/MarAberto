@@ -17,6 +17,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -53,18 +54,29 @@ public class EmergencyCallController {
                     content = @Content(mediaType = "application/problem+json",
                             schema = @Schema(implementation = ApiProblem.class))),
             @ApiResponse(
+                    responseCode = "429",
+                    description = "Limite de chamados por origem excedido (RFC 9457); "
+                            + "o cabeçalho Retry-After informa a espera mínima",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class))),
+            @ApiResponse(
                     responseCode = "500",
                     description = "Erro inesperado; resposta no formato RFC 9457",
                     content = @Content(mediaType = "application/problem+json",
                             schema = @Schema(implementation = ApiProblem.class)))
     })
-    public EmergencyCallResponse create(@Valid @RequestBody CreateEmergencyCallRequest request) {
+    public EmergencyCallResponse create(
+            @Valid @RequestBody CreateEmergencyCallRequest request,
+            HttpServletRequest httpRequest) {
+        // A origem resolvida por `server.forward-headers-strategy` é o cliente
+        // real atrás do Nginx; o IP em claro nunca vira chave, log ou resposta.
         EmergencyCall call = createEmergencyCallService
                 .create(new CreateEmergencyCallService.CreateEmergencyCallCommand(
                         request.clientRequestId(),
                         request.latitude(),
                         request.longitude(),
-                        request.accuracyMeters()));
+                        request.accuracyMeters(),
+                        httpRequest.getRemoteAddr()));
         return EmergencyCallResponse.from(call);
     }
 

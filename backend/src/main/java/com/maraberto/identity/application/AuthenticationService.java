@@ -11,6 +11,7 @@ import com.maraberto.identity.domain.InvalidRefreshTokenException;
 import com.maraberto.identity.domain.OperationalUser;
 import com.maraberto.identity.infra.OperationalUserRepository;
 import com.maraberto.identity.infra.security.JwtService;
+import com.maraberto.identity.infra.security.LoginProtectionProperties;
 import com.maraberto.shared.security.CpfValidator;
 import com.maraberto.shared.security.crypto.BlindIndexer;
 import java.time.Instant;
@@ -36,6 +37,8 @@ public class AuthenticationService {
     private final JwtService jwtService;
     private final BlindIndexer blindIndexer;
     private final RefreshTokenService refreshTokenService;
+    private final LoginProtectionProperties loginProtection;
+    private final LoginIpRateLimiter ipRateLimiter;
 
     /**
      * Hash descartável usado para gastar o mesmo tempo de Argon2 quando o
@@ -48,12 +51,16 @@ public class AuthenticationService {
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             BlindIndexer blindIndexer,
-            RefreshTokenService refreshTokenService) {
+            RefreshTokenService refreshTokenService,
+            LoginProtectionProperties loginProtection,
+            LoginIpRateLimiter ipRateLimiter) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.blindIndexer = blindIndexer;
         this.refreshTokenService = refreshTokenService;
+        this.loginProtection = loginProtection;
+        this.ipRateLimiter = ipRateLimiter;
         this.dummyPasswordHash = passwordEncoder.encode(UUID.randomUUID().toString());
     }
 
@@ -94,9 +101,15 @@ public class AuthenticationService {
         return user.getId();
     }
 
-    /** Login único: valida credenciais, abre família de refresh e emite o JWT. */
-    @Transactional
+    /**
+     * Login único: valida credenciais, abre família de refresh e emite o JWT.
+     *
+     * <p>Deliberadamente **sem** {@code @Transactional}: a falha de senha
+     * precisa gravar o contador de bloqueio e só então virar 401. Dentro de uma
+     * transação, a exceção faria rollback e o bloqueio nunca existiria.
+     */
     public LoginResult login(LoginCommand cmd, RequestMetadata metadata) {
+        ipRateLimiter.check(metadata.ipAddress());
         OperationalUser user = authenticate(cmd);
         RefreshTokenService.IssuedRefreshToken refresh =
                 refreshTokenService.issueForNewLogin(user, metadata);
@@ -142,11 +155,32 @@ public class AuthenticationService {
         }
 
         OperationalUser user = candidate.get();
-        if (!passwordEncoder.matches(cmd.password(), user.getPasswordHash())) {
+        Instant now = Instant.now();
+
+        if (user.isLockedAt(now)) {
+            // Mantém o custo de verificação e a resposta uniforme: o atacante
+            // não descobre que a conta está bloqueada nem se a senha estava certa.
+            passwordEncoder.matches(cmd.password(), user.getPasswordHash());
             throw new InvalidCredentialsException();
         }
+
+        if (!passwordEncoder.matches(cmd.password(), user.getPasswordHash())) {
+            user.registerFailedLogin(
+                    now,
+                    loginProtection.getAccountMaxAttempts(),
+                    loginProtection.getAccountBaseLock(),
+                    loginProtection.getAccountMaxLock());
+            userRepository.saveAndFlush(user);
+            throw new InvalidCredentialsException();
+        }
+
         if (!user.isActive()) {
             throw new AccountInactiveException();
+        }
+
+        if (user.getFailedLoginAttempts() != 0 || user.getLockedUntil() != null) {
+            user.resetFailedLogins();
+            userRepository.saveAndFlush(user);
         }
         return user;
     }

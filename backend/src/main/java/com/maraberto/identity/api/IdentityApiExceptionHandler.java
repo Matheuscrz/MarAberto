@@ -4,6 +4,8 @@ import com.maraberto.identity.domain.AccountInactiveException;
 import com.maraberto.identity.domain.DuplicateOperationalUserException;
 import com.maraberto.identity.domain.InvalidCredentialsException;
 import com.maraberto.identity.domain.InvalidRefreshTokenException;
+import com.maraberto.identity.domain.OriginNotAllowedException;
+import com.maraberto.identity.domain.TooManyLoginAttemptsException;
 import com.maraberto.shared.api.FieldValidationError;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -36,6 +38,8 @@ public class IdentityApiExceptionHandler extends ResponseEntityExceptionHandler 
     public static final String ACCOUNT_INACTIVE = "https://maraberto.org/problems/account-inactive";
     public static final String INVALID_REFRESH_TOKEN = "https://maraberto.org/problems/invalid-refresh-token";
     public static final String DUPLICATE_USER = "https://maraberto.org/problems/duplicate-user";
+    public static final String ORIGIN_NOT_ALLOWED = "https://maraberto.org/problems/origin-not-allowed";
+    public static final String TOO_MANY_ATTEMPTS = "https://maraberto.org/problems/too-many-login-attempts";
 
     private static final MediaType PROBLEM_JSON_UTF8 =
             new MediaType(MediaType.APPLICATION_PROBLEM_JSON, StandardCharsets.UTF_8);
@@ -115,6 +119,31 @@ public class IdentityApiExceptionHandler extends ResponseEntityExceptionHandler 
                 "Cadastro duplicado",
                 exception.getMessage(),
                 requestUri(request)), new HttpHeaders());
+    }
+
+    @ExceptionHandler(OriginNotAllowedException.class)
+    ResponseEntity<Object> handleOriginNotAllowed(
+            OriginNotAllowedException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.FORBIDDEN,
+                ORIGIN_NOT_ALLOWED,
+                "Origem não permitida",
+                "Esta origem não pode executar operações de sessão.",
+                requestUri(request)), new HttpHeaders());
+    }
+
+    @ExceptionHandler(TooManyLoginAttemptsException.class)
+    ResponseEntity<Object> handleTooManyAttempts(
+            TooManyLoginAttemptsException exception, WebRequest request) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.RETRY_AFTER, Long.toString(exception.retryAfterSeconds()));
+        return response(problem(
+                HttpStatus.TOO_MANY_REQUESTS,
+                TOO_MANY_ATTEMPTS,
+                "Muitas tentativas",
+                "Aguarde " + exception.retryAfterSeconds()
+                        + " segundo(s) antes de tentar entrar novamente.",
+                requestUri(request)), headers);
     }
 
     private ResponseEntity<Object> response(ProblemDetail problem, HttpHeaders headers) {

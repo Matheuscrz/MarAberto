@@ -22,6 +22,7 @@ import {
   type NativePermission,
 } from "@/shared/lib/native";
 import { isNativeApp } from "@/shared/lib/platform";
+import { startPushNotifications, type PushMessage } from "@/shared/lib/push";
 
 export type AlertPermission = "unsupported" | "default" | "granted" | "denied";
 
@@ -161,6 +162,16 @@ export async function armSosAlerts(): Promise<{
 }> {
   const sound = unlockAlertAudio();
   const permission = await requestAlertPermission();
+  if (isNativeApp()) {
+    // Uma vez por sessão: o registro vale para o app inteiro, não só para o
+    // console. A permissão já foi pedida no gesto acima.
+    await startPushNotifications({
+      onMessage: (message) => {
+        void showPushNotification(message);
+      },
+      onAction: openPushTarget,
+    }).catch(() => undefined);
+  }
   return { sound, permission };
 }
 
@@ -334,6 +345,40 @@ export async function closeSosNotification(callId: string): Promise<void> {
     tag: `sos-${callId}`,
   });
   await Promise.all(notifications?.map((notification) => notification.close()) ?? []);
+}
+
+/**
+ * Push recebido com o app aberto.
+ *
+ * <p>No Android a mensagem entregue ao processo não é exibida pelo sistema, e é
+ * justamente aí que o console está na tela: a mensagem vira notificação local
+ * no mesmo canal do SOS, para ter som e vibração do aparelho.
+ */
+async function showPushNotification(message: PushMessage): Promise<void> {
+  try {
+    await nativeShowNotification({
+      id: sosNotificationId(message.data.callId ?? message.title),
+      title: message.title,
+      body: message.body,
+      data: message.data,
+    });
+  } catch {
+    // Plugin indisponível: resta o popup do console e o polling.
+  }
+}
+
+/**
+ * Toque na notificação de push: abre o caminho interno do payload.
+ *
+ * <p>Só caminho absoluto do próprio app é aceito; qualquer outra coisa — URL
+ * externa, `javascript:` — é ignorada. A navegação recarrega o bundle porque o
+ * toque normalmente acontece com o app fechado.
+ */
+function openPushTarget(message: PushMessage): void {
+  const target = message.data.url;
+  if (target && target.startsWith("/") && !target.startsWith("//")) {
+    window.location.assign(target);
+  }
 }
 
 interface WakeLockSentinelLike {
