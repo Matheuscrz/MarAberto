@@ -101,6 +101,13 @@ maraberto:
       sweep-initial-delay: ${DISPATCH_ESCALATION_SWEEP_INITIAL_DELAY:PT15S}
       batch-size: ${DISPATCH_ESCALATION_BATCH_SIZE:20}
   emergency:
+    rate-limit:
+      # Limite do SOS anônimo (RN05): três chamados por dez minutos por origem.
+      # Token bucket em Redis, com falha aberta — o chamado nunca depende do
+      # Redis. A chave é o HMAC do IP, nunca o IP em claro.
+      enabled: ${SOS_RATE_LIMIT_ENABLED:true}
+      capacity: ${SOS_RATE_LIMIT_CAPACITY:3}
+      window: ${SOS_RATE_LIMIT_WINDOW:PT10M}
     outbox:
       # Sweep de recuperação da outbox: intervalo curto porque o SOS tem
       # p95 < 3 s e o evento pode ter ficado pendente após uma queda.
