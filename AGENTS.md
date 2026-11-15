@@ -25,7 +25,7 @@ Ferramenta de **apoio**; não substitui o acionamento oficial (ligar 193).
 - **Sessão**: `/login` único e três áreas por papel; refresh em cookie
   `__Secure-maraberto_rt; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Strict` e access
   token **só em memória**.
-- **Estado**: backend com **219 testes** (`./gradlew clean check`); frontend com
+- **Estado**: backend com **229 testes** (`./gradlew clean check`); frontend com
   `npm run build` e `npm run lint` verdes; app Android (Capacitor 8) com APK debug gerado.
 - **Sinalização e estruturas (ADR-022)**: `flag_updates` append-only com validade (12 h,
   teto 24 h) e `closed_at`; bandeira vencida sai do mapa e a ficha mostra a última cor com
@@ -745,8 +745,11 @@ Correções de borda que fecham superfícies abertas sem mudar o fluxo funcional
   contador. Respostas continuam uniformes (401 `invalid-credentials`, sem revelar conta
   bloqueada) e senha curta agora é 401, não 400. `@Size(min=8)` removido do `LoginCommand`.
 - **Cookie e origem**: `maraberto.security.cookie.secure` decide o atributo e o prefixo do
-  nome (`__Secure-maraberto_rt` só em HTTPS; `maraberto_rt` em dev). `prod` recusa
-  `secure=false`. `/refresh` e `/logout` verificam `Origin` contra a allowlist; ausência de
+  nome (`__Secure-maraberto_rt` só em HTTPS; `maraberto_rt` em dev), e `AuthCookie.read`
+  aceita **somente** o nome do ambiente corrente — um `maraberto_rt` plantado não sombreia
+  o cookie seguro. `prod` recusa `secure=false` e recusa allowlist com `Origin` sem HTTPS
+  (a lista de desenvolvimento não sobe); `SECURITY_ALLOWED_ORIGINS` é obrigatória em
+  produção. `/refresh` e `/logout` verificam `Origin` contra a allowlist; ausência de
   `Origin` é aceita para clientes nativos.
 - **IP real**: `server.forward-headers-strategy=native` (Tomcat confia em
   `X-Forwarded-For` apenas de proxy interno, o padrão das faixas privadas). O

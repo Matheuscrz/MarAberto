@@ -292,7 +292,7 @@ Regras para todas:
   (`35-bug-tópico-stomp-aberto`). Não empilhar uma fatia sobre a outra: cada PR parte do
   `main` atualizado.
 - Commit em pt-BR (Conventional Commits), um assunto por commit; **não commitar sem aval**.
-- `./gradlew clean check` (hoje 219 testes), `npm run lint` e `npm run build` verdes antes
+- `./gradlew clean check` (hoje 229 testes), `npm run lint` e `npm run build` verdes antes
   de abrir o PR.
 - Documento e código no mesmo PR: `Requirements.md`, `Architecture.md` (§7.9, §7.11, §7.12,
   §8.x, §9, §13.2) e `AGENTS.md`.
