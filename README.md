@@ -17,7 +17,7 @@
 
 O **MarAberto** é uma iniciativa _open source_ desenvolvida para aproximar a população dos serviços de salvamento aquático (Corpo de Bombeiros e guarda-vidas). Diferente de plataformas informativas estáticas, o MarAberto atua em três frentes complementares:
 
-1. **Prevenção Ativa & Conscientização:** Mapeamento visual de zonas de risco permanente (ex.: desembocaduras perigosas de rios, fossas submarinas e rebojos como na Praia dos Artistas), sincronização automática da tábua de marés oficial e vídeos educativos curados (YouTube) sobre como escapar de correntes de retorno (_rip currents_).
+1. **Prevenção Ativa & Conscientização:** Mapeamento visual de zonas de risco permanente (ex.: desembocaduras perigosas de rios, fossas submarinas e rebojos como na Praia dos Artistas), fichas completas das praias e vídeos educativos curados (YouTube) sobre como escapar de correntes de retorno (_rip currents_).
 2. **Colaboração Cidadã Confiável:** Estimativa passiva e anônima de ocupação da praia (estilo Waze), envio de reportes comunitários de perigo com validação por quórum geográfico e canal de **SOS Cidadão** para socorro rápido, sem exigir cadastro ou conta prévia do banhista.
 3. **Console Tático Operacional:** Aplicação de campo para guarda-vidas atualizarem bandeiramento em tempo real, registrarem postos móveis com fotos (inclusive usando a localização atual), receberem despachos de emergência por proximidade e **registrarem ocorrências** — as geradas por SOS e as que chegaram pelo 193 ou fora do sistema — com uma ficha pronta para transcrever no CIOSP. Um único `/login` leva cada perfil à sua área: operador de campo, gestão do Corpo de Bombeiros e TI.
 
@@ -43,17 +43,17 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 +-------------------------------------------------------------------------------------------------+
 |                                SPRING BOOT 3 (MONÓLITO MODULAR)                                 |
 |                                                                                                 |
-|  [ beaches ]              [ safety ]                  [ emergency ]           [ tides ]         |
-|  - Polígonos de praia     - Postos Fixos e Móveis     - Despacho SOS          - Tábua de Marés  |
-|  - Riscos Permanentes     - Bandeiramento do Dia      - STOMP WebSockets      - Ingestão DHN    |
-|  - Estimativa Lotação     - Upload Fotos (Presigned)  - Quórum Comunitário    - Marés de Sizígia|
+|  [ beaches ]              [ safety ]                  [ emergency ]           [ media ]         |
+|  - Polígonos de praia     - Postos Fixos e Móveis     - Despacho SOS          - URLs assinadas  |
+|  - Riscos Permanentes     - Bandeiramento do Dia      - STOMP WebSockets      - Sanitiza EXIF   |
+|  - Estimativa Lotação     - Upload Fotos (Presigned)  - Quórum Comunitário    - Miniaturas      |
 |                                                                                                 |
 |  [ occurrences ]          [ search ]                  [ identity / audit ]                      |
 |  - Ocorrências (SOS e 193) - Busca tolerante a erros  - Login, papéis, trilha imutável          |
 |  - Ficha para o CIOSP     - pg_trgm (sem serviço extra)                                         |
 |                                                                                                 |
 |  [ content ]              [ shared / kernel ]                                                   |
-|  - Vídeos YouTube         - Auth JWT, CPF operacional, Operações Geoespaciais                  |
+|  - Vídeos YouTube         - Auth JWT, CPF operacional, Operações Geoespaciais                   |
 +------------------------------------------------+------------------------------------------------+
                                                  |
          +---------------------------------------+---------------------------------------+
@@ -61,8 +61,8 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
          v                                       v                                       v
 +------------------+                   +--------------------+                  +------------------+
 |    PostgreSQL    |                   |       Redis        |                  |    Garage/S3     |
-|    + PostGIS     |                   | (Cache de Mapas,   |                  | (Object Storage  |
-| (SRID 4326/GiST) |                   |  Marés e Limiter)  |                  |   Fotos/Mídias)  |
+|    + PostGIS     |                   | (Cache de Mapas e  |                  | (Object Storage  |
+| (SRID 4326/GiST) |                   |  Limiter)          |                  |   Fotos/Mídias)  |
 +------------------+                   +--------------------+                  +------------------+
 ```
 
@@ -85,7 +85,7 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 | :--------------- | :------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Banhista**     | Mapa Dinâmico Multicamadas      | Visualização de postos ativos, bandeiras do dia, áreas de banho seguras e alertas comunitários.                                                                                                                    |
 | **Banhista**     | Zonas Críticas Permanentes      | Demarcação explícita de áreas de alto perigo estático (ex.: desembocadura do rio com o mar, pedrais submersos, rebojos profundos).                                                                                 |
-| **Banhista**     | Tábua de Marés em Tempo Real    | Indicador visual de preamar/baixa-mar, coeficientes de maré, horários de pico e avisos de maré de sizígia (maré viva).                                                                                             |
+| **Banhista**     | Tábua de Marés (R2)             | Roadmap: preamar/baixa-mar do dia, altura, tendência e destaque de sizígia. Fora da v1 até existir provider oficial validado — a aba `/mares` não é publicada nem aparece na navegação. |
 | **Banhista**     | Hub Educativo (YouTube)         | Vídeos informativos embutidos (_lazy-loaded_) com instruções de auto-resgate, fuga de correntes de retorno e primeiros socorros.                                                                                   |
 | **Banhista**     | SOS Cidadão (Botão de Pânico)   | Disparo georreferenciado de socorro imediato para guarda-vidas da circunscrição, sem cadastro ou CPF prévio.                                                                                                       |
 | **Banhista**     | Nível de Lotação "Waze"         | Estimativa anônima de ocupação da praia através de geocheck no dispositivo sem persistência de rastro do usuário.                                                                                                  |

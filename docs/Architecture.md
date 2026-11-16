@@ -165,7 +165,7 @@ Implementados com **Spring Modulith**: cada módulo é um pacote de topo; só a 
 | `occurrences` | Ocorrências: abertas a partir do SOS ou registradas manualmente (193/externas), desfecho, fila e ficha de transcrição para o CIOSP. | `OccurrenceOpened`, `OccurrenceClosed`, `OccurrenceCiospRegistered`            | `EmergencyCallCreated`, `…Acknowledged`, `…Resolved` |
 | `search`      | Projeção de busca (`search_documents`) e `SearchPort`; adaptador PostgreSQL por padrão.                                             | —                                                                              | `BeachChanged`, `RiskZoneChanged`, `PostChanged`     |
 | `safety`      | Reportes comunitários, quórum, moderação.                                                                                           | `ReportSubmitted`, `AlertActivated`, `AlertClosed`                             | `FlagChanged`                                        |
-| `tides`       | Ingestão, previsão, sizígia, consulta.                                                                                              | `TideForecastIngested`                                                         | `RegionConfigChanged`                                |
+| `tides`       | Ingestão, previsão, sizígia, consulta. **Inativo na v1**: RF03/RF31 voltam no R2, com provider validado.                            | `TideForecastIngested`                                                         | `RegionConfigChanged`                                |
 | `content`     | CMS de vídeos e dicas.                                                                                                              | `ContentChanged`                                                               | —                                                    |
 | `occupancy`   | Contagem anônima e níveis por praia.                                                                                                | `OccupancyLevelChanged`                                                        | `BeachChanged`                                       |
 | `media`       | URLs pré-assinadas, saneamento (EXIF), miniaturas.                                                                                  | `MediaReady`, `MediaRejected`                                                  | —                                                    |
@@ -211,7 +211,7 @@ web/src/
     ├── stations/             # postos fixos e bases móveis (StationSheet)
     ├── signals/              # sinalização/bandeiramento com foto (SignalSheet)
     ├── sos/                  # fluxo do SOS cidadão e SosFab
-    ├── tides/                # tábua de marés
+    ├── tides/                # tábua de marés (inativa na v1; volta no R2)
     ├── learn/                # guias, facade de vídeo, filtros por chip
     ├── search/               # caixa de busca e hook de resultados
     ├── auth/                 # LoginPage, sessão em memória, RequireRole
@@ -238,12 +238,14 @@ web/src/
 
 | Rota                                                    | Papel                     | Feature                                   |
 | ------------------------------------------------------- | ------------------------- | ----------------------------------------- |
-| `/`, `/praias`, `/mares`, `/aprender`, `/sos`, `/sobre` | público                   | `map`, `beaches`, `tides`, `learn`, `sos` |
+| `/`, `/praias`, `/aprender`, `/sos`, `/sobre`            | público                   | `map`, `beaches`, `learn`, `sos`          |
 | `/login`                                                | público                   | `auth`                                    |
 | `/operador/**`                                          | `LIFEGUARD` (e acima)     | `operator`, `occurrences`                 |
 | `/gestao/**`                                            | `COORDINATOR` (e `ADMIN`) | `management`, `occurrences`               |
 | `/gestao/importar`                                      | `COORDINATOR` (e `ADMIN`) | `management` — **primeira aba do perfil** |
 | `/admin/**`                                             | `ADMIN`                   | `admin`                                   |
+
+`/mares` não é mais rota de conteúdo: redireciona para o mapa e a feature `tides` fica fora do bundle ativo (RF03/RF31 voltam no R2).
 
 A guarda de rota no cliente é **só experiência de uso**; a autorização real é do servidor (13.2).
 
