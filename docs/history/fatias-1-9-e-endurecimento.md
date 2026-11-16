@@ -1,0 +1,612 @@
+# Histórico de entregas — fatias 1 a 9 e endurecimento da V21
+
+Registro do que cada fatia entregou, preservado do `AGENTS.md` quando ele passou a
+ser só o contexto operacional vigente. O estado atual do código é sempre a fonte da
+verdade; se algo aqui divergir, vale o repositório.
+
+O backlog corrente (fatias 10–15) fica no `AGENTS.md`; o diagnóstico das fatias
+10–13 está em `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md`.
+
+## Fatia 1 — importador de áreas de banho (KML → PostGIS)
+
+**Status:** commitada (`1a795ea`, `1466485`, `cf58aa2`, `e08e3e2`). Entregue:
+`KmlFeatureReader`, `BathingAreaImportService`, `BathingAreaRepository`, `V11`, endpoint
+da coordenação, seed de dev e `ImportMapPage` em `/gestao`. O fluxo é **síncrono** nesta
+fatia; a fila (Rabbit ou tabela de jobs) entra quando houver volume/concorrência medidos.
+
+Objetivo: ler `docs/kml/Areas_Banho_Sergipe.kml`, converter as geometrias para
+`geometry(...,4326)` com JTS e persistir **idempotentemente** em `beaches`,
+`beach_sectors` e proveniência (ADR-016). O leitor de KML é **ferramenta de importação**
+(seed de dev + endpoint da gestão opt-in), **não** parser do caminho de produção: o GeoJSON
+continua canônico no Region Pack (emenda da ADR-016).
+
+### O que o arquivo tem (levantado em 2026-11-11)
+
+- **45 `<Placemark>` = 45 setores**, todos `MultiGeometry > Polygon` (1 a 3 polígonos por
+  feição). **32 praias distintas** por (`Municipio`, `Praia`).
+- `ExtendedData`: `id` (1–45, único), `Praia`, `Setor`, `Municipio`, `Estado` (SE) e
+  `Num. de Oc` (contagem histórica — guardar como metadado de origem, **não** como
+  contador vivo).
+- **`Estado` pode faltar**: o CBM informa a UF no envio, então o importador recebe `state`
+  como parâmetro (seed/endpoint). Quando a feição traz `Estado`, ele precisa bater com o
+  parâmetro; quando não traz, vale o parâmetro. Sem UF (nem no arquivo nem no envio) a
+  importação é rejeitada — `beaches.state_code` é `NOT NULL`.
+- **Nome não identifica nada**: "Prainha da Orla" existe em Canindé, Propriá e Neópolis;
+  no Brasil inteiro há homônimos de município e de praia. A chave da área é
+  (`state_code`, `municipio`, `praia normalizada`) e **nome de setor nunca é chave**.
+  Dois setores da mesma praia podem ter o mesmo nome; o que os distingue é o `id` da
+  origem (o `external_id`) e a `display_order`.
+- **Setor sem nome**: `Setor = "-"` em **20 das 45** feições (ex.: Praia do Restinho,
+  Praia da Costa, Barragem de Lagarto). Não é "praia inteira": é o **único setor sem
+  nome** daquela praia. Guardar `name` nulo + `display_order`; a UI mostra "Setor N".
+- O arquivo **mistura praia oceânica, banho de rio e barragem** (S. do Socorro, Propriá,
+  Neópolis, Santana do São Francisco, Pacatuba, Porto da Folha e as três "Barragem de…").
+- Não há postos, bases nem zonas de risco no arquivo — essas camadas virão em outra fatia.
+
+### Modelo e migração `V11`
+
+- `beaches` mantém o nome da tabela (FKs de postos/zonas já existem), mas passa a
+  significar **área de banho**: adicionar `kind` (`BEACH`/`RIVER`/`DAM`/`LAGOON`/`OTHER`,
+  default `BEACH`), `external_id`, `source`, `source_version`, `imported_at`, `imported_by`,
+  `source_metadata JSONB`, `active` e trocar `boundary` para `geometry(MultiPolygon,4326)`.
+- `beach_sectors`: tabela nova com `beach_id`, `external_id` (= `<uf>-areas-banho:<id>`),
+  **`name` nulo**, `display_order`, `active`, `geometry_hash`, geometria `MultiPolygon` e a
+  mesma proveniência; `UNIQUE (external_id)`, `CHECK (ST_IsValid(geometry))`, GiST na
+  geometria.
+- `import_batches`: `source_file`, `source_version` (SHA-256), `imported_at`, `imported_by`,
+  `accepted`, `rejected`, `unchanged`, `missing` e `report JSONB` — auditoria e `dry-run`.
+- `beaches.boundary` = união dos setores daquela (`state_code`, `municipio`, `praia`); cada
+  placemark vira **um** setor. Feição ausente na reimportação **não** é apagada: só
+  relatada.
+- **UUID estável**: o upsert é por `external_id` e **preserva o `id`** da área/setor, para
+  que `lifeguard_posts`, `critical_zones`, `shift_sessions` e `occurrences` nunca apontem
+  para uma linha recriada. **A âncora da área é o menor `id` de setor do grupo**
+  (`<uf>-areas-banho:area:<min-id>`), não o nome: renomear a praia no QGIS atualiza a mesma
+  área em vez de criar outra. Se essa âncora sumir do arquivo, o importador casa pelo
+  (`state_code`, `municipio`, `praia` normalizada) e mantém o UUID; se nem isso casar,
+  reporta "área ausente + área nova" e a fusão é decisão humana.
+- **`external_id` inclui a UF** (`<uf>-areas-banho:<id>`): o `id` do KML é único no arquivo,
+  não no país. Sem o prefixo da UF, um KML de outro estado com o mesmo `id` colidiria na
+  constraint `UNIQUE` e sobrescreveria a praia errada.
+- **Nome de setor é rótulo, não identidade.** `beach_sectors.name` aceita nome repetido
+  (inclusive dentro da mesma praia) e nome nulo; a identidade é o `external_id` e a ordem é
+  a `display_order`. O `UNIQUE` é só em `external_id` — nunca em (`beach_id`, `name`).
+- `kind`: o KML não traz o tipo. Ordem de decisão: campo `Tipo` no `ExtendedData` quando
+  o QGIS passar a exportá-lo → nome iniciado por `Barragem`/`Açude` = `DAM` → default
+  `BEACH`. A classificação de rio é ajustável pelo cadastro/endpoint, sem reimportar.
+
+### Importar e **atualizar** (reimportação)
+
+O mesmo endpoint e o mesmo *seed* servem para a carga inicial e para a atualização. O CBM
+não precisa mandar um arquivo "limpo": manda o mesmo KML reexportado com as mudanças, e o
+importador descobre o que é novo, o que mudou e o que sumiu.
+
+- **Entrada:** arquivo KML (multipart) + `state` (UF informada pelo CBM) ou caminho
+  configurado (`maraberto.beaches.import.file`). KMZ fica para depois (exige descompactar);
+  o QGIS exporta KML ou GeoJSON. A UF entra no prefixo do `external_id`
+  (`<uf>-areas-banho:`), então o mesmo `id` em estados diferentes não colide.
+- **Sempre em duas fases:** `dryRun=true` (padrão) devolve o relatório sem escrever;
+  a aplicação exige `dryRun=false` **e** `confirm=true`.
+- **Modos:** `UPSERT` (padrão) cria e atualiza, **nunca** remove; `SYNC` (opt-in) marca
+  como `active=false` as feições que sumiram do arquivo — **soft delete**, sem apagar
+  linha nem quebrar FK. Reativar uma feição que voltou é automático.
+- **Cenários cobertos:** praia nova → `beaches` + setores `created`; setor novo em praia
+  existente → setor `created` e `beaches.boundary` recalculado só para aquela área;
+  polígono/nome/ordem alterados → `updated`; setor removido → `missing` (e `active=false`
+  em `SYNC`, com o `boundary` recalculado a partir dos setores ativos); praia renomeada →
+  `updated` (a âncora pelo menor `id` de setor mantém o UUID); **mesmo nome em outro
+  município/estado** → duas áreas distintas, nunca um merge por nome.
+- **Diff por feição:** compara `external_id` + `geometry_hash` (WKB normalizado + SHA-256)
+  + campos (`Praia`, `Setor`, `Municipio`, `kind`, `display_order`). O relatório classifica
+  em `created`/`updated`/`unchanged`/`rejected`/`missing`, com os campos alterados; só as
+  linhas realmente diferentes são escritas.
+- **Arquivo idêntico é barato:** se o SHA-256 do arquivo for igual ao do último lote
+  aplicado com sucesso, o relatório responde "sem mudanças" sem reescrever nada (a
+  validação do parser continua rodando).
+- **Uma transação por lote**, `ON CONFLICT (external_id) DO UPDATE`, e `source_version`
+  (hash do arquivo) gravado no lote e em cada feição. Falha no meio não deixa mapa
+  parcialmente atualizado.
+- **Mapa do banhista:** ao aplicar, publicar `BeachChanged`/`SectorChanged` para invalidar
+  o GeoJSON público em cache; o frontend recarrega as camadas. Nada de TTL curto como
+  mecanismo de atualização.
+
+### Passos
+
+1. `KmlFeatureReader` (XML namespace-aware, **XXE/DTD desligados**) → `ImportedFeature`
+   (`id`, `praia`, `setor`, `municipio`, `uf`, `MultiPolygon` JTS).
+2. `BathingAreaImportService`: recebe `state`, agrupa por (`state_code`, `municipio`,
+   `praia` normalizada) com âncora no menor `id` de setor, valida (`ST_IsValid`/
+   `ST_MakeValid`), força 2D, reprojeta se preciso, rejeita vazio/auto-intersectado,
+   recalcula `beaches.boundary` apenas nas áreas afetadas e devolve relatório de
+   aceitos/rejeitados/alterados/ausentes.
+3. `JdbcBathingAreaRepository` com `ON CONFLICT` por `external_id`, em transação por lote;
+   `dry-run` é o padrão.
+4. Exposição: `maraberto.beaches.dev-seed.enabled` (importa se a tabela estiver vazia) e
+   `POST /api/v1/management/bathing-areas/import?state=&dryRun=&confirm=&mode=`
+   (`COORDINATOR`; `ADMIN` só como superusuário técnico, sem entrada na área da TI;
+   `dryRun=true` por padrão, relatório de diff em JSON e erros em
+   `application/problem+json`). O mesmo endpoint aceita o arquivo novo do QGIS e atualiza
+   as geometrias existentes.
+5. Testes: parser isolado com fixture pequena, integração PostGIS (importar **duas
+   vezes**, contar linhas, validar SRID/geometria/`ST_IsValid`, setor sem nome, barragem
+   reconhecida), mudança de geometria refletida em `updated`, praia nova em `created`,
+   praia renomeada mantendo o UUID, feição removida vira `missing` sem apagar, `state`
+   como fallback quando o arquivo não traz `Estado`, e `ModularityTests`.
+6. Frontend — **gestão primeiro**: `ImportMapPage` em `/gestao/importar`, **primeira aba e
+   tela inicial do perfil** (`COORDINATOR` entra na gestão já na importação). A página
+   envia o KML com `state`, mostra `dry-run`/relatório (`created`/`updated`/`unchanged`/
+   `missing`/`rejected`), exige confirmação para aplicar e deixa claro que o arquivo
+   substitui/atualiza o mapa. A TI (`/admin`) continua só com usuários, papéis, postos e
+   auditoria. `/praias` e a ficha leem as áreas de banho e listam setores (nome ou
+   "Setor N"); a camada vem do GeoJSON público, não do KML.
+7. Segurança: o endpoint fica em `/api/v1/management/**` (`COORDINATOR`, `ADMIN` como
+   superusuário técnico); upload limitado por tamanho/tipo, conteúdo processado fora do
+   request do banhista e o relatório nunca expõe coordenada exata de operador.
+
+### Critérios de aceite
+
+- KML lido sem erro; **45 setores** e **32 praias** por (`municipio`, `praia`).
+- Reimportar o mesmo arquivo: `unchanged=45`, `created=0`, `updated=0`, `missing=0`.
+- Reimportar depois de mover um polígono no QGIS: aquele setor aparece em `updated`, os
+  demais em `unchanged`, e o `id`/UUID da área e do setor **não muda**.
+- Arquivo novo com uma praia a mais: a praia e seus setores aparecem em `created`; o
+  `boundary` da área é recalculado e as demais áreas ficam `unchanged`.
+- Praia renomeada no QGIS: `updated` na mesma área (UUID preservado), não `created` +
+  `missing`.
+- `SYNC` com uma feição removida marca `active=false` e não apaga a linha; reimportar
+  com ela de volta reativa.
+- Arquivo sem `Estado`: a UF vem do parâmetro `state`; arquivo com `Estado` divergente do
+  parâmetro é rejeitado com erro claro.
+- Duas praias de mesmo nome em municípios diferentes (e duas em estados diferentes) viram
+  **quatro** áreas; dois setores de mesmo nome na mesma praia viram **dois** setores, sem
+  colisão de `UNIQUE`.
+- Geometrias válidas em 4326 (`ST_IsValid`), sem Z e sem coordenada fora da UF.
+- A coordenação entra em `/gestao` na aba **Importar mapa**, envia o KML com a UF, vê o
+  relatório em `dry-run` e só aplica após confirmar; a TI não tem essa aba.
+- `ModularityTests` verde e `beaches` sem importar `emergency`/`operations`.
+
+## Fatia 2 — mapa público real, arquivamento e ocupação
+
+**Status:** commitada (`e2012a7`, `6dd5097`, `30dccf6`, `403083a`, `7da31af`). Substituiu
+os dados mocados de praias pelos dados da importação.
+
+### Arquivamento do KML aplicado (`V12`)
+
+- Lote **aplicado** (nunca `dry-run`) envia os bytes originais ao storage de objetos via
+  `S3ObjectStorage` (`ObjectStoragePort`, provider `maraberto.storage.provider=s3`, padrão
+  no Compose). Chave por conteúdo: `<prefixo>/<UF>/<sha256>.kml` (padrão
+  `bathing-areas/SE/<sha256>.kml`), gravada em `import_batches.source_storage_key`.
+- Reenviar o mesmo arquivo reusa o mesmo objeto; **best-effort**: storage fora do ar não
+  bloqueia o mapa (coluna fica nula, aviso no log). Credenciais de exemplo do Garage são
+  recusadas no perfil `prod` (`S3StorageConfiguration`). Testes fixam `stub`.
+- **Gotcha do Garage:** o SDK v2 assina o corpo em `aws-chunked` por padrão e o Garage
+  responde `400 Invalid payload signature`. O cliente e o presigner usam
+  `chunkedEncodingEnabled(false)` e `requestChecksumCalculation=WHEN_REQUIRED`; sem isso
+  todo upload falha mesmo com credencial correta.
+
+### Lista pública por proximidade (RF01)
+
+- `GET /api/v1/beaches?lat=&lon=&radiusM=` — só as áreas ativas num raio de até
+  **30 000 m** (`radiusM` omitido = 30 km), da mais próxima para a mais distante; sem
+  posição não existe lista. `GET /api/v1/beaches/{id}` devolve a ficha com os setores na
+  ordem do mapeamento (`sectorLabel` mostra "Setor N" quando o nome é nulo).
+- Lê da projeção materializada `beach_map_features` (`feature_kind = 'AREA'`), com
+  `ST_DWithin(geometry::geography, ponto, raio)` sobre o índice GiST de expressão da
+  `V13`; distância em metros até o polígono. Erros em RFC 9457 (`localizacao-invalida`
+  400, `praia-nao-encontrada` 404). `SecurityConfig` já libera `GET /api/v1/beaches/**`.
+- Cache em memória (`BeachMapQueryService`): TTL de 120 s, chave pela posição arredondada
+  a 3 casas (~110 m) + raio, **nunca** persistida/logada, limpa por
+  `BathingAreaMapChanged`/`BeachChanged`; `Cache-Control: private, max-age=60`.
+- Frontend: `useNearbyBeaches` (leitura pontual de GPS, sem `watchPosition`),
+  `BeachesPage`/`BeachDetailPage`/`BeachSheet` consumindo a API; `demo-beaches.ts`
+  removido. Negar a permissão ou estar longe do litoral mostra estado explicado com
+  "Tentar de novo" — a tela não quebra.
+
+### Ocupação anônima (RF10/RN06/RNF04, `V14`)
+
+- `POST /api/v1/occupancy/samples {latitude, longitude, token}` resolve o **setor** que
+  contém o ponto (`ST_Contains`) e grava só `beach_id`, `sector_id`, `bucket_start`
+  (janela de 15 min) e o **HMAC** do token (`BlindIndexer`). A coordenada é descartada;
+  não há coluna de posição, IP nem histórico por aparelho. Fora de setor mapeado → `204`.
+- `UNIQUE (anonymous_token, sector_id, bucket_start)` + `ON CONFLICT DO NOTHING`:
+  recarregar a tela não infla. Estimativa = `count(DISTINCT token)` na janela móvel;
+  abaixo de `minimum-sample` (5) → `INSUFFICIENT` **sem nível** (protege praia vazia).
+  Retenção de 24 h com expurgo **na escrita**.
+- `GET /api/v1/occupancy/beaches/{id}` devolve `status`, `level` e `windowMinutes`, nunca
+  a contagem. Token do cliente é `crypto.getRandomValues` em memória do módulo (rotaciona
+  ao recarregar), nunca em storage web. `SecurityConfig` libera `/api/v1/occupancy/**`.
+
+## Fatia 3 — geometria no mapa e ocupação por setor
+
+**Status:** commitada (`5afaa34`, `5c84378`, `8b255b5`). **Plano detalhado:**
+`docs/plan/fatia-3-mapa-e-ocupacao.md` (2026-11-12).
+
+A geometria **já era armazenada** (`beaches.boundary`, `beach_sectors.geometry`, projetada em
+`beach_map_features`), mas o cliente só recebia o centroide e a ocupação só agregava por área.
+A fatia fechou as três lacunas:
+
+- **Geometria na API:** `GET /api/v1/beaches/{id}/map` devolve `bbox` (`ST_Envelope` em tempo
+  de consulta) + geometria GeoJSON simplificada (`ST_SimplifyPreserveTopology`, tolerância
+  `5e-5` ≈ 5 m, 6 casas) da área e de cada setor ativo, com `Cache-Control: max-age=60,
+  public` e `ETag` por área e por versão do mapa → `304` com `If-None-Match` (aceita lista,
+  `*` e `W/`). **`import_batches.id` é UUID**, então a versão é
+  `count(*) || '-' || extract(epoch from max(imported_at))` dos lotes aplicados; o `ETag`
+  inclui o `beachId` para o `If-None-Match` de uma praia nunca responder `304` para outra.
+  A lista continua com centroide; não existe GeoJSON por viewport nesta fatia.
+- **Onde estou:** a resposta de `GET /beaches?lat&lon` ganhou `position`
+  (`beachId`/`beachName`/`sectorId`/`sectorLabel`), resolvido por `ST_Contains` em
+  `beach_sectors` com `ORDER BY display_order, id LIMIT 1` (setor sobreposto → vence o
+  primeiro da ordem do mapeamento, a mesma regra da amostra). A query vive em `beaches`
+  (duplicada de propósito: o módulo não pode importar `occupancy`) e `sectorLabel` é gerado no
+  backend ("Setor N" quando o nome é nulo).
+- **Ocupação por setor:** `GET /api/v1/occupancy/beaches/{id}` devolve `BeachOccupancy` —
+  faixa da área e `sectors[]`. **A área é `count(DISTINCT token)`, nunca a soma dos setores**
+  (quem está na fronteira aparece em dois); `countDistinctTokensBySector` usa `LEFT JOIN`
+  para listar setor ativo sem amostra com contagem 0. `k` mínimo continua 5 nos dois escopos;
+  setor pequeno responder `INSUFFICIENT` é o esperado. `POST /samples` continua devolvendo só
+  a faixa da área.
+- **Mapa:** `MapView` recebe `beachArea`/`beachSectors` (GeoJSON genérico) e `focus`
+  (`MapFocus`); camadas `beach-area-*`/`beach-sector-*` criadas uma vez no `load` e
+  alimentadas por `setData`, enquadramento por `fitBounds` (padding 48, `maxZoom: 16`,
+  duration 600) que **não** voa se o `getBounds()` já contém o bbox. Marcador intocado: o
+  elemento raiz continua recebendo o `transform` do MapLibre.
+- **Deep link e ficha:** a praia selecionada mora na URL (`/?praia=<id>&setor=<id>`), não em
+  estado paralelo — "Ver no mapa" da lista e da ficha navega para lá e o mapa enquadra. A
+  ficha mostra "Você está no <setor>", a faixa da área e a de cada setor, e o setor
+  selecionado vai para `?setor=`. Geometria fica em cache de módulo no frontend (sem TTL;
+  muda só em importação) e o `304`/`ETag` fica no servidor (`apiRequest` não envia
+  `If-None-Match`).
+
+Sem migração nova (`V15` continua livre para ocorrências): `bbox` sai de `ST_Envelope` em
+tempo de consulta e as amostras já têm `sector_id`. PostGIS emite `"type":"Polygon"` quando o
+`MultiPolygon` tem uma única parte — testes e tipos do frontend aceitam os dois.
+
+## Fatia 4 — sinalização e estruturas operacionais
+
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-022 · **migração:** `V15`. Substituiu os dados mocados
+de postos, bases e bandeiras por leitura real, com ciclo de vida explícito.
+
+### O que está no ar
+
+- **Bandeira (RF12/RN01)**: `POST /api/v1/operations/flags` (guarda-vidas e coordenação) e
+  `POST /api/v1/operations/flags/{id}/close`. Corpo com `beachId`, `sectorId` opcional
+  (nulo = praia inteira), `flag`, `notes` e `validityHours` (0,5 a 24, padrão
+  `maraberto.flags.validity: PT12H`). Lançamento novo no mesmo escopo fecha o anterior sob
+  `pg_advisory_xact_lock(hashtextextended(beach_id || ':' || sector_id))`.
+- **Mapa público**: `GET /api/v1/flags` devolve só o vigente (`closed_at IS NULL AND
+  valid_until > now()`), com nome da praia, rótulo do setor e o pin no centroide do setor
+  (ou `ST_PointOnSurface(boundary)` na praia) — **nunca** a posição do operador (RN17).
+- **Ficha da praia**: `GET /api/v1/flags?beachId=<id>&includeExpired=true` devolve o último
+  lançamento de cada escopo, mesmo vencido/encerrado, para o selo "desatualizada". Sem
+  `beachId`, `includeExpired` é `400` em RFC 9457.
+- **Estruturas**: `GET /api/v1/stations` (público: só `active`, base móvel só com plantão
+  aberto e lease válido), `GET /api/v1/admin/stations` (TI, inclui inativas) e
+  `PATCH /api/v1/admin/stations/{kind}/{id}` com `{active, statusNote}` (`kind` =
+  `FIXED`/`MOBILE`, `ADMIN`). Reativar limpa `deactivated_at` e **preserva** a nota.
+- **Zonas de risco**: `GET /api/v1/risk-zones` publica só `active` e vigente; `PERMANENT`
+  nunca expira, `SEMI_PERMANENT` expira em `valid_until`.
+
+### Frontend
+
+- `features/signals` (`useSignals`, `useBeachSignals`, `SignalSheet`, `BeachFlagCard`,
+  `SignalStateTag`) e `features/stations` (`usePublicStations`, `useAdminStations`,
+  `StationList`, `StationAdminTable`, `StationSheet`) são as features reais; `demo-signals`,
+  `demo-stations`, `StationRegistry` e `lib/risk-zones.ts` foram removidos.
+- `/operador/sinalizacao` lança e encerra bandeira (praia/setor, validade, observação) e
+  lista os lançamentos **da mais nova para a mais antiga** (`created_at DESC` no servidor e
+  `orderedSignals` no cliente), incluindo o recém-criado no topo; `/operador/postos` cadastra,
+  reposiciona e ativa/desativa a estrutura do plantão; `/admin/postos` alterna qualquer
+  estrutura e corrige a posição; a ficha da praia mostra a bandeira vigente ou
+  "desatualizada".
+- `RootLayout` compõe os marcadores a partir de `useSignals`/`usePublicStations`; o
+  `SignalsState`/`StationsState` mantém a chave da consulta para não exibir dado da praia
+  anterior durante o carregamento.
+
+### Dívidas conhecidas
+
+- **Sem contadores de sinalização** por operador/praia/setor no painel da coordenação (RF40).
+- **Push** — o app já registra o aparelho no FCM e exibe a mensagem recebida
+  (`@capacitor/push-notifications` + `shared/lib/push.ts`), mas nada é enviado pelo
+  servidor: falta o registro do token (`V22`), o endpoint autenticado e o envio FCM HTTP v1
+  com a chave de service account. Sem isso o push só serve para teste pelo console do
+  Firebase.
+
+A foto da sinalização e o cadastro/reposição de estrutura fecharam na Fatia 5 (ADR-023).
+
+## Fatia 5 — sinalização e estruturas ancoradas no aparelho (`V16`, ADR-023)
+
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-023 · **migração:** `V16`. Duas formas de sinalizar e de
+cadastrar estrutura, com foto servida pelo backend.
+
+### O que está no ar
+
+- **Duas formas no mesmo endpoint:** `POST /api/v1/operations/flags` aceita `beachId`
+  (+ `sectorId` opcional) **ou** `latitude`/`longitude` (+ `accuracyMeters`). Sem nenhuma das
+  duas → `400`; só uma coordenada → `400`.
+- **Resolução por ponto:** `FlagService.resolveScope` usa `ST_Contains` em `beach_sectors`
+  (`ORDER BY display_order, id LIMIT 1`) e, sem setor, `beaches.boundary`. Fora do
+  mapeamento, desde a Fatia 7, o lançamento vai para a fila de áreas não identificadas
+  (`outcome=UNMAPPED`); a recusa `422` foi removida (ADR-024).
+- **Posição da sinalização:** `flag_updates.signal_position`/`position_accuracy_m`/
+  `position_source` (`SCOPE`/`DEVICE_GPS`); pin público =
+  `COALESCE(signal_position, centroide do setor, ST_PointOnSurface(área))`. Um ponto por
+  lançamento, **sem histórico de trajeto**.
+- **Foto (RF12/ADR-012):** `POST /api/v1/media` multipart **ou** JSON `{contentBase64}`
+  (o app usa sempre base64); `ImageNormalizer` re-codifica em JPEG (maior lado 1600 px,
+  qualidade 0,85, teto de 40 MP, EXIF/GPS fora); `media_assets` + `flag_media` (até 3, com
+  `display_order`). `MediaCatalog` confere existência e **dono** antes de anexar.
+  `GET /api/v1/media/{id}` é público, com `ETag` do SHA-256, `If-None-Match`/`304` e
+  `Cache-Control: public, max-age=30d, immutable`. `FlagResponse`/`PublicFlag` levam
+  `photoUrls`.
+- **Estruturas (RF11):** `POST /api/v1/operations/stations` (cadastro na posição atual) e
+  `PATCH /api/v1/operations/stations/{kind}/{id}/position` (reposição), para
+  `LIFEGUARD`/`COORDINATOR`/`ADMIN`; `position_source`/`position_accuracy_m`/
+  `position_updated_at` em `lifeguard_posts`/`mobile_bases`; `StationAdminView` expõe
+  origem/precisão/data. A TI continua com o cadastro administrativo; a ativação em campo
+  e a foto do posto chegaram na Fatia 8 (ADR-024).
+
+### Frontend
+
+- `/operador/sinalizacao` tem dois modos (`Praia e setor` / `Minha localização`), até 3 fotos
+  com prévia, progresso de envio e aviso de validade; `shared/lib/media.ts` faz o upload em
+  base64 com `photoProblem`/`MAX_SIGNAL_PHOTOS`, e `SignalPhotos` mostra galeria + dialog na
+  ficha, no card da praia e na lista do console.
+- `/operador/postos` deixou de ser somente leitura: `NewStationForm` cadastra posto/base na
+  posição atual (`useStationPosition` → `getDevicePosition`) com até 3 fotos, e
+  `/admin/postos` ganhou "Corrigir posição" (`StationPositionForm`) com a origem e a
+  precisão na linha.
+- `shared/components/PhotoGallery.tsx` é a galeria única (imagem inteira, anterior/próxima,
+  contador, miniaturas, setas e `Escape`); `SignalPhotos` é o wrapper da sinalização e a
+  mesma galeria aparece em `StationList`/`StationSheet`/`StationAdminTable`.
+- `shared/lib/api-client.ts` expõe `apiAssetUrl` para a `<img>` funcionar no app (a API é
+  outra origem e a tag não passa pelo cliente HTTP).
+
+### Dívidas conhecidas
+
+- Upload base64 cresce ~33% no app; limites de multipart em 12 MB (arquivo) / 14 MB (request).
+- Foto enviada e não anexada fica órfã (inofensiva) até uma rotina de retenção.
+- Ajuste fino do pino e desenho da bandeira na foto continuam para uma fatia de UX.
+
+## Fatia 6 — ocorrência aberta no aceite do SOS (`V17`, ADR-013 emendada)
+
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-013 emendada · **migração:** `V17`. Escopo original
+desta fatia: **nascer e ler** a ficha. O encerramento, o desfecho e o protocolo CIOSP foram
+entregues na Fatia 9 (`V20`) — ver abaixo.
+
+### Backend
+
+- **Gatilho é o ack:** `emergency/api/SosAcknowledged` (`@NamedInterface("api")`) é publicado
+  no aceite; `SosOccurrenceListener` roda `AFTER_COMMIT` + `REQUIRES_NEW` e abre a ficha
+  (`origin=SOS_CITIZEN`, `status=IN_PROGRESS`, `ciosp_status=PENDING`). Chamado sem ack não
+  gera ocorrência; falha do listener só loga.
+- **Idempotência e rede de segurança:** `INSERT … SELECT … ON CONFLICT (emergency_call_id) DO
+  NOTHING`; `OccurrenceReconciliationJob` abre a ficha de todo chamado assumido há mais de
+  `maraberto.occurrences.reconciliation.*` e sem par. `emergency` não depende de
+  `occurrences` e o SOS nunca espera a ficha.
+- **Leitura (RN15):** `GET /api/v1/occurrences` e `GET /{id}`; `LIFEGUARD` lê o que está no
+  escopo do seu plantão aberto e o que assumiu (na `V20` o escopo passou a ser
+  `responder_id`, emenda da RN15); `COORDINATOR`/`ADMIN` veem tudo; fora do escopo → `404`.
+  Erros em RFC 9457.
+
+### Frontend
+
+- `features/occurrences` (types/api/hook de 30 s/lista) alimenta `/operador/ocorrencias` e
+  `/gestao/ocorrencias`; a ficha aparece depois do ack, sem recarregar a página.
+
+### Dívidas conhecidas
+
+- O registro manual de ocorrência (`FIELD_ATTENDED`, 193, rádio) continua pendente; o
+  encerramento, o desfecho e o protocolo do CIOSP chegaram na Fatia 9 (`V20`).
+
+## Fatia 7 — sinalização fora do mapeamento em triagem (`V18`, ADR-024)
+
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-024 · **migração:** `V18`. Ponto fora do KML não é
+recusado: vira registro para a coordenação decidir o que fazer.
+
+### Backend
+
+- `POST /api/v1/operations/flags` devolve `FlagLaunchResponse`: `outcome=PLACED` (bandeira
+  publicada) ou `outcome=UNMAPPED` (`201`, registro na fila, `flag` nulo).
+- `unmapped_signals` guarda um ponto por lançamento (cor pretendida, observação, precisão,
+  matrícula de quem reportou, posto do plantão) e `unmapped_signal_media` as até 3 fotos.
+  **Nada entra em `flag_updates`** e `GET /api/v1/flags` não lê a fila.
+- `GET /api/v1/management/unmapped-signals?status=&limit=` e
+  `POST /{id}/decision` (`COORDINATOR`; `ADMIN` como superusuário técnico). Decisões
+  `IDENTIFIED`/`NEEDS_MAPPING`/`DISCARDED`/`PENDING`; `IDENTIFIED` exige área ativa e setor
+  da área quando informado. A linha nunca é apagada.
+- A área ativa mais próxima é sugestão calculada na consulta (`ST_Distance`), nunca vínculo
+  automático. A fila é sensível (RN17): coordenada e matrícula só na rota autenticada.
+- `GET /api/v1/management/bathing-areas` é o catálogo enxuto (id, nome, município, setores)
+  usado pelo seletor da triagem.
+
+### Frontend
+
+- `features/signals` expõe `LaunchFlagResult`/`UnmappedSignal`; `launchFlag` devolve o
+  desfecho e `/operador/sinalizacao` mostra "registro enviado para a coordenação" sem fingir
+  que publicou bandeira.
+- `/gestao/areas-nao-identificadas` (`ManagementUnmappedSignalsPage` + `useUnmappedSignals`)
+  lista a fila, sugere a área mais próxima e grava a decisão; item de nav com `MapPinOff`.
+
+### Dívidas conhecidas
+
+- Sem notificação de novo registro para a coordenação; a fila é consultada na tela.
+- Identificar na triagem **não** publica bandeira retroativa: a decisão só associa o local.
+
+## Fatia 8 — estrutura em campo e foto do posto (`V19`, ADR-024)
+
+**Status:** commitada (`35b4bca`, `07d5aaf`, `2edfbcf`, `1ef3ece`).
+**Decisão:** ADR-024 · **migração:** `V19`. O guarda-vidas gerencia a
+estrutura do próprio plantão e a população vê a foto do posto.
+
+### Backend
+
+- `PATCH /api/v1/operations/stations/{kind}/{id}` (`{active, statusNote}`): `LIFEGUARD` só
+  alterna a estrutura do plantão aberto dele (fora → `403` `station-outside-shift`);
+  `COORDINATOR`/`ADMIN` alternam qualquer uma. Desativar carimba `deactivated_at` e a nota;
+  reativar limpa a data e preserva a nota. Nada é apagado.
+- `GET /api/v1/operations/stations/{kind}/{id}` devolve a estrutura mesmo desativada.
+- `GET /api/v1/operations/stations` lista **todas** as estruturas no console de campo
+  (`LIFEGUARD`/`COORDINATOR`/`ADMIN`), inclusive a base móvel sem plantão vivo e as
+  desativadas, com posição, origem, precisão, data e fotos. É leitura: não amplia a
+  permissão de escrita (ADR-024). `ShiftTarget` ganhou `positionUpdatedAt`/
+  `positionAccuracyM` para o seletor mostrar onde o destino fica e há quanto tempo o ponto
+  foi registrado.
+- `CreateStationRequest.mediaIds` (até 3) anexa `media_assets` via `lifeguard_post_media` /
+  `mobile_base_media` (`V19`); `photoUrls` aparece em `PublicStation` e `StationAdminView`.
+  O upload e a normalização são os mesmos da sinalização.
+
+### Frontend
+
+- `ShiftStationCard` em `/operador/postos` lê o plantão (`useShift`), busca a estrutura e
+  oferece desativar (com motivo opcional) ou reativar; o pin sai do mapa na hora.
+- `/operador/postos` usa `useFieldStations` (`/api/v1/operations/stations`) e
+  `FieldStationList`: mostra posto/base ativo, base móvel "aguardando plantão" e estrutura
+  fora do mapa, com distância da leitura pontual do aparelho (`useStationPosition` +
+  `shared/lib/geo.ts`), data/precisão da posição, coordenada e "como chegar". O seletor de
+  plantão em `ShiftPanel` mostra a mesma distância e a posição registrada do destino.
+- `StationList`, `StationSheet`, `StationAdminTable` e `NewStationForm` mostram/enviem fotos
+  com a `PhotoGallery` compartilhada.
+
+### Dívidas conhecidas
+
+- Não há troca de foto depois do cadastro nesta fatia (só novo cadastro/reposição anexa).
+- A galeria não tem zoom por gesto; a foto órfã segue sem rotina de retenção.
+
+## Fatia 9 — encerramento e edição da ocorrência (`V20`, ADR-013 emendada)
+
+**Status:** commitada (`3dd3b4c`, `80856c6`).
+**Decisão:** ADR-013 emendada · **migração:** `V20`. O atendimento
+assumido deixa de ficar "em atendimento" para sempre: o guarda-vidas encerra com relato e
+desfecho, o chamado do SOS fecha junto e a coordenação completa depois o CIOSP e a vítima.
+
+### Backend
+
+- `POST /api/v1/occurrences/{id}/close` (`CloseOccurrenceRequest`): desfecho
+  (`RESOLVED`/`REFERRED`/`FALSE_ALARM`/`CANCELLED`), relato obrigatório, observações,
+  protocolos de canal/CIOSP e vítima opcional. `RESOLVED`/`REFERRED` → `CLOSED`;
+  `FALSE_ALARM`/`CANCELLED` → status homônimo; encerrar de novo → `409`
+  `occurrence-already-closed`.
+- **Encerrar fecha o chamado do SOS na mesma transação** pela porta
+  `emergency/api/SosCallCloser` (`SosCallOutcome`): `UPDATE` compare-and-set de
+  `ACKNOWLEDGED`/`EN_ROUTE`/`ON_SCENE` para `RESOLVED`/`FALSE_ALARM`/`CANCELLED`, com
+  `resolved_at`/`resolved_by`. `emergency` continua sem depender de `occurrences`.
+- **Escopo (RN15 emendada):** guarda-vidas vê/encerra por `responder_id` (quem deu o ack;
+  fallback pelo despacho `ACKNOWLEDGED` nas fichas antigas). Coordenação/TI veem e editam
+  tudo. Fora do escopo → `404`.
+- `PATCH /api/v1/occurrences/{id}` (`UpdateOccurrenceRequest`): edição parcial, inclusive
+  depois do encerramento — protocolo do CIOSP, vítima identificada depois, correção do
+  relato. Campo nulo não altera; `REGISTERED` sem protocolo → `409`
+  `ciosp-protocol-required`; protocolo marca `REGISTERED` e carimba
+  `ciosp_registered_at/by`.
+- `POST /api/v1/occurrences/{id}/victim/reveal` (`RevealVictimRequest`, motivo obrigatório)
+  decifra nome/idade/contato/condição e grava `PERSON_REVEALED`; a ficha devolve só
+  `recorded`. Resumo/observações têm AAD próprio; nada de PII em claro em
+  `occurrence_events`.
+- `OccurrenceRepository` reescrito (escopo, detalhe, `close`, `update` dinâmico, eventos,
+  vítima cifrada); `OccurrenceCommandService`/`OccurrenceQueryService`/`OccurrenceViews`;
+  `CloseOccurrenceRequest`/`UpdateOccurrenceRequest`/`RevealVictimRequest` com `@Sanitized`;
+  `GET /occurrences?status=` filtra o histórico. Erros em RFC 9457 (404/409).
+- `V20`: `responder_id`, `closed_by`, `victim_*`, `REFERRED` no check de desfecho, backfill
+  do responsável pelo dispatch `ACKNOWLEDGED` e `emergency_calls.resolved_at/resolved_by`.
+- Testes em `OccurrenceFromSosTests`: encerramento + chamado fechado + listas por status +
+  revelação auditada, coordenação completando CIOSP/vítima, outro guarda bloqueado, falso
+  alarme (sem CIOSP) e encerramento duplicado.
+
+### Frontend
+
+- `features/occurrences`: `OccurrenceSheet` (ficha com encerrar, editar e revelar vítima com
+  motivo), `OccurrenceList` clicável, `fetchOccurrence`/`closeOccurrence`/
+  `updateOccurrence`/`revealOccurrenceVictim` e tipos do detalhe/desfecho.
+- `/operador/ocorrencias` ganhou abas **Em atendimento**/**Atendidas**, contadores por
+  `isActiveOccurrence` e abertura da ficha; encerrar recarrega a lista e o chamado some de
+  "Em atendimento por você" no console do SOS.
+- `/gestao/ocorrencias` filtra Em atendimento/Encerradas/CIOSP pendente e edita qualquer
+  ficha (protocolo do CIOSP, vítima, relato).
+- Texto do console do SOS aponta o encerramento na tela de ocorrências.
+
+### Dívidas conhecidas
+
+- `POST /api/v1/occurrences` (registro manual 193/rádio/campo, `FIELD_ATTENDED`) continua
+  rascunho local no frontend; a ficha e o protocolo do CIOSP existem, o registro manual não.
+- Sem busca por número/protocolo/período na lista; a consulta é por status e limite.
+- Anexos/fotos da ocorrência não existem; o histórico mostra os eventos, não uma linha do
+  tempo na UI.
+
+## Endurecimento de segurança (`V21`, branch `35-bug-tópico-stomp-aberto`)
+
+Correções de borda que fecham superfícies abertas sem mudar o fluxo funcional:
+
+- **STOMP**: o `CONNECT` já exigia JWT; agora o `SUBSCRIBE` também é autorizado no
+  `StompAuthenticationInterceptor`. Allowlist: `/user/queue/sos` para
+  `LIFEGUARD`/`COORDINATOR`/`ADMIN` e `/topic/operational.emergency.calls` só para
+  coordenação/TI. Qualquer outro destino é recusado; `SEND` para `/topic`, `/queue` e
+  `/user` é bloqueado (o cliente não publica no broker).
+- **SOS anônimo (RN05)**: token bucket atômico no Redis (`shared/ratelimit`, script Lua),
+  **falha aberta** — o chamado nunca depende do Redis. A chave é o HMAC do IP
+  (`BlindIndexer`), nunca o IP em claro. Reenvio do mesmo `clientRequestId` não consome
+  ficha. Excedeu → `429` RFC 9457 com `Retry-After` (documentado no OpenAPI).
+  Config: `maraberto.emergency.rate-limit.*`.
+- **Idempotência do SOS**: `CreateEmergencyCallService` consulta antes de criar;
+  `EmergencyCallRegistrar` grava em transação própria com `saveAndFlush`, e a violação de
+  `client_request_id` é capturada fora dela, devolvendo o chamado vencedor. Teste concorrente
+  cobre a corrida.
+- **Login**: bloqueio por conta persistido (`failed_login_attempts`/`locked_until`) com
+  espera progressiva (5 falhas → 30 s, dobrando até 15 min) e limite por IP com Redis +
+  balde local (`LocalTokenBucketRateLimiter`) para o Redis não ser o único limite. O login
+  saiu de `@Transactional` de propósito: a exceção de credencial não pode desfazer o
+  contador. Respostas continuam uniformes (401 `invalid-credentials`, sem revelar conta
+  bloqueada) e senha curta agora é 401, não 400. `@Size(min=8)` removido do `LoginCommand`.
+- **Cookie e origem**: `maraberto.security.cookie.secure` decide o atributo e o prefixo do
+  nome (`__Secure-maraberto_rt` só em HTTPS; `maraberto_rt` em dev), e `AuthCookie.read`
+  aceita **somente** o nome do ambiente corrente — um `maraberto_rt` plantado não sombreia
+  o cookie seguro. `prod` recusa `secure=false` e recusa allowlist com `Origin` sem HTTPS
+  (a lista de desenvolvimento não sobe); `SECURITY_ALLOWED_ORIGINS` é obrigatória em
+  produção. `/refresh` e `/logout` verificam `Origin` contra a allowlist; ausência de
+  `Origin` é aceita para clientes nativos.
+- **IP real**: `server.forward-headers-strategy=native` (Tomcat confia em
+  `X-Forwarded-For` apenas de proxy interno, o padrão das faixas privadas). O
+  `AuthController` parou de ler o cabeçalho à mão; `getRemoteAddr()` é a origem usada em
+  rate limit e lockout. Perfil `prod` em `application-prod.yml`.
+- **`JwtAuthenticationFilter`**: claim `role` ausente/desconhecida deixa a requisição
+  anônima em vez de estourar 500.
+- **Mapa/CSP**: o estilo PMTiles passou a montar `tiles` com `{z}/{x}/{y}` (sem isso o
+  MapLibre não busca tile nenhum); a CSP nativa inclui a origem da API e do PMTiles em
+  `img-src` para as fotos.
+- **Aviso de sistema indisponível**: `shared/lib/backend-status.ts` centraliza o estado;
+  `api-client` marca indisponível em falha de rede/502/503/504 e disponível em qualquer
+  resposta. `BackendUnavailableBanner` no `RootLayout` avisa que a ausência de sinalização
+  não significa praia segura, repete o 193 e desaparece quando o backend volta (sondagem de
+  15 s em `/api/v1/flags`).
+
+### Pendências deste endurecimento
+
+- **Validação no aparelho Android**: o emulador está parado; falta abrir o app (Capacitor 8)
+  e conferir login, refresh, SSE/STOMP e o aviso de backend fora do ar em aparelho físico.
+- **PR**: a branch `35-bug-tópico-stomp-aberto` ainda não foi enviada nem tem PR aberto.
+- **Push com o app fechado**: o lado do app está pronto (plugin instalado, `google-services.json`
+  presente e ignorado pelo git, registro e exibição da mensagem em `shared/lib/push.ts`);
+  falta o envio pelo backend, que exige chave de service account — não é bloqueio desta branch.
+- **Fora desta branch** (backlog da ADR-027): MFA/TOTP, convite/cadastro de usuários com
+  senha temporária, recuperação de senha e trilha de auditoria consultável.
+
+## Roadmap (2026-11-15)
+
+- `beaches` — depois da Fatia 3: GeoJSON público por viewport com ETag/Redis e
+  importação de postos/bases/zonas (as zonas e a leitura pública por área já existem).
+- `occurrences` — registro manual (`POST /api/v1/occurrences`, `FIELD_ATTENDED`), busca por
+  número/protocolo/período e anexos (ADR-013; encerramento na `V20`, paginação na Fatia 10).
+- `operations` — `rip_current_markings` para correntes efêmeras (RF13); contadores de
+  sinalização no painel da coordenação entram com a Fatia 11 (RF40).
+- `region` — `installation_settings` e Region Pack.
+- `tides`/`content`/`search` — endpoints públicos de marés/vídeos e `pg_trgm` (ADR-014).
+- `emergency` — perfil `rabbit` com DLQ, Web Push com o app fechado, métricas/k6
+  (gatilhos da ADR-020); a transição de saída já existe pela porta `SosCallCloser` no
+  encerramento da ocorrência.
+- Frontend — formulário de ocorrência, tiles PMTiles e ícones padronizados (o painel da
+  gestão entra na Fatia 11).
+- App mobile — câmera/push, ícone/splash próprios, keystore e teste em aparelho físico.
+- CI — lint/build do frontend, Testcontainers Garage, SAST/SCA e cobertura.

@@ -54,6 +54,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
+                        // Métricas (JVM, HTTP, pools) são de operação, não de campo:
+                        // qualquer sessão autenticada as lia, inclusive LIFEGUARD.
+                        .requestMatchers("/actuator/**").hasRole("ADMIN")
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         // Sessão: login/refresh/logout são públicos (o cookie é a prova);
                         // /me exige access token válido.
