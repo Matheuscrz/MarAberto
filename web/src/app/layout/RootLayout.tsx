@@ -14,7 +14,6 @@ import {
   Info,
   LogIn,
   MapPin,
-  Moon,
   Phone,
   Search,
   Shield,
@@ -64,7 +63,6 @@ const SIGNAL_PREFIX = "signal:";
 const quickTabs = [
   { to: "/praias", label: "Praias", icon: MapPin },
   { to: "/guarda-vidas", label: "Guarda-Vidas", icon: Shield },
-  { to: "/mares", label: "Marés", icon: Moon },
   { to: "/aprender", label: "Aprender", icon: BookOpen },
   { to: "/sobre", label: "Sobre", icon: Info },
 ];
