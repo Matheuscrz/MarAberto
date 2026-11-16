@@ -22,10 +22,9 @@ export function AboutPage() {
           <Waves aria-hidden="true" className="size-4 text-ocean-600" />O que é
         </h2>
         <p className="mt-1.5 text-xs leading-relaxed text-ocean-700">
-          O MarAberto reúne bandeiramento, zonas de risco, tábua de marés e um
-          SOS cidadão. É uma ferramenta de <strong>apoio</strong>: não substitui
-          o acionamento oficial (193) nem a orientação presencial do
-          guarda-vidas.
+          O MarAberto reúne bandeiramento, zonas de risco e um SOS cidadão. É uma
+          ferramenta de <strong>apoio</strong>: não substitui o acionamento
+          oficial (193) nem a orientação presencial do guarda-vidas.
         </p>
       </Card>
 

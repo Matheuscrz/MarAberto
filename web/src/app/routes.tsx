@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { RootLayout } from "@/app/layout/RootLayout";
 import { OperatorLayout } from "@/app/layout/OperatorLayout";
 import { ManagementLayout } from "@/app/layout/ManagementLayout";
@@ -31,9 +31,6 @@ const SosPage = lazy(() =>
 );
 const LifeguardsPage = lazy(() =>
   import("@/features/stations").then((m) => ({ default: m.LifeguardsPage })),
-);
-const TidesPage = lazy(() =>
-  import("@/features/tides").then((m) => ({ default: m.TidesPage })),
 );
 const LearnPage = lazy(() =>
   import("@/features/learn").then((m) => ({ default: m.LearnPage })),
@@ -175,7 +172,12 @@ export function AppRoutes() {
           path="guarda-vidas"
           element={withFallback(<LifeguardsPage />)}
         />
-        <Route path="mares" element={withFallback(<TidesPage />)} />
+        {/*
+         * A tábua de marés saiu da v1 (RF03/RF31 voltam em R2, sem provider
+         * validado). O endereço antigo cai no mapa em vez de 404, e a feature
+         * `tides` fica fora do bundle por não ter mais importador.
+         */}
+        <Route path="mares" element={<Navigate to="/" replace />} />
         <Route path="aprender" element={withFallback(<LearnPage />)} />
         <Route path="sobre" element={withFallback(<AboutPage />)} />
         <Route path="*" element={withFallback(<NotFoundPage />)} />

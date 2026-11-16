@@ -1,7 +1,7 @@
 {
   "name": "MarAberto — Segurança Balnear",
   "short_name": "MarAberto",
-  "description": "Bandeiramento, zonas de risco, tábua de marés e SOS cidadão para a central de guarda-vidas. Em emergência, ligue 193.",
+  "description": "Bandeiramento, zonas de risco e SOS cidadão para a central de guarda-vidas. Em emergência, ligue 193.",
   "lang": "pt-BR",
   "dir": "ltr",
   "start_url": "/",
@@ -58,18 +58,6 @@
       "short_name": "Praias",
       "description": "Consultar bandeira e riscos",
       "url": "/praias",
-      "icons": [
-        {
-          "src": "/icons/icon-192.png",
-          "sizes": "192x192"
-        }
-      ]
-    },
-    {
-      "name": "Marés",
-      "short_name": "Marés",
-      "description": "Ver a tábua de marés",
-      "url": "/mares",
       "icons": [
         {
           "src": "/icons/icon-192.png",
