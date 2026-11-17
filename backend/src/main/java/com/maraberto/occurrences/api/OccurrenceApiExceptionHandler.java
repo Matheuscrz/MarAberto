@@ -105,6 +105,17 @@ public class OccurrenceApiExceptionHandler extends ResponseEntityExceptionHandle
                 request), new HttpHeaders());
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Object> handleInvalidArgument(
+            IllegalArgumentException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.BAD_REQUEST,
+                "https://maraberto.org/problems/invalid-request",
+                "Requisição inválida",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
     private ResponseEntity<Object> response(ProblemDetail problem, HttpHeaders headers) {
         return ResponseEntity.status(problem.getStatus())
                 .headers(headers)

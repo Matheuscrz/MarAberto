@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ClipboardList, RefreshCw } from "lucide-react";
+import { ChevronDown, ClipboardList, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/shared/components/Card";
 import {
   OccurrenceList,
@@ -19,7 +19,15 @@ type Filter = "ACTIVE" | "CLOSED" | "CIOSP";
  * leitura.
  */
 export function ManagementOccurrencesPage() {
-  const { occurrences, status, message, reload } = useOccurrences();
+  const {
+    occurrences,
+    status,
+    message,
+    hasMore,
+    loadingMore,
+    loadMore,
+    reload,
+  } = useOccurrences();
   const [filter, setFilter] = useState<Filter>("ACTIVE");
   const [selectedOccurrenceId, setSelectedOccurrenceId] = useState<
     string | null
@@ -102,17 +110,36 @@ export function ManagementOccurrencesPage() {
           Carregando as ocorrências…
         </p>
       ) : (
-        <OccurrenceList
-          occurrences={shown}
-          onSelect={(occurrence) => setSelectedOccurrenceId(occurrence.id)}
-          emptyMessage={
-            filter === "ACTIVE"
-              ? "Nenhum atendimento em curso no momento."
-              : filter === "CLOSED"
-                ? "Nenhuma ocorrência encerrada no período."
-                : "Nenhuma pendência de CIOSP no período."
-          }
-        />
+        <>
+          <OccurrenceList
+            occurrences={shown}
+            onSelect={(occurrence) => setSelectedOccurrenceId(occurrence.id)}
+            emptyMessage={
+              filter === "ACTIVE"
+                ? "Nenhum atendimento em curso no momento."
+                : filter === "CLOSED"
+                  ? "Nenhuma ocorrência encerrada no período."
+                  : "Nenhuma pendência de CIOSP no período."
+            }
+          />
+          {hasMore ? (
+            <div className="mt-3 text-center">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-ocean-300 bg-white px-3 py-1.5 text-xs font-bold text-ocean-800 transition hover:bg-ocean-50 disabled:cursor-progress disabled:opacity-70"
+              >
+                <ChevronDown aria-hidden="true" className="size-3.5" />
+                {loadingMore ? "Carregando…" : "Carregar mais antigas"}
+              </button>
+              <p className="mt-1 text-[11px] text-ocean-500">
+                A lista abre pelas mais recentes; o cursor do servidor busca as
+                páginas anteriores sem repetir registros.
+              </p>
+            </div>
+          ) : null}
+        </>
       )}
 
       {selectedOccurrenceId ? (

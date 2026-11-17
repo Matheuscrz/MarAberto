@@ -178,17 +178,35 @@ public class OccurrenceRepository {
     }
 
     public List<OccurrenceView> findAll(
-            UUID userId, boolean allScopes, OccurrenceStatus status, int limit) {
+            UUID userId,
+            boolean allScopes,
+            OccurrenceStatus status,
+            UUID emergencyCallId,
+            Instant beforeOccurredAt,
+            Long beforeNumber,
+            int limit) {
         MapSqlParameterSource params = scopeParams(userId, allScopes)
                 .addValue("status", status == null ? null : status.name(), Types.VARCHAR)
                 .addValue("limit", limit);
-        return jdbc.query(
+        StringBuilder sql = new StringBuilder(
                 "SELECT " + VIEW_COLUMNS + FROM_SQL
                         + " WHERE " + SCOPE_SQL
-                        + " AND (:status IS NULL OR o.status = :status)"
-                        + " ORDER BY o.occurred_at DESC, o.number DESC LIMIT :limit",
-                params,
-                (rs, rowNum) -> view(rs));
+                        + " AND (:status IS NULL OR o.status = :status)");
+        if (emergencyCallId != null) {
+            sql.append(" AND o.emergency_call_id = :emergencyCallId");
+            params.addValue("emergencyCallId", emergencyCallId, Types.OTHER);
+        }
+        if (beforeOccurredAt != null) {
+            // Keyset sobre (occurred_at, number): o par é único e não muda
+            // quando a ocorrência é encerrada, então paginar não repete nem
+            // pula registros entre páginas.
+            sql.append(" AND (o.occurred_at, o.number) < (:beforeOccurredAt, :beforeNumber)");
+            params.addValue("beforeOccurredAt",
+                    OffsetDateTime.ofInstant(beforeOccurredAt, ZoneOffset.UTC));
+            params.addValue("beforeNumber", beforeNumber, Types.BIGINT);
+        }
+        sql.append(" ORDER BY o.occurred_at DESC, o.number DESC LIMIT :limit");
+        return jdbc.query(sql.toString(), params, (rs, rowNum) -> view(rs));
     }
 
     public Optional<OccurrenceDetail> findDetail(

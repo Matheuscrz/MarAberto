@@ -6,7 +6,6 @@ import com.maraberto.occurrences.domain.OccurrenceStatus;
 import com.maraberto.shared.api.ApiProblem;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -14,7 +13,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import java.util.List;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.UUID;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
@@ -56,19 +56,41 @@ public class OccurrenceController {
             summary = "Listar ocorrências",
             description = "Guarda-vidas vê as ocorrências que ele mesmo atendeu; coordenação e TI "
                     + "veem todas. Ordenadas da mais recente para a mais antiga, pelo horário do "
-                    + "fato. O filtro `status` separa o que está em atendimento do histórico.")
-    @ApiResponse(responseCode = "200", description = "Ocorrências",
-            content = @Content(array = @ArraySchema(
-                    schema = @Schema(implementation = OccurrenceView.class))))
-    public List<OccurrenceView> list(
-            @Parameter(description = "Máximo de ocorrências devolvidas (1 a 100)",
-                    example = "50")
-            @RequestParam(required = false, defaultValue = "50") int limit,
+                    + "fato, com paginação por cursor. Envie `nextCursor.occurredAt` em "
+                    + "`beforeOccurredAt` e `nextCursor.number` em `beforeNumber` para a próxima "
+                    + "página; o cursor é estável mesmo quando uma ocorrência é encerrada entre "
+                    + "duas páginas. `emergencyCallId` localiza a ficha aberta pelo ack de um "
+                    + "chamado do SOS.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Página de ocorrências",
+                    content = @Content(schema = @Schema(implementation = OccurrencePage.class))),
+            @ApiResponse(responseCode = "400",
+                    description = "Cursor incompleto ou fora do formato ISO-8601 (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class)))
+    })
+    public OccurrencePage list(
+            @Parameter(description = "Tamanho da página (1 a 100)", example = "20")
+            @RequestParam(required = false, defaultValue = "20") int limit,
             @Parameter(description = "Filtra por situação; omitido devolve todas")
             @RequestParam(required = false) OccurrenceStatus status,
+            @Parameter(description = "Chamado do SOS que abriu a ocorrência")
+            @RequestParam(required = false) UUID emergencyCallId,
+            @Parameter(description = "Horário do fato da última ocorrência da página anterior",
+                    example = "2026-11-16T12:00:00Z")
+            @RequestParam(required = false) String beforeOccurredAt,
+            @Parameter(description = "Número interno da última ocorrência da página anterior",
+                    example = "42")
+            @RequestParam(required = false) String beforeNumber,
             Authentication authentication) {
         return occurrenceQueryService.list(
-                userId(authentication), seesAllScopes(authentication), status, limit);
+                userId(authentication),
+                seesAllScopes(authentication),
+                status,
+                emergencyCallId,
+                parseInstant(beforeOccurredAt),
+                parseNumber(beforeNumber),
+                limit);
     }
 
     @GetMapping("/{occurrenceId}")
@@ -162,6 +184,35 @@ public class OccurrenceController {
 
     private static UUID userId(Authentication authentication) {
         return UUID.fromString(authentication.getName());
+    }
+
+    /**
+     * Cursor como texto para que um valor inválido vire 400 com tipo estável,
+     * em vez de um erro genérico de conversão do Spring.
+     */
+    private static Instant parseInstant(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(value);
+        } catch (DateTimeParseException exception) {
+            throw new IllegalArgumentException(
+                    "beforeOccurredAt deve ser um instante ISO-8601, por exemplo "
+                            + "2026-11-16T12:00:00Z.");
+        }
+    }
+
+    private static Long parseNumber(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    "beforeNumber deve ser o número interno da última ocorrência da página.");
+        }
     }
 
     private static boolean seesAllScopes(Authentication authentication) {

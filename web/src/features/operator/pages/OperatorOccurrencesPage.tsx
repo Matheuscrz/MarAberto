@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   CheckCircle,
+  ChevronDown,
   ClipboardList,
   Crosshair,
   MapPin,
@@ -48,7 +49,15 @@ interface Position {
  * entra com o formulário de campo e a ficha de transcrição do CIOSP.
  */
 export function OperatorOccurrencesPage() {
-  const { occurrences, status, message: loadMessage, reload } = useOccurrences();
+  const {
+    occurrences,
+    status,
+    message: loadMessage,
+    hasMore,
+    loadingMore,
+    loadMore,
+    reload,
+  } = useOccurrences();
   const [tab, setTab] = useState<"active" | "closed">("active");
   const [selectedOccurrenceId, setSelectedOccurrenceId] = useState<
     string | null
@@ -237,15 +246,34 @@ export function OperatorOccurrencesPage() {
             Carregando as ocorrências do turno…
           </p>
         ) : (
-          <OccurrenceList
-            occurrences={shownOccurrences}
-            onSelect={(occurrence) => setSelectedOccurrenceId(occurrence.id)}
-            emptyMessage={
-              tab === "active"
-                ? "Nenhum atendimento em curso. Ao aceitar um SOS, a ficha aparece aqui para ser encerrada."
-                : "Nenhum atendimento encerrado ainda. Ao encerrar, a ficha sai da lista em atendimento e fica aqui com o desfecho."
-            }
-          />
+          <>
+            <OccurrenceList
+              occurrences={shownOccurrences}
+              onSelect={(occurrence) => setSelectedOccurrenceId(occurrence.id)}
+              emptyMessage={
+                tab === "active"
+                  ? "Nenhum atendimento em curso. Ao aceitar um SOS, a ficha aparece aqui para ser encerrada."
+                  : "Nenhum atendimento encerrado ainda. Ao encerrar, a ficha sai da lista em atendimento e fica aqui com o desfecho."
+              }
+            />
+            {hasMore ? (
+              <div className="mt-3 text-center">
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-ocean-300 bg-white px-3 py-1.5 text-xs font-bold text-ocean-800 transition hover:bg-ocean-50 disabled:cursor-progress disabled:opacity-70"
+                >
+                  <ChevronDown aria-hidden="true" className="size-3.5" />
+                  {loadingMore ? "Carregando…" : "Carregar mais antigas"}
+                </button>
+                <p className="mt-1 text-[11px] text-ocean-500">
+                  A lista abre pelas mais recentes; o cursor do servidor busca
+                  as páginas anteriores sem repetir registros.
+                </p>
+              </div>
+            ) : null}
+          </>
         )}
       </section>
 
