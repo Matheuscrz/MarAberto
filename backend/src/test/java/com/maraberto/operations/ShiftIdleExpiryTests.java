@@ -205,10 +205,50 @@ class ShiftIdleExpiryTests extends PostgisIntegrationTest {
                 .isNull();
     }
 
+    @Test
+    void lazyExpiryDeactivatesTheMobileBase() {
+        UUID baseId = EmergencyTestData.createMobileBase(
+                jdbcTemplate, LATITUDE, LONGITUDE, 500);
+        UUID shiftId = openMobileShift(baseId);
+        ageSignal(shiftId, 20);
+
+        assertThat(exchange("/api/v1/dispatch/shifts/current", HttpMethod.GET, null)
+                .getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT active FROM mobile_bases WHERE id = ?", Boolean.class, baseId))
+                .as("o lease vencido desativa a base móvel do turno")
+                .isFalse();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT deactivated_at FROM mobile_bases WHERE id = ?", Instant.class, baseId))
+                .isNotNull();
+    }
+
+    @Test
+    void sweepDeactivatesTheMobileBaseOfAnIdleShift() {
+        UUID baseId = EmergencyTestData.createMobileBase(
+                jdbcTemplate, LATITUDE, LONGITUDE, 500);
+        UUID shiftId = openMobileShift(baseId);
+        ageSignal(shiftId, 20);
+
+        assertThat(shiftService.closeIdleShifts()).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT active FROM mobile_bases WHERE id = ?", Boolean.class, baseId))
+                .isFalse();
+    }
+
     private UUID openShift() {
         ResponseEntity<String> opened = exchange("/api/v1/dispatch/shifts",
                 HttpMethod.POST,
                 Map.of("postId", postId.toString(), "latitude", LATITUDE, "longitude", LONGITUDE));
+        assertThat(opened.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        return UUID.fromString(readJson(opened).get("id").asText());
+    }
+
+    private UUID openMobileShift(UUID baseId) {
+        ResponseEntity<String> opened = exchange("/api/v1/dispatch/shifts",
+                HttpMethod.POST,
+                Map.of("mobileBaseId", baseId.toString(),
+                        "latitude", LATITUDE, "longitude", LONGITUDE));
         assertThat(opened.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         return UUID.fromString(readJson(opened).get("id").asText());
     }

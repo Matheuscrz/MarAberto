@@ -23,6 +23,10 @@ import {
   getDevicePosition,
 } from "@/shared/lib/geolocation";
 import { useShift } from "@/features/operator/lib/use-shift";
+import {
+  createStation,
+  stationErrorMessage,
+} from "@/features/stations";
 import type {
   ShiftTarget,
   ShiftTargetKind,
@@ -80,10 +84,13 @@ export function ShiftPanel({ onArmAlerts }: ShiftPanelProps) {
   const [longitude, setLongitude] = useState("");
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
+  const [creatingBase, setCreatingBase] = useState(false);
   const [geoMessage, setGeoMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const options = targets.filter((target) => target.kind === kind);
+  // A base móvel nasce do turno (ADR-025): não há lista de bases antigas para
+  // escolher. Posto fixo continua vindo do cadastro permanente.
+  const options = targets.filter((target) => target.kind === "POST");
   const selected =
     options.find((target) => target.id === targetId) ?? options[0] ?? null;
 
@@ -150,11 +157,6 @@ export function ShiftPanel({ onArmAlerts }: ShiftPanelProps) {
     // permissão de notificação. Antes de qualquer await.
     onArmAlerts?.();
 
-    if (!selected) {
-      setFormError("Escolha um posto fixo ou uma base móvel.");
-      return;
-    }
-
     const typedLatitude = Number.parseFloat(latitude);
     const typedLongitude = Number.parseFloat(longitude);
     const hasLatitude = Number.isFinite(typedLatitude);
@@ -201,17 +203,38 @@ export function ShiftPanel({ onArmAlerts }: ShiftPanelProps) {
       }
     }
 
-    if (kind === "MOBILE_BASE" && !Number.isFinite(openedLatitude)) {
-      setFormError(
-        "A base móvel precisa da posição atual para o despacho medir a distância. Capture pelo aparelho ou informe as coordenadas.",
-      );
-      return;
+    let destination: { postId: string } | { mobileBaseId: string };
+    if (kind === "POST") {
+      if (!selected) {
+        setFormError("Escolha um posto fixo.");
+        return;
+      }
+      destination = { postId: selected.id };
+    } else {
+      // ADR-025: a base móvel pertence ao turno. Cadastramos uma base nova na
+      // posição atual em vez de reutilizar uma linha antiga do seletor.
+      setCreatingBase(true);
+      try {
+        const base = await createStation({
+          kind: "MOBILE",
+          name: mobileBaseName(),
+          latitude: openedLatitude,
+          longitude: openedLongitude,
+          ...(openedAccuracy === null
+            ? {}
+            : { accuracyMeters: openedAccuracy }),
+        });
+        destination = { mobileBaseId: base.id };
+      } catch (error) {
+        setFormError(stationErrorMessage(error));
+        return;
+      } finally {
+        setCreatingBase(false);
+      }
     }
 
     const opened = await open({
-      ...(kind === "POST"
-        ? { postId: selected.id }
-        : { mobileBaseId: selected.id }),
+      ...destination,
       latitude: openedLatitude,
       longitude: openedLongitude,
       ...(openedAccuracy === null ? {} : { accuracyMeters: openedAccuracy }),
@@ -373,72 +396,76 @@ export function ShiftPanel({ onArmAlerts }: ShiftPanelProps) {
             </div>
           </fieldset>
 
-          {options.length === 0 ? (
-            <p className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
-              Nenhum {kind === "POST" ? "posto fixo" : "base móvel"} ativo
-              cadastrado. Cadastre o ponto em{" "}
-              <Link
-                to="/operador/postos"
-                className="underline decoration-2 underline-offset-2"
-              >
-                Postos e bases
-              </Link>{" "}
-              e volte para abrir o plantão.
-            </p>
-          ) : (
-            <div className="grid gap-1">
-              <label
-                htmlFor="shift-target"
-                className="text-xs font-semibold text-ocean-800"
-              >
-                {kind === "POST" ? "Posto fixo" : "Base móvel"}
-                <select
-                  id="shift-target"
-                  value={selected?.id ?? ""}
-                  onChange={(event) => setTargetId(event.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-ocean-200 bg-white px-3 text-xs font-normal focus:border-ocean-600 focus:outline-none"
+          {kind === "POST" ? (
+            options.length === 0 ? (
+              <p className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+                Nenhum posto fixo ativo cadastrado. Cadastre o ponto em{" "}
+                <Link
+                  to="/operador/postos"
+                  className="underline decoration-2 underline-offset-2"
                 >
-                  {options.map((target) => (
-                    <option key={target.id} value={target.id}>
-                      {targetLabel(target, distanceTo(target))}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  Postos e bases
+                </Link>{" "}
+                e volte para abrir o plantão.
+              </p>
+            ) : (
+              <div className="grid gap-1">
+                <label
+                  htmlFor="shift-target"
+                  className="text-xs font-semibold text-ocean-800"
+                >
+                  Posto fixo
+                  <select
+                    id="shift-target"
+                    value={selected?.id ?? ""}
+                    onChange={(event) => setTargetId(event.target.value)}
+                    className="mt-1 h-9 w-full rounded-lg border border-ocean-200 bg-white px-3 text-xs font-normal focus:border-ocean-600 focus:outline-none"
+                  >
+                    {options.map((target) => (
+                      <option key={target.id} value={target.id}>
+                        {targetLabel(target, distanceTo(target))}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-              {selected ? (
-                <div className="rounded-xl border border-ocean-100 bg-ocean-50/60 px-3 py-2 text-[11px] leading-snug text-ocean-700">
-                  <p className="font-bold text-ocean-900">
-                    {distanceTo(selected) === null
-                      ? "Use “Usar minha localização” para ver a distância."
-                      : `A ${formatDistance(distanceTo(selected))} de você`}
-                    {selected.kind === "POST" && selected.beachName
-                      ? ` · ${selected.beachName}`
-                      : ""}
-                  </p>
-                  <p className="mt-0.5">
-                    {selected.positionUpdatedAt
-                      ? `Posição registrada em ${formatDateTime(selected.positionUpdatedAt)}`
-                      : "Posição de cadastro sem data"}
-                    {selected.positionAccuracyM === null
-                      ? ""
-                      : ` · ${formatAccuracy(selected.positionAccuracyM)}`}
-                    {selected.coverageRadiusMeters
-                      ? ` · cobertura de ${formatDistance(selected.coverageRadiusMeters)}`
-                      : ""}
-                  </p>
-                  <p className="mt-0.5 text-ocean-500">
-                    Coordenada {selected.latitude.toFixed(5)},{" "}
-                    {selected.longitude.toFixed(5)}
-                  </p>
-                  {selected.kind === "MOBILE_BASE" ? (
-                    <p className="mt-1 text-ocean-600">
-                      A base móvel é a estrutura cadastrada neste ponto; a
-                      posição muda quando você a reposiciona no console.
+                {selected ? (
+                  <div className="rounded-xl border border-ocean-100 bg-ocean-50/60 px-3 py-2 text-[11px] leading-snug text-ocean-700">
+                    <p className="font-bold text-ocean-900">
+                      {distanceTo(selected) === null
+                        ? "Use “Usar minha localização” para ver a distância."
+                        : `A ${formatDistance(distanceTo(selected))} de você`}
+                      {selected.beachName ? ` · ${selected.beachName}` : ""}
                     </p>
-                  ) : null}
-                </div>
-              ) : null}
+                    <p className="mt-0.5">
+                      {selected.positionUpdatedAt
+                        ? `Posição registrada em ${formatDateTime(selected.positionUpdatedAt)}`
+                        : "Posição de cadastro sem data"}
+                      {selected.positionAccuracyM === null
+                        ? ""
+                        : ` · ${formatAccuracy(selected.positionAccuracyM)}`}
+                      {selected.coverageRadiusMeters
+                        ? ` · cobertura de ${formatDistance(selected.coverageRadiusMeters)}`
+                        : ""}
+                    </p>
+                    <p className="mt-0.5 text-ocean-500">
+                      Coordenada {selected.latitude.toFixed(5)},{" "}
+                      {selected.longitude.toFixed(5)}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            )
+          ) : (
+            <div className="rounded-xl border border-ocean-200 bg-white px-3 py-2 text-[11px] leading-relaxed text-ocean-700">
+              <p className="font-bold text-ocean-900">
+                A base móvel é cadastrada na sua posição atual.
+              </p>
+              <p className="mt-0.5">
+                Ao entrar de plantão criamos uma base nova aqui — não é preciso
+                escolher uma base antiga. Quando o turno encerrar (ou expirar
+                por inatividade), ela é desativada e sai do seletor.
+              </p>
             </div>
           )}
 
@@ -516,20 +543,27 @@ export function ShiftPanel({ onArmAlerts }: ShiftPanelProps) {
           <div className="flex flex-wrap gap-2">
             <button
               type="submit"
-              disabled={busy !== null || locating || !selected}
+              disabled={
+                busy !== null ||
+                locating ||
+                creatingBase ||
+                (kind === "POST" && !selected)
+              }
               className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-ocean-950 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-ocean-900 disabled:cursor-progress disabled:opacity-70"
             >
               <LogIn aria-hidden="true" className="size-3.5" />
               {locating
                 ? "Obtendo localização…"
-                : busy === "open"
-                  ? "Abrindo…"
-                  : "Entrar de plantão"}
+                : creatingBase
+                  ? "Cadastrando base…"
+                  : busy === "open"
+                    ? "Abrindo…"
+                    : "Entrar de plantão"}
             </button>
             <button
               type="button"
               onClick={resetForm}
-              disabled={busy !== null}
+              disabled={busy !== null || creatingBase}
               className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-ocean-200 bg-white px-3 py-1.5 text-xs font-bold text-ocean-800 transition hover:bg-ocean-50 disabled:opacity-70"
             >
               Cancelar
@@ -684,4 +718,20 @@ function targetLabel(
     parts.push(formatDistance(distance));
   }
   return parts.join(" · ");
+}
+
+/**
+ * Nome curto da base móvel criada junto com o turno (ADR-025).
+ *
+ * <p>A base pertence ao plantão e some do seletor ao encerrar; o nome carrega
+ * data e hora para a coordenação reconhecer o turno no mapa e no histórico.
+ */
+function mobileBaseName(now = new Date()): string {
+  const label = new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(now);
+  return `Base móvel ${label}`;
 }

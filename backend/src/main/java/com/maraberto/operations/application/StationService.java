@@ -270,6 +270,42 @@ public class StationService {
         return findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
     }
 
+    /**
+     * Desativa a base móvel quando o último plantão aberto nela termina
+     * (ADR-025).
+     *
+     * <p>A base móvel existe para o turno: criada na posição atual ao abrir o
+     * plantão, ela não deve acumular no seletor de destinos depois que o turno
+     * acaba. A desativação só acontece quando não há nenhum outro plantão
+     * aberto usando a mesma base — dois operadores podem compartilhá-la. Nada é
+     * apagado: a linha continua em {@code GET /api/v1/operations/stations} e as
+     * FKs de plantões e ocorrências permanecem válidas.
+     */
+    @Transactional
+    public void deactivateMobileBaseIfUnused(UUID mobileBaseId) {
+        if (mobileBaseId == null) {
+            return;
+        }
+        jdbc.update("""
+                        UPDATE mobile_bases m
+                           SET active = FALSE,
+                               deactivated_at = COALESCE(m.deactivated_at, NOW()),
+                               status_note = CAST(:note AS text),
+                               updated_at = NOW()
+                         WHERE m.id = :id
+                           AND m.active
+                           AND NOT EXISTS (
+                               SELECT 1
+                                 FROM shift_sessions s
+                                WHERE s.mobile_base_id = m.id
+                                  AND s.ended_at IS NULL)
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("id", mobileBaseId)
+                        .addValue("note",
+                                "Desativada automaticamente ao encerrar o plantão em base móvel."));
+    }
+
     private java.util.Optional<StationAdminView> findAdmin(StationKind kind, UUID id) {
         String sql = kind == StationKind.FIXED
                 ? """

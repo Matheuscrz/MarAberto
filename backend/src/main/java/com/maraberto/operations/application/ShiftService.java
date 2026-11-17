@@ -73,14 +73,17 @@ public class ShiftService {
             """;
 
     private final ShiftSessionRepository shiftSessions;
+    private final StationService stationService;
     private final NamedParameterJdbcTemplate jdbc;
     private final Duration idleTimeout;
 
     public ShiftService(
             ShiftSessionRepository shiftSessions,
+            StationService stationService,
             NamedParameterJdbcTemplate jdbc,
             @Value("${maraberto.dispatch.shift-idle-timeout:PT15M}") Duration idleTimeout) {
         this.shiftSessions = shiftSessions;
+        this.stationService = stationService;
         this.jdbc = jdbc;
         this.idleTimeout = idleTimeout;
     }
@@ -191,6 +194,10 @@ public class ShiftService {
             return shift;
         }
         shift.end(now, ShiftEndReason.MANUAL);
+        // O flush é necessário antes de decidir sobre a base móvel: a consulta
+        // de "outro plantão aberto" é SQL e precisa ver este turno já encerrado.
+        shiftSessions.saveAndFlush(shift);
+        deactivateMobileBaseIfUnused(shift);
         return shift;
     }
 
@@ -214,14 +221,21 @@ public class ShiftService {
                     updated_at = NOW()
                 WHERE ended_at IS NULL
                   AND last_seen_at < NOW() - make_interval(secs => :seconds)
+                RETURNING mobile_base_id
                 """;
-        int closed = jdbc.update(sql, new MapSqlParameterSource()
+        List<UUID> closed = jdbc.query(sql, new MapSqlParameterSource()
                 .addValue("reason", ShiftEndReason.IDLE_TIMEOUT.name())
-                .addValue("seconds", idleTimeout.toSeconds()));
-        if (closed > 0) {
-            log.info("Plantões encerrados por inatividade: {}", closed);
+                .addValue("seconds", idleTimeout.toSeconds()),
+                (resultSet, rowNumber) ->
+                        resultSet.getObject("mobile_base_id", UUID.class));
+        closed.stream()
+                .filter(mobileBaseId -> mobileBaseId != null)
+                .distinct()
+                .forEach(stationService::deactivateMobileBaseIfUnused);
+        if (!closed.isEmpty()) {
+            log.info("Plantões encerrados por inatividade: {}", closed.size());
         }
-        return closed;
+        return closed.size();
     }
 
     /**
@@ -253,8 +267,20 @@ public class ShiftService {
             return false;
         }
         shift.end(lastSeen, ShiftEndReason.IDLE_TIMEOUT);
+        // Ver o comentário em close(): o SQL de desativação precisa do turno
+        // já marcado como encerrado.
+        shiftSessions.saveAndFlush(shift);
+        deactivateMobileBaseIfUnused(shift);
         log.info("Plantão encerrado por inatividade: {}", shift.getId());
         return true;
+    }
+
+    /**
+     * Base móvel deixa de ser destino quando o turno nela termina (ADR-025).
+     * Posto fixo continua ativo: ele não pertence ao turno.
+     */
+    private void deactivateMobileBaseIfUnused(ShiftSession shift) {
+        stationService.deactivateMobileBaseIfUnused(shift.getMobileBaseId());
     }
 
     private void requireActiveTarget(UUID postId, UUID mobileBaseId) {        String sql = postId != null

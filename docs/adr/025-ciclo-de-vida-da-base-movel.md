@@ -1,7 +1,8 @@
 # ADR-025: Ciclo de vida da base móvel
 
-- Status: **Proposto (2026-11-13)** — decisão a confirmar ao abrir a branch
-  `30-fix-console-de-campo-sos-e-ocorrencias`. O resto do documento assume a opção A.
+- Status: **Aceito (2026-11-17)** — opção A implementada na Fatia 10 (issue 63):
+  base móvel nasce no turno, é desativada ao encerrar o último plantão aberto que
+  a usa e não volta ao seletor. Ver `docs/history/fatias-10.md`.
 - Relacionadas: ADR-016 (áreas), ADR-022 (ciclo de vida da sinalização e das estruturas),
   ADR-024 (estrutura em campo), ADR-026 (painel da coordenação).
 - Requisitos: RF11, RF39, RN17; `shift_sessions.mobile_base_id`, `mobile_bases`.
@@ -26,7 +27,7 @@ Base móvel não tem endereço: tem **posição de hoje**.
    atual" — o mesmo fluxo da `V16`/RF39, não a escolha de uma linha antiga numa lista.
 2. **Morre com o plantão.** Ao encerrar o plantão (`close`, logout ou job de inatividade),
    a base usada é desativada: `active=false`, `deactivated_at=now()`,
-   `status_note='Desativada ao encerrar o plantão'`. É **soft delete**: nada é apagado e
+   `status_note='Desativada automaticamente ao encerrar o plantão em base móvel.'`. É **soft delete**: nada é apagado e
    `shift_sessions.mobile_base_id`, ocorrências e mídia continuam apontando para a linha.
 3. **Nunca desativar base em uso.** Se existe **outro** plantão aberto na mesma base
    (`shift_sessions.mobile_base_id = :id AND ended_at IS NULL`), a base permanece ativa e a
