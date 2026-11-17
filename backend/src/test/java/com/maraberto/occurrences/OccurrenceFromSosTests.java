@@ -9,6 +9,9 @@ import com.maraberto.occurrences.application.OccurrenceReconciliationJob;
 import com.maraberto.occurrences.infra.OccurrenceRepository;
 import com.maraberto.support.PostgisIntegrationTest;
 import com.maraberto.support.TestOperatorAuth;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -406,14 +409,77 @@ class OccurrenceFromSosTests extends PostgisIntegrationTest {
                 .isEqualTo("https://maraberto.org/problems/occurrence-already-closed");
     }
 
-    private JsonNode[] listByStatus(String accessToken, String status) throws Exception {
-        ResponseEntity<String> response = restTemplate.exchange(
-                "/api/v1/occurrences?status=" + status,
+    @Test
+    void cursorPaginationDoesNotRepeatOrSkipWhenAnOccurrenceClosesBetweenPages() throws Exception {
+        Area area = createArea(-10.974, -38.501, null);
+        TestOperatorAuth.Session lifeguard = lifeguardAt(area, "LIFEGUARD");
+        UUID oldestCall = createEmergencyCall(area.centerLatitude(), area.centerLongitude());
+        UUID middleCall = createEmergencyCall(area.centerLatitude(), area.centerLongitude());
+        UUID newestCall = createEmergencyCall(area.centerLatitude(), area.centerLongitude());
+        ack(oldestCall, lifeguard.accessToken());
+        ack(middleCall, lifeguard.accessToken());
+        ack(newestCall, lifeguard.accessToken());
+
+        setOccurredAt(oldestCall, 3);
+        setOccurredAt(middleCall, 2);
+        setOccurredAt(newestCall, 1);
+
+        JsonNode firstPage = getPage(lifeguard.accessToken(), "limit=2");
+        JsonNode[] head = items(firstPage);
+        assertThat(head).hasSize(2);
+        assertThat(head[0].get("number").asLong())
+                .isGreaterThan(head[1].get("number").asLong());
+        assertThat(firstPage.get("hasMore").asBoolean()).isTrue();
+        JsonNode cursor = firstPage.get("nextCursor");
+        assertThat(cursor.isNull()).isFalse();
+
+        // Encerrar uma ficha entre as páginas muda só o status; a chave
+        // (occurred_at, number) continua a mesma.
+        String closedId = head[0].get("id").asText();
+        assertThat(post(
+                "/api/v1/occurrences/" + closedId + "/close",
+                """
+                {"outcome": "RESOLVED", "summary": "Encerrada entre as páginas."}
+                """,
+                lifeguard.accessToken()).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        JsonNode secondPage = getPage(lifeguard.accessToken(),
+                "limit=2&beforeOccurredAt=" + cursor.get("occurredAt").asText()
+                        + "&beforeNumber=" + cursor.get("number").asLong());
+        JsonNode[] tail = items(secondPage);
+        assertThat(tail).hasSize(1);
+        assertThat(secondPage.get("hasMore").asBoolean()).isFalse();
+        assertThat(secondPage.get("nextCursor").isNull()).isTrue();
+
+        List<String> seen = new ArrayList<>();
+        for (JsonNode node : head) {
+            seen.add(node.get("id").asText());
+        }
+        for (JsonNode node : tail) {
+            seen.add(node.get("id").asText());
+        }
+        assertThat(seen)
+                .as("o keyset não repete nem pula a ficha encerrada entre as páginas")
+                .doesNotHaveDuplicates()
+                .hasSize(3);
+        assertThat(tail[0].get("id").asText())
+                .isNotEqualTo(head[0].get("id").asText())
+                .isNotEqualTo(head[1].get("id").asText());
+        assertThat(tail[0].get("status").asText()).isEqualTo("IN_PROGRESS");
+
+        // Cursor incompleto é erro de requisição com tipo estável (RFC 9457).
+        ResponseEntity<String> invalid = restTemplate.exchange(
+                "/api/v1/occurrences?beforeNumber=1",
                 HttpMethod.GET,
-                new HttpEntity<>(authorization(accessToken)),
+                new HttpEntity<>(authorization(lifeguard.accessToken())),
                 String.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        return objectMapper.readValue(response.getBody(), JsonNode[].class);
+        assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(objectMapper.readTree(invalid.getBody()).get("type").asText())
+                .isEqualTo("https://maraberto.org/problems/invalid-request");
+    }
+
+    private JsonNode[] listByStatus(String accessToken, String status) throws Exception {
+        return items(getPage(accessToken, "status=" + status));
     }
 
     private JsonNode getDetail(String occurrenceId, String accessToken) throws Exception {
@@ -454,13 +520,45 @@ class OccurrenceFromSosTests extends PostgisIntegrationTest {
     }
 
     private JsonNode[] list(String accessToken, int limit) throws Exception {
+        return items(getPage(accessToken, "limit=" + limit));
+    }
+
+    private JsonNode getPage(String accessToken, String query) throws Exception {
         ResponseEntity<String> response = restTemplate.exchange(
-                "/api/v1/occurrences?limit=" + limit,
+                "/api/v1/occurrences?" + query,
                 HttpMethod.GET,
                 new HttpEntity<>(authorization(accessToken)),
                 String.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        return objectMapper.readValue(response.getBody(), JsonNode[].class);
+        assertThat(response.getStatusCode())
+                .withFailMessage("GET /api/v1/occurrences?%s respondeu %s: %s",
+                        query, response.getStatusCode(), response.getBody())
+                .isEqualTo(HttpStatus.OK);
+        return objectMapper.readTree(response.getBody());
+    }
+
+    /**
+     * A lista vem em {@code items} desde a paginação por cursor; os testes
+     * continuam comparando o array de fichas.
+     */
+    private static JsonNode[] items(JsonNode page) {
+        JsonNode items = page.get("items");
+        JsonNode[] result = new JsonNode[items.size()];
+        for (int index = 0; index < items.size(); index++) {
+            result[index] = items.get(index);
+        }
+        return result;
+    }
+
+    /**
+     * Congela o horário do fato para a ordenação ser determinística. O
+     * {@code occurred_at} nasce do chamado e não muda quando a ficha é
+     * encerrada — é justamente ele que sustenta o keyset.
+     */
+    private void setOccurredAt(UUID callId, int minutesAgo) {
+        jdbcTemplate.update(
+                "UPDATE occurrences SET occurred_at = ? WHERE emergency_call_id = ?",
+                OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(minutesAgo),
+                callId);
     }
 
     private ResponseEntity<String> get(String occurrenceId, String accessToken) {

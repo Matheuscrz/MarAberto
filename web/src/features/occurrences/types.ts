@@ -66,6 +66,25 @@ export interface Occurrence {
   readonly ciospStatus: CiospStatus;
 }
 
+/** Posição na paginação por cursor (`nextCursor` da página). */
+export interface OccurrenceCursor {
+  readonly occurredAt: string;
+  readonly number: number;
+}
+
+/**
+ * Página de ocorrências (`GET /api/v1/occurrences`).
+ *
+ * <p>`hasMore` e `nextCursor` vêm do servidor; o cursor é a chave estável da
+ * ordenação e não repete nem pula registros quando uma ocorrência é encerrada
+ * entre duas páginas.
+ */
+export interface OccurrencePage {
+  readonly items: readonly Occurrence[];
+  readonly nextCursor: OccurrenceCursor | null;
+  readonly hasMore: boolean;
+}
+
 /**
  * Ficha completa (`GET /api/v1/occurrences/{id}`).
  *

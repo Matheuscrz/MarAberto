@@ -43,7 +43,7 @@ public class DispatchService {
             WHERE c.status = 'DISPATCHED'
               AND d.recipient_user_id = :userId
               AND d.status IN ('PENDING', 'NOTIFIED')
-            ORDER BY c.created_at
+            ORDER BY c.created_at DESC, c.id DESC
             """;
 
     /**
@@ -74,7 +74,7 @@ public class DispatchService {
             WHERE c.status IN ('ACKNOWLEDGED', 'EN_ROUTE', 'ON_SCENE')
               AND d.recipient_user_id = :userId
               AND d.status = 'ACKNOWLEDGED'
-            ORDER BY c.acknowledged_at
+            ORDER BY c.acknowledged_at DESC, c.id DESC
             """;
 
     private final EmergencyCallRepository callRepository;

@@ -46,11 +46,10 @@
 - **Frontend/MapLibre**: Nunca aplicar `transform`, `scale` ou `transition` no elemento raiz do marcador MapLibre (usar elemento filho). Overlays acessíveis via `useOverlay` (`<dialog open>`, `<output>`).
 - **Git & Qualidade**: Commits em **pt-BR** (Conventional Commits); classes em inglês; **nunca commitar sem aval explícito**. Manter `./gradlew clean check`, `npm run lint` e `npm run build` verdes e zero issues críticas no SonarQube.
 
-## Backlog Ativo (Fatias 10–15)
+## Backlog Ativo (Fatias 11–15)
 
 | Fatia  | Escopo                                                                                                                                               | Migrations               |
 | :----- | :--------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------- |
-| **10** | Ordem SOS `DESC`, encerrar SOS na tela operacional, base móvel efêmera (ADR-025) e paginação por cursor em ocorrências                                | `V22` (se índice medido) |
 | **11** | Home da Coordenação como Mapa de Situação real-time (camadas + lista sincronizada `flyTo`) + aba de postos na gestão (ADR-026)                       | `V23` (se necessário)    |
 | **12** | Módulo `content` (CMS Aprender na gestão + tela `/aprender`) + atualização dinâmica de bandeiras/postos no mapa público                              | `V24`                    |
 | **13** | Gestão real de usuários (senha temporária obrigatória), blacklist JWT Redis, MFA (TOTP) e consulta de `audit_log` (ADR-027)                          | `V25`, `V26`             |
@@ -61,5 +60,6 @@
 
 - `docs/Requirements.md` e `docs/Architecture.md` — requisitos e arquitetura detalhada.
 - `docs/adr/001`–`027` — decisões arquiteturais.
-- `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` — diagnóstico detalhado das fatias.
-- `docs/history/fatias-1-9.md` — histórico de entregas das Fatias 1 a 9 (migrações `V1`–`V20`).
+- `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` — diagnóstico das fatias 10–13.
+- `docs/history/fatias-1-9-e-endurecimento.md` — histórico das Fatias 1 a 9 (migrações `V1`–`V20`).
+- `docs/history/fatias-10.md` — histórico da Fatia 10 (sem migration; `V22` segue livre).

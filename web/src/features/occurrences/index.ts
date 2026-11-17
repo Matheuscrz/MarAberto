@@ -5,11 +5,13 @@ export type { OccurrencesState } from "@/features/occurrences/hooks/use-occurren
 export {
   closeOccurrence,
   fetchOccurrence,
+  fetchOccurrenceByEmergencyCall,
   fetchOccurrences,
   occurrenceErrorMessage,
   revealOccurrenceVictim,
   updateOccurrence,
 } from "@/features/occurrences/api/occurrences";
+export type { OccurrenceQuery } from "@/features/occurrences/api/occurrences";
 export {
   CIOSP_LABEL,
   NATURE_LABEL,
@@ -20,10 +22,12 @@ export {
   type CiospStatus,
   type CloseOccurrenceInput,
   type Occurrence,
+  type OccurrenceCursor,
   type OccurrenceDetail,
   type OccurrenceNature,
   type OccurrenceOrigin,
   type OccurrenceOutcome,
+  type OccurrencePage,
   type OccurrenceStatus,
   type UpdateOccurrenceInput,
   type VictimView,

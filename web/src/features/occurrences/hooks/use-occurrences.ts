@@ -3,7 +3,10 @@ import {
   fetchOccurrences,
   occurrenceErrorMessage,
 } from "@/features/occurrences/api/occurrences";
-import type { Occurrence } from "@/features/occurrences/types";
+import type {
+  Occurrence,
+  OccurrenceCursor,
+} from "@/features/occurrences/types";
 
 export type OccurrencesStatus = "loading" | "ready" | "error";
 
@@ -11,7 +14,12 @@ export interface OccurrencesState {
   readonly occurrences: readonly Occurrence[];
   readonly status: OccurrencesStatus;
   readonly message: string | null;
+  /** Há registros mais antigos além da última página carregada. */
+  readonly hasMore: boolean;
+  readonly loadingMore: boolean;
   readonly reload: () => void;
+  /** Busca a próxima página pelo cursor devolvido pelo servidor. */
+  readonly loadMore: () => void;
 }
 
 /**
@@ -20,6 +28,9 @@ export interface OccurrencesState {
  */
 const POLL_MS = 30_000;
 
+/** Primeira página; o restante chega por "Carregar mais", por cursor. */
+const PAGE_SIZE = 30;
+
 const EMPTY: readonly Occurrence[] = [];
 
 /**
@@ -27,13 +38,17 @@ const EMPTY: readonly Occurrence[] = [];
  *
  * <p>O escopo é do servidor: o cliente nunca recebe o que não pode ver. Quando
  * a consulta falha depois de já haver dados, a lista continua na tela com o
- * aviso, em vez de sumir com as ocorrências do turno.
+ * aviso, em vez de sumir com as ocorrências do turno. A reconciliação periódica
+ * recarrega a primeira página; páginas antigas só são buscadas sob demanda.
  */
 export function useOccurrences(): OccurrencesState {
   const [occurrences, setOccurrences] =
     useState<readonly Occurrence[]>(EMPTY);
   const [status, setStatus] = useState<OccurrencesStatus>("loading");
   const [message, setMessage] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<OccurrenceCursor | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -53,9 +68,11 @@ export function useOccurrences(): OccurrencesState {
         return;
       }
       try {
-        const next = await fetchOccurrences(100);
+        const page = await fetchOccurrences({ limit: PAGE_SIZE });
         if (cancelled) return;
-        setOccurrences(next);
+        setOccurrences(page.items);
+        setCursor(page.nextCursor);
+        setHasMore(page.hasMore);
         setStatus("ready");
         setMessage(null);
       } catch (error) {
@@ -92,5 +109,42 @@ export function useOccurrences(): OccurrencesState {
     setAttempt((value) => value + 1);
   }, []);
 
-  return { occurrences, status, message, reload };
+  const loadMore = useCallback(() => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    const run = async () => {
+      try {
+        const page = await fetchOccurrences({
+          limit: PAGE_SIZE,
+          beforeOccurredAt: cursor.occurredAt,
+          beforeNumber: cursor.number,
+        });
+        setOccurrences((previous) => {
+          const known = new Set(previous.map((occurrence) => occurrence.id));
+          return [
+            ...previous,
+            ...page.items.filter((occurrence) => !known.has(occurrence.id)),
+          ];
+        });
+        setCursor(page.nextCursor);
+        setHasMore(page.hasMore);
+        setMessage(null);
+      } catch (error) {
+        setMessage(occurrenceErrorMessage(error));
+      } finally {
+        setLoadingMore(false);
+      }
+    };
+    void run();
+  }, [cursor, loadingMore]);
+
+  return {
+    occurrences,
+    status,
+    message,
+    hasMore,
+    loadingMore,
+    reload,
+    loadMore,
+  };
 }

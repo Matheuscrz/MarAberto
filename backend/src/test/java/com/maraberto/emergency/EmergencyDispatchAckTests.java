@@ -150,6 +150,31 @@ class EmergencyDispatchAckTests extends PostgisIntegrationTest {
     }
 
     @Test
+    void newestCallsComeFirstInTheOpenQueueAndInTheAssignedList() throws Exception {
+        UUID older = createEmergencyCall();
+        UUID newer = createEmergencyCall();
+        // Horários determinísticos: o chamado "older" foi aberto antes.
+        jdbcTemplate.update(
+                "UPDATE emergency_calls SET created_at = NOW() - INTERVAL '5 minutes' "
+                        + "WHERE id = ?", older);
+
+        JsonNode[] queue = openCalls(first.accessToken());
+        assertThat(queue).extracting(node -> node.get("callId").asText())
+                .containsExactly(newer.toString(), older.toString());
+
+        ack(older, first.accessToken());
+        ack(newer, first.accessToken());
+        jdbcTemplate.update(
+                "UPDATE emergency_calls SET acknowledged_at = NOW() - INTERVAL '4 minutes' "
+                        + "WHERE id = ?", older);
+
+        JsonNode[] assigned = assignedCalls(first.accessToken());
+        assertThat(assigned).extracting(node -> node.get("callId").asText())
+                .as("o atendimento mais recente fica no topo da mesa")
+                .containsExactly(newer.toString(), older.toString());
+    }
+
+    @Test
     void operatorWhoWasNotDispatchedGetsForbiddenWithoutLeakingTheCall() throws Exception {
         UUID callId = createEmergencyCall();
 

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.maraberto.identity.application.AuthenticationService;
+import com.maraberto.operations.application.ShiftService;
 import com.maraberto.support.EmergencyTestData;
 import com.maraberto.support.PostgisIntegrationTest;
 import com.maraberto.support.TestOperatorAuth;
@@ -45,6 +46,9 @@ class ShiftControllerTests extends PostgisIntegrationTest {
 
     @Autowired
     private AuthenticationService authenticationService;
+
+    @Autowired
+    private ShiftService shiftService;
 
     private TestOperatorAuth.Session operator;
     private UUID postId;
@@ -177,6 +181,76 @@ class ShiftControllerTests extends PostgisIntegrationTest {
     }
 
     @Test
+    void closingMobileShiftDeactivatesTheBaseButKeepsItInTheFieldList() throws Exception {
+        UUID baseId = EmergencyTestData.createMobileBase(
+                jdbcTemplate, LATITUDE, LONGITUDE, 500);
+        assertThat(post("/api/v1/dispatch/shifts",
+                Map.of("mobileBaseId", baseId.toString(),
+                        "latitude", LATITUDE, "longitude", LONGITUDE))
+                .getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        JsonNode targets = json(exchange(
+                "/api/v1/dispatch/shifts/targets", HttpMethod.GET, null));
+        assertThat(findTargetOrNull(targets, baseId.toString())).isNotNull();
+
+        ResponseEntity<String> closed = exchange(
+                "/api/v1/dispatch/shifts/current/close", HttpMethod.POST, null);
+        assertThat(closed.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        Map<String, Object> base = jdbcTemplate.queryForMap(
+                "SELECT active, deactivated_at, status_note FROM mobile_bases WHERE id = ?",
+                baseId);
+        assertThat(base.get("active")).isEqualTo(false);
+        assertThat(base.get("deactivated_at")).isNotNull();
+        assertThat(base.get("status_note")).isNotNull();
+
+        JsonNode after = json(exchange(
+                "/api/v1/dispatch/shifts/targets", HttpMethod.GET, null));
+        assertThat(findTargetOrNull(after, baseId.toString()))
+                .as("base encerrada sai do seletor de destinos")
+                .isNull();
+
+        JsonNode stations = json(exchange(
+                "/api/v1/operations/stations", HttpMethod.GET, null));
+        JsonNode fieldBase = findTargetOrNull(stations, baseId.toString());
+        assertThat(fieldBase)
+                .as("a estrutura continua no console de campo, inclusive inativa")
+                .isNotNull();
+        assertThat(fieldBase.get("active").asBoolean()).isFalse();
+        assertThat(fieldBase.get("deactivatedAt").isNull()).isFalse();
+    }
+
+    @Test
+    void sharedMobileBaseOnlyDeactivatesWhenTheLastShiftCloses() {
+        UUID baseId = EmergencyTestData.createMobileBase(
+                jdbcTemplate, LATITUDE, LONGITUDE, 500);
+        assertThat(post("/api/v1/dispatch/shifts",
+                Map.of("mobileBaseId", baseId.toString(),
+                        "latitude", LATITUDE, "longitude", LONGITUDE))
+                .getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        TestOperatorAuth.Session second = TestOperatorAuth.registerAndLogin(
+                authenticationService, restTemplate, objectMapper, "LIFEGUARD");
+        EmergencyTestData.openMobileShift(
+                jdbcTemplate, second.userId(), baseId, LATITUDE, LONGITUDE);
+
+        // O primeiro operador encerra, mas a base ainda tem plantão aberto.
+        assertThat(exchange(
+                "/api/v1/dispatch/shifts/current/close", HttpMethod.POST, null)
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT active FROM mobile_bases WHERE id = ?", Boolean.class, baseId))
+                .as("dois operadores podem usar a mesma base móvel")
+                .isTrue();
+
+        shiftService.close(second.userId());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT active FROM mobile_bases WHERE id = ?", Boolean.class, baseId))
+                .as("sem nenhum plantão aberto, a base é desativada")
+                .isFalse();
+    }
+
+    @Test
     void rejectsPositionWithOnlyOneCoordinate() throws Exception {
         ResponseEntity<String> response = post("/api/v1/dispatch/shifts",
                 Map.of("postId", postId.toString(), "latitude", LATITUDE));
@@ -216,6 +290,14 @@ class ShiftControllerTests extends PostgisIntegrationTest {
 
     private ResponseEntity<String> post(String path, Map<String, Object> body) {
         return exchange(path, HttpMethod.POST, body);
+    }
+
+    private JsonNode json(ResponseEntity<String> response) {
+        try {
+            return objectMapper.readTree(response.getBody());
+        } catch (Exception exception) {
+            throw new IllegalStateException("Resposta de teste não é JSON", exception);
+        }
     }
 
     private ResponseEntity<String> exchange(

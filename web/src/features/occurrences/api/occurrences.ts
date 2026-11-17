@@ -3,24 +3,65 @@ import type {
   CloseOccurrenceInput,
   Occurrence,
   OccurrenceDetail,
+  OccurrencePage,
+  OccurrenceStatus,
   UpdateOccurrenceInput,
   VictimView,
 } from "@/features/occurrences/types";
+
+export interface OccurrenceQuery {
+  /** Tamanho da página; o servidor usa 20 quando omitido e limita a 100. */
+  readonly limit?: number;
+  readonly status?: OccurrenceStatus;
+  /** Localiza a ficha aberta pelo ack de um chamado do SOS. */
+  readonly emergencyCallId?: string;
+  readonly beforeOccurredAt?: string;
+  readonly beforeNumber?: number;
+}
 
 /**
  * Ocorrências visíveis para quem consulta.
  *
  * <p>O escopo é do servidor (RN15): o guarda-vidas recebe as que ele mesmo
  * atendeu; a coordenação recebe todas. A coordenada do banhista vem nesta rota
- * autenticada e não deve ser exibida fora do console operacional.
+ * autenticada e não deve ser exibida fora do console operacional. A paginação
+ * é por cursor: devolva `nextCursor` como `beforeOccurredAt`/`beforeNumber`.
  */
 export async function fetchOccurrences(
-  limit = 50,
-): Promise<readonly Occurrence[]> {
-  return apiRequest<readonly Occurrence[]>(
-    `/api/v1/occurrences?limit=${limit}`,
+  query: OccurrenceQuery = {},
+): Promise<OccurrencePage> {
+  return apiRequest<OccurrencePage>(
+    `/api/v1/occurrences?${queryString(query)}`,
     {},
   );
+}
+
+/**
+ * Ficha da ocorrência aberta pelo ack de um chamado do SOS.
+ *
+ * <p>É o que liga o card "Em atendimento por você" à ocorrência que precisa ser
+ * encerrada na própria tela do SOS. `null` quando o chamado ainda não gerou
+ * ocorrência (o ack pode ter acontecido antes do listener).
+ */
+export async function fetchOccurrenceByEmergencyCall(
+  emergencyCallId: string,
+): Promise<Occurrence | null> {
+  const page = await fetchOccurrences({ emergencyCallId, limit: 1 });
+  return page.items[0] ?? null;
+}
+
+function queryString(query: OccurrenceQuery): string {
+  const params = new URLSearchParams();
+  params.set("limit", String(query.limit ?? 20));
+  if (query.status) params.set("status", query.status);
+  if (query.emergencyCallId) {
+    params.set("emergencyCallId", query.emergencyCallId);
+  }
+  if (query.beforeOccurredAt && query.beforeNumber !== undefined) {
+    params.set("beforeOccurredAt", query.beforeOccurredAt);
+    params.set("beforeNumber", String(query.beforeNumber));
+  }
+  return params.toString();
 }
 
 export async function fetchOccurrence(

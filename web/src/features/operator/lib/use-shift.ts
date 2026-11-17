@@ -129,6 +129,22 @@ export function useShift(): ShiftConsole {
     setLoading(false);
   }, [markExpired]);
 
+  /**
+   * Recarrega só os destinos depois de abrir/encerrar o plantão.
+   *
+   * <p>Sem isso o seletor continuaria mostrando a base móvel que o turno
+   * acabou de desativar (ou esconderia a que acabou de nascer) até a próxima
+   * leitura completa.
+   */
+  const reloadTargets = useCallback(async () => {
+    try {
+      const next = await fetchShiftTargets();
+      if (mounted.current) setTargets(next);
+    } catch {
+      // Mantém a lista anterior; a próxima leitura completa reconcilia.
+    }
+  }, []);
+
   useEffect(() => {
     mounted.current = true;
     const initial = window.setTimeout(() => {
@@ -242,6 +258,7 @@ export function useShift(): ShiftConsole {
         message:
           "Plantão aberto. Enquanto ele estiver aberto o despacho pode escolher você para um SOS.",
       });
+      await reloadTargets();
       return true;
     } catch (error) {
       if (mounted.current) {
@@ -251,7 +268,7 @@ export function useShift(): ShiftConsole {
     } finally {
       if (mounted.current) setBusy(null);
     }
-  }, []);
+  }, [reloadTargets]);
 
   const refreshPosition = useCallback(async () => {
     setBusy("move");
@@ -290,6 +307,9 @@ export function useShift(): ShiftConsole {
         message:
           "Plantão encerrado. Você deixou de receber chamados do SOS até abrir um novo plantão.",
       });
+      // A base móvel do turno foi desativada no servidor: recarrega para ela
+      // sair do seletor sem esperar a próxima leitura completa.
+      await reloadTargets();
       return true;
     } catch (error) {
       if (mounted.current) {
@@ -299,7 +319,7 @@ export function useShift(): ShiftConsole {
     } finally {
       if (mounted.current) setBusy(null);
     }
-  }, []);
+  }, [reloadTargets]);
 
   const dismissFeedback = useCallback(() => setFeedback(null), []);
 
