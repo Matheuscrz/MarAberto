@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle,
@@ -32,6 +33,11 @@ import { ShiftPanel } from "@/features/operator/components/ShiftPanel";
 import { SosAlertOverlay } from "@/features/operator/components/SosAlertOverlay";
 import { SosAlertActivation } from "@/features/operator/components/SosAlertActivation";
 import { placeUrl, routeUrl } from "@/features/operator/lib/maps";
+import {
+  OccurrenceSheet,
+  fetchOccurrenceByEmergencyCall,
+  occurrenceErrorMessage,
+} from "@/features/occurrences";
 
 const REALTIME_LABEL: Record<SosRealtimeState, string> = {
   live: "Tempo real",
@@ -78,6 +84,41 @@ export function OperatorSosPage() {
     sosAlert.alert === null
       ? null
       : (calls.find((call) => call.callId === sosAlert.alert?.callId) ?? null);
+
+  // Encerrar o atendimento na própria tela: localizamos a ficha pareada ao
+  // chamado e abrimos o mesmo OccurrenceSheet do console de ocorrências.
+  const [closingCallId, setClosingCallId] = useState<string | null>(null);
+  const [closeError, setCloseError] = useState<{
+    readonly callId: string;
+    readonly message: string;
+  } | null>(null);
+  const [sheetOccurrenceId, setSheetOccurrenceId] = useState<string | null>(
+    null,
+  );
+
+  const openCloseSheet = useCallback(async (callId: string) => {
+    setClosingCallId(callId);
+    setCloseError(null);
+    try {
+      const occurrence = await fetchOccurrenceByEmergencyCall(callId);
+      if (!occurrence) {
+        // O listener abre a ficha no ack; se o chamado veio antes dele, a
+        // reconciliação do servidor cria a ficha em instantes. Não travamos a
+        // tela por isso — só avisamos e deixamos tentar de novo.
+        setCloseError({
+          callId,
+          message:
+            "A ficha deste chamado ainda não foi criada pelo servidor. Aguarde alguns segundos e toque em Encerrar atendimento de novo.",
+        });
+        return;
+      }
+      setSheetOccurrenceId(occurrence.id);
+    } catch (error) {
+      setCloseError({ callId, message: occurrenceErrorMessage(error) });
+    } finally {
+      setClosingCallId(null);
+    }
+  }, []);
 
   const nearest = calls.reduce<number | null>((closest, call) => {
     if (call.distanceMeters === null) return closest;
@@ -202,14 +243,25 @@ export function OperatorSosPage() {
               Em atendimento por você
             </h2>
             <span className="text-[11px] font-semibold text-ocean-500">
-              Encerre na tela de ocorrências: o relato e o desfecho tiram o
-              chamado daqui.
+              Encerre aqui mesmo: o relato e o desfecho fecham o chamado na
+              mesma transação, sem trocar de tela.
             </span>
           </div>
           <ul className="grid gap-3">
             {assigned.map((call) => (
               <li key={call.callId}>
-                <AssignedCard call={call} />
+                <AssignedCard
+                  call={call}
+                  closing={closingCallId === call.callId}
+                  error={
+                    closeError?.callId === call.callId
+                      ? closeError.message
+                      : null
+                  }
+                  onCloseAttendance={(callId) => {
+                    void openCloseSheet(callId);
+                  }}
+                />
               </li>
             ))}
           </ul>
@@ -244,6 +296,20 @@ export function OperatorSosPage() {
         Coordenadas precisas do banhista têm uso restrito ao atendimento: não
         aparecem em listagens públicas, logs nem na notificação em tempo real.
       </p>
+
+      {sheetOccurrenceId ? (
+        <OccurrenceSheet
+          occurrenceId={sheetOccurrenceId}
+          onClose={() => setSheetOccurrenceId(null)}
+          onChanged={() => {
+            // Encerrou ou editou: fecha a ficha e relê o atendimento em curso
+            // agora; a reconciliação de 10 s cobre o caso de o servidor demorar
+            // a refletir o fim do chamado.
+            setSheetOccurrenceId(null);
+            refresh();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -366,7 +432,21 @@ function CallCard({ call, acknowledging, onAcknowledge }: CallCardProps) {
  * mapas) e é dele que nasce a ocorrência operacional (ADR-013). A coordenada
  * continua só nesta rota autenticada.
  */
-function AssignedCard({ call }: { readonly call: DispatchAssignedCall }) {
+interface AssignedCardProps {
+  readonly call: DispatchAssignedCall;
+  /** Localizando a ocorrência pareada para abrir a ficha de encerramento. */
+  readonly closing: boolean;
+  /** Falha ao abrir a ficha; o chamado continua na mesa. */
+  readonly error: string | null;
+  readonly onCloseAttendance: (callId: string) => void;
+}
+
+function AssignedCard({
+  call,
+  closing,
+  error,
+  onCloseAttendance,
+}: AssignedCardProps) {
   const distance = currentDistance(call);
 
   return (
@@ -416,8 +496,27 @@ function AssignedCard({ call }: { readonly call: DispatchAssignedCall }) {
             <ExternalLink aria-hidden="true" className="size-3.5" />
             Ver ponto no mapa
           </a>
+          <button
+            type="button"
+            onClick={() => onCloseAttendance(call.callId)}
+            disabled={closing}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-ocean-900 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-ocean-950 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <CheckCircle aria-hidden="true" className="size-3.5" />
+            {closing ? "Abrindo ficha…" : "Encerrar atendimento"}
+          </button>
         </div>
       </div>
+
+      {error ? (
+        <p
+          role="alert"
+          className="mt-3 flex items-start gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-relaxed text-amber-900"
+        >
+          <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+          {error}
+        </p>
+      ) : null}
 
       <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
         <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
@@ -480,8 +579,8 @@ function AssignedCard({ call }: { readonly call: DispatchAssignedCall }) {
       <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-ocean-500">
         <MapPin aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
         A rota abre o app de mapas do aparelho e envia a coordenada do banhista
-        só quando você toca. Este atendimento fica na mesa para virar a
-        ocorrência no CIOSP.
+        só quando você toca. Encerrar aqui fecha a ocorrência com o relato e o
+        desfecho, sem precisar trocar de tela.
       </p>
     </article>
   );
