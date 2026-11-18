@@ -19,7 +19,13 @@ export type SymbolPrimitive =
       readonly y2: number;
     };
 
-export type SymbolKey = "STATION_FIXED" | "STATION_MOBILE" | "SIGNAL" | "CAMERA";
+export type SymbolKey =
+  | "STATION_FIXED"
+  | "STATION_MOBILE"
+  | "SIGNAL"
+  | "LIFEGUARD"
+  | "OCCURRENCE"
+  | "CAMERA";
 
 export const MARKER_SYMBOLS: Record<SymbolKey, readonly SymbolPrimitive[]> = {
   /** Boia de salvamento: identifica posto fixo de guarda-vidas. */
@@ -57,5 +63,16 @@ export const MARKER_SYMBOLS: Record<SymbolKey, readonly SymbolPrimitive[]> = {
       d: "M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z",
     },
     { kind: "circle", cx: 12, cy: 13, r: 3 },
+  ],
+  /** Pessoa: guarda-vidas em plantão no mapa de situação (ADR-026). */
+  LIFEGUARD: [
+    { kind: "circle", cx: 12, cy: 7.5, r: 3.2 },
+    { kind: "path", d: "M5.5 21c0-3.6 2.9-6.5 6.5-6.5s6.5 2.9 6.5 6.5" },
+  ],
+  /** Alerta: ocorrência ativa ou pendente de CIOSP. */
+  OCCURRENCE: [
+    { kind: "path", d: "M12 3 2.5 20.5h19L12 3z" },
+    { kind: "line", x1: 12, y1: 9, x2: 12, y2: 14 },
+    { kind: "circle", cx: 12, cy: 17.2, r: 0.9 },
   ],
 };

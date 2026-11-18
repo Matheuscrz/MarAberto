@@ -334,21 +334,34 @@ export function MapView({
     );
   }, [ready, beachArea, beachSectors]);
 
-  // Enquadramento na área/setor: efeito na instância do mapa, nunca CSS.
+  // Enquadramento na área/setor ou centralização em um ponto: efeito na
+  // instância do mapa, nunca CSS.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !focus) return;
 
-    const southWest: [number, number] = [focus.bbox[0], focus.bbox[1]];
-    const northEast: [number, number] = [focus.bbox[2], focus.bbox[3]];
+    if ("bbox" in focus) {
+      const southWest: [number, number] = [focus.bbox[0], focus.bbox[1]];
+      const northEast: [number, number] = [focus.bbox[2], focus.bbox[3]];
 
-    // `focus` só muda quando o usuário pede ("Ver no mapa"/seleção de setor),
-    // não a cada render. Enquadrar sempre: com o mapa aberto no Brasil inteiro
-    // todo bbox de praia já está "visível" e o pedido não pode virar no-op.
-    map.fitBounds([southWest, northEast], {
-      padding: 48,
-      maxZoom: 16,
+      // `focus` só muda quando o usuário pede ("Ver no mapa"/seleção de setor),
+      // não a cada render. Enquadrar sempre: com o mapa aberto no Brasil inteiro
+      // todo bbox de praia já está "visível" e o pedido não pode virar no-op.
+      map.fitBounds([southWest, northEast], {
+        padding: 48,
+        maxZoom: 16,
+        duration: 600,
+      });
+      return;
+    }
+
+    // Clique em pin/item da equipe: centraliza no objeto sem perder o contexto
+    // do entorno. `offset` sobe o ponto o bastante para a ficha não cobri-lo.
+    map.flyTo({
+      center: [focus.longitude, focus.latitude],
+      zoom: focus.zoom ?? Math.max(map.getZoom(), 14),
       duration: 600,
+      offset: [0, -80],
     });
   }, [focus, ready]);
 

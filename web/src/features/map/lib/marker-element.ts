@@ -9,6 +9,8 @@ const DEFAULT_PIN_COLORS: Record<MapMarkerKind, string> = {
   STATION_FIXED: "#1c6f8d",
   STATION_MOBILE: "#d6923f",
   SIGNAL: "#ef4444",
+  LIFEGUARD: "#0f766e",
+  OCCURRENCE: "#b91c1c",
 };
 
 function createSymbolSvg(key: SymbolKey): SVGSVGElement {
@@ -58,6 +60,10 @@ function symbolOf(kind: MapMarkerKind): SymbolKey {
       return "STATION_MOBILE";
     case "SIGNAL":
       return "SIGNAL";
+    case "LIFEGUARD":
+      return "LIFEGUARD";
+    case "OCCURRENCE":
+      return "OCCURRENCE";
   }
 }
 
@@ -70,6 +76,10 @@ function accessibleLabel(marker: MapMarker): string {
       return `Base móvel de guarda-vidas: ${label}`;
     case "SIGNAL":
       return `Sinalização com bandeira: ${label}`;
+    case "LIFEGUARD":
+      return `Guarda-vidas em plantão: ${label}`;
+    case "OCCURRENCE":
+      return `Ocorrência ativa: ${label}`;
   }
 }
 
