@@ -76,6 +76,9 @@ public class OccurrenceController {
             @RequestParam(required = false) OccurrenceStatus status,
             @Parameter(description = "Chamado do SOS que abriu a ocorrência")
             @RequestParam(required = false) UUID emergencyCallId,
+            @Parameter(description = "Só o que ainda pede ação: atendimento aberto/em curso "
+                    + "ou CIOSP pendente")
+            @RequestParam(required = false, defaultValue = "false") boolean active,
             @Parameter(description = "Horário do fato da última ocorrência da página anterior",
                     example = "2026-11-16T12:00:00Z")
             @RequestParam(required = false) String beforeOccurredAt,
@@ -88,6 +91,7 @@ public class OccurrenceController {
                 seesAllScopes(authentication),
                 status,
                 emergencyCallId,
+                active,
                 parseInstant(beforeOccurredAt),
                 parseNumber(beforeNumber),
                 limit);

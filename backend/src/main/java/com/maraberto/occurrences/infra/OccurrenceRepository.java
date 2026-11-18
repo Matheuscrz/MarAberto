@@ -182,6 +182,7 @@ public class OccurrenceRepository {
             boolean allScopes,
             OccurrenceStatus status,
             UUID emergencyCallId,
+            boolean activeOnly,
             Instant beforeOccurredAt,
             Long beforeNumber,
             int limit) {
@@ -192,6 +193,12 @@ public class OccurrenceRepository {
                 "SELECT " + VIEW_COLUMNS + FROM_SQL
                         + " WHERE " + SCOPE_SQL
                         + " AND (:status IS NULL OR o.status = :status)");
+        if (activeOnly) {
+            // O mapa de situação da coordenação só quer o que ainda pede ação:
+            // ficha aberta/em atendimento ou pendência de transcrição no CIOSP.
+            sql.append(" AND (o.status IN ('OPEN', 'IN_PROGRESS')"
+                    + " OR o.ciosp_status = 'PENDING')");
+        }
         if (emergencyCallId != null) {
             sql.append(" AND o.emergency_call_id = :emergencyCallId");
             params.addValue("emergencyCallId", emergencyCallId, Types.OTHER);

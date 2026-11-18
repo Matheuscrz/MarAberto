@@ -33,6 +33,16 @@ const PAGE_SIZE = 30;
 
 const EMPTY: readonly Occurrence[] = [];
 
+export interface UseOccurrencesOptions {
+  /**
+   * Só o que ainda pede ação (mapa de situação da coordenação): ficha aberta/em
+   * atendimento ou pendência de CIOSP. O filtro é do servidor.
+   */
+  readonly active?: boolean;
+  /** Tamanho da primeira página e das seguintes; o servidor limita a 100. */
+  readonly pageSize?: number;
+}
+
 /**
  * Ocorrências visíveis para o usuário logado.
  *
@@ -41,7 +51,11 @@ const EMPTY: readonly Occurrence[] = [];
  * aviso, em vez de sumir com as ocorrências do turno. A reconciliação periódica
  * recarrega a primeira página; páginas antigas só são buscadas sob demanda.
  */
-export function useOccurrences(): OccurrencesState {
+export function useOccurrences(
+  options: UseOccurrencesOptions = {},
+): OccurrencesState {
+  const active = options.active ?? false;
+  const pageSize = options.pageSize ?? PAGE_SIZE;
   const [occurrences, setOccurrences] =
     useState<readonly Occurrence[]>(EMPTY);
   const [status, setStatus] = useState<OccurrencesStatus>("loading");
@@ -68,7 +82,7 @@ export function useOccurrences(): OccurrencesState {
         return;
       }
       try {
-        const page = await fetchOccurrences({ limit: PAGE_SIZE });
+        const page = await fetchOccurrences({ limit: pageSize, active });
         if (cancelled) return;
         setOccurrences(page.items);
         setCursor(page.nextCursor);
@@ -101,7 +115,7 @@ export function useOccurrences(): OccurrencesState {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", onVisible);
     };
-  }, [attempt]);
+  }, [attempt, active, pageSize]);
 
   const reload = useCallback(() => {
     setStatus("loading");
@@ -115,7 +129,8 @@ export function useOccurrences(): OccurrencesState {
     const run = async () => {
       try {
         const page = await fetchOccurrences({
-          limit: PAGE_SIZE,
+          limit: pageSize,
+          active,
           beforeOccurredAt: cursor.occurredAt,
           beforeNumber: cursor.number,
         });
@@ -136,7 +151,7 @@ export function useOccurrences(): OccurrencesState {
       }
     };
     void run();
-  }, [cursor, loadingMore]);
+  }, [cursor, loadingMore, active, pageSize]);
 
   return {
     occurrences,

@@ -45,6 +45,7 @@ public class OccurrenceQueryService {
             boolean allScopes,
             OccurrenceStatus status,
             UUID emergencyCallId,
+            boolean activeOnly,
             Instant beforeOccurredAt,
             Long beforeNumber,
             int limit) {
@@ -55,7 +56,7 @@ public class OccurrenceQueryService {
         int size = clamp(limit);
         // Uma linha a mais decide `hasMore` sem uma segunda consulta de count.
         List<OccurrenceView> rows = occurrenceRepository.findAll(
-                userId, allScopes, status, emergencyCallId,
+                userId, allScopes, status, emergencyCallId, activeOnly,
                 beforeOccurredAt, beforeNumber, size + 1);
         boolean hasMore = rows.size() > size;
         List<OccurrenceView> items = hasMore

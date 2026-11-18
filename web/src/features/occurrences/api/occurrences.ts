@@ -13,6 +13,8 @@ export interface OccurrenceQuery {
   /** Tamanho da página; o servidor usa 20 quando omitido e limita a 100. */
   readonly limit?: number;
   readonly status?: OccurrenceStatus;
+  /** Só o que ainda pede ação: atendimento aberto/em curso ou CIOSP pendente. */
+  readonly active?: boolean;
   /** Localiza a ficha aberta pelo ack de um chamado do SOS. */
   readonly emergencyCallId?: string;
   readonly beforeOccurredAt?: string;
@@ -54,6 +56,7 @@ function queryString(query: OccurrenceQuery): string {
   const params = new URLSearchParams();
   params.set("limit", String(query.limit ?? 20));
   if (query.status) params.set("status", query.status);
+  if (query.active) params.set("active", "true");
   if (query.emergencyCallId) {
     params.set("emergencyCallId", query.emergencyCallId);
   }
