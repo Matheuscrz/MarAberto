@@ -1,12 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   fetchAdminStations,
+  fetchFieldStations,
   stationErrorMessage,
+  updateFieldStationStatus,
   updateStationStatus,
 } from "@/features/stations/api/stations";
 import type { AdminStation } from "@/features/stations/types";
 
 export type AdminStationsStatus = "loading" | "ready" | "error";
+
+/**
+ * Origem da lista de estruturas.
+ *
+ * <p>`admin` é a TI (`/api/v1/admin/stations`); `coordination` é a coordenação
+ * (`/api/v1/operations/stations`), que lê e ativa/desativa qualquer estrutura
+ * sem precisar do papel `ADMIN`.
+ */
+export type StationAdminSource = "admin" | "coordination";
+
+export interface AdminStationsOptions {
+  readonly source?: StationAdminSource;
+}
 
 export interface AdminStationsState {
   readonly stations: readonly AdminStation[];
@@ -27,13 +42,16 @@ export interface AdminStationsState {
 }
 
 /**
- * Cadastro de postos e bases no painel da TI.
+ * Cadastro de postos e bases no painel da TI ou na aba da coordenação.
  *
  * <p>A lista é do servidor, inclusive inativas: desativar só tira a estrutura do
  * mapa público e da lista de destinos do plantão — o histórico de plantões e
  * ocorrências continua apontando para a mesma linha.
  */
-export function useAdminStations(): AdminStationsState {
+export function useAdminStations(
+  options: AdminStationsOptions = {},
+): AdminStationsState {
+  const source = options.source ?? "admin";
   const [stations, setStations] = useState<readonly AdminStation[]>([]);
   const [status, setStatus] = useState<AdminStationsStatus>("loading");
   const [message, setMessage] = useState<string | null>(null);
@@ -46,7 +64,10 @@ export function useAdminStations(): AdminStationsState {
 
     void (async () => {
       try {
-        const loaded = await fetchAdminStations();
+        const loaded =
+          source === "coordination"
+            ? await fetchFieldStations()
+            : await fetchAdminStations();
         if (cancelled) return;
         setStations(loaded);
         setStatus("ready");
@@ -61,19 +82,27 @@ export function useAdminStations(): AdminStationsState {
     return () => {
       cancelled = true;
     };
-  }, [attempt]);
+  }, [attempt, source]);
 
   const setActive = useCallback(
     async (station: AdminStation, active: boolean, statusNote: string | null) => {
       setBusyId(station.id);
       setFeedback(null);
       try {
-        const updated = await updateStationStatus(
-          station.kind,
-          station.id,
-          active,
-          statusNote,
-        );
+        const updated =
+          source === "coordination"
+            ? await updateFieldStationStatus(
+                station.kind,
+                station.id,
+                active,
+                statusNote,
+              )
+            : await updateStationStatus(
+                station.kind,
+                station.id,
+                active,
+                statusNote,
+              );
         setStations((current) =>
           current.map((item) => (item.id === updated.id ? updated : item)),
         );
@@ -90,7 +119,7 @@ export function useAdminStations(): AdminStationsState {
         setBusyId(null);
       }
     },
-    [],
+    [source],
   );
 
   const applyUpdate = useCallback((updated: AdminStation) => {

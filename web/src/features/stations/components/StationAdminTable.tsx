@@ -5,6 +5,7 @@ import { PhotoGallery } from "@/shared/components/PhotoGallery";
 import { formatDateTime } from "@/shared/lib/format";
 import { sanitizeText } from "@/shared/lib/sanitize";
 import { useAdminStations } from "@/features/stations/hooks/use-admin-stations";
+import type { StationAdminSource } from "@/features/stations/hooks/use-admin-stations";
 import { StationPositionForm } from "@/features/stations/components/StationPositionForm";
 import {
   POSITION_SOURCE_LABEL,
@@ -18,7 +19,12 @@ import {
  * apaga o motivo, só limpa a data. Nada é excluído: plantões e ocorrências
  * continuam apontando para a mesma linha.
  */
-export function StationAdminTable() {
+export function StationAdminTable({
+  source = "admin",
+}: {
+  /** `admin` (TI) ou `coordination` (aba de postos da gestão). */
+  readonly source?: StationAdminSource;
+}) {
   const {
     stations,
     status,
@@ -29,7 +35,7 @@ export function StationAdminTable() {
     setActive,
     applyUpdate,
     dismissFeedback,
-  } = useAdminStations();
+  } = useAdminStations({ source });
   const [reason, setReason] = useState<{ id: string; note: string } | null>(null);
   const [repositionId, setRepositionId] = useState<string | null>(null);
 
