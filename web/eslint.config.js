@@ -11,7 +11,8 @@ import { defineConfig, globalIgnores } from 'eslint/config'
  * - `shared/` nunca importa de `app/` nem de `features/`.
  * - Uma feature importa de si mesma e de `shared/`; entre features só pelas
  *   arestas permitidas (`operator/management -> occurrences`, `admin -> stations`,
- *   qualquer feature -> auth). Toda outra composição fica em `app/`.
+ *   `management -> stations/map`, qualquer feature -> auth). Toda outra
+ *   composição fica em `app/`.
  */
 const FEATURES = [
   'map',
@@ -35,7 +36,7 @@ const ALLOWED_CROSS_FEATURE_IMPORTS = {
   // coordenação revisa ocorrências; a TI mantém postos/bases.
   operator: ['occurrences', 'stations', 'beaches', 'signals'],
   beaches: ['signals'],
-  management: ['occurrences', 'beaches', 'signals'],
+  management: ['occurrences', 'beaches', 'signals', 'stations', 'map'],
   admin: ['stations'],
 }
 

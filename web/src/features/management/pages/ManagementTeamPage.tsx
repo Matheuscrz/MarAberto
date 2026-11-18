@@ -1,119 +1,41 @@
-import { useMemo, useState } from "react";
 import {
   ClipboardList,
   ExternalLink,
   MapPin,
-  Power,
   Radio,
   Siren,
   UserCheck,
-  UserX,
 } from "lucide-react";
 import { PageHeader } from "@/shared/components/Card";
 import { formatAccuracy, formatDateTime } from "@/shared/lib/format";
-import type { TeamMember, TeamMemberStatus } from "@/features/management/types";
-
-const INITIAL_TEAM: readonly TeamMember[] = [
-  {
-    id: "team-1",
-    name: "Sgt. Silva",
-    badgeNumber: "BM-10492",
-    stationName: "Posto Principal",
-    beachName: "Praia Principal",
-    sector: "Setor Central",
-    shift: "08:00 às 17:00",
-    status: "ACTIVE",
-    onShiftSince: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
-    lastPosition: {
-      latitude: -10.98521,
-      longitude: -37.04512,
-      accuracyMeters: 12,
-      at: new Date(Date.now() - 4 * 60_000).toISOString(),
-    },
-    occurrencesToday: 3,
-    fieldAttendedToday: 2,
-    signalsToday: 1,
-    ciospPending: 1,
-    updatedAt: new Date(Date.now() - 42 * 60_000).toISOString(),
-  },
-  {
-    id: "team-2",
-    name: "Cb. Rocha",
-    badgeNumber: "BM-20871",
-    stationName: "Base Móvel Farol",
-    beachName: "Praia do Farol",
-    sector: "Orla Norte",
-    shift: "08:00 às 17:00",
-    status: "ACTIVE",
-    onShiftSince: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
-    lastPosition: {
-      latitude: -10.96512,
-      longitude: -37.03188,
-      accuracyMeters: 28,
-      at: new Date(Date.now() - 11 * 60_000).toISOString(),
-    },
-    occurrencesToday: 1,
-    fieldAttendedToday: 1,
-    signalsToday: 2,
-    ciospPending: 0,
-    updatedAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
-  },
-  {
-    id: "team-3",
-    name: "Sd. Almeida",
-    badgeNumber: "BM-30455",
-    stationName: "Posto das Conchas",
-    beachName: "Praia das Conchas",
-    shift: "12:00 às 21:00",
-    status: "INACTIVE",
-    occurrencesToday: 0,
-    fieldAttendedToday: 0,
-    signalsToday: 0,
-    ciospPending: 0,
-    updatedAt: new Date(Date.now() - 26 * 60 * 60_000).toISOString(),
-  },
-];
+import { sanitizeText } from "@/shared/lib/sanitize";
+import { useManagementTeam } from "@/features/management/hooks/use-management-team";
+import type { TeamMember } from "@/features/management/types";
 
 /**
  * Painel da coordenação (RF40/RN17): quem está de plantão, última posição
  * conhecida e o volume do dia (ocorrências, atendimentos em campo,
  * sinalizações e pendências no CIOSP). O cadastro é da TI — aqui não se cria
- * usuário. Estado local até `identity`/`shift_sessions` entrarem; a autorização
- * real é sempre do servidor.
+ * usuário nem se altera o turno.
+ *
+ * <p>A fonte é `GET /api/v1/management/team`, `no-store`, e a posição é a
+ * última conhecida do plantão: não há rastreamento contínuo nem histórico de
+ * trajeto. Plantão encerrado some da lista na leitura seguinte (15 s).
  */
 export function ManagementTeamPage() {
-  const [team, setTeam] = useState<readonly TeamMember[]>(INITIAL_TEAM);
+  const { team, status, message, reload } = useManagementTeam();
+  const members = team?.members ?? [];
 
-  const totals = useMemo(() => {
-    return team.reduce(
-      (acc, member) => {
-        if (member.status === "ACTIVE") acc.onShift += 1;
-        acc.occurrences += member.occurrencesToday;
-        acc.field += member.fieldAttendedToday;
-        acc.signals += member.signalsToday;
-        acc.ciosp += member.ciospPending;
-        return acc;
-      },
-      { onShift: 0, occurrences: 0, field: 0, signals: 0, ciosp: 0 },
-    );
-  }, [team]);
-
-  const toggleStatus = (memberId: string) => {
-    setTeam((previous) =>
-      previous.map((member) => {
-        if (member.id !== memberId) return member;
-        const status: TeamMemberStatus =
-          member.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
-        return {
-          ...member,
-          status,
-          onShiftSince:
-            status === "ACTIVE" ? new Date().toISOString() : undefined,
-          updatedAt: new Date().toISOString(),
-        };
-      }),
-    );
-  };
+  const totals = members.reduce(
+    (acc, member) => {
+      acc.occurrences += member.occurrencesToday;
+      acc.field += member.fieldAttendedToday;
+      acc.signals += member.signalsToday;
+      acc.ciosp += member.ciospPending;
+      return acc;
+    },
+    { occurrences: 0, field: 0, signals: 0, ciosp: 0 },
+  );
 
   return (
     <div>
@@ -123,9 +45,7 @@ export function ManagementTeamPage() {
         actions={
           <span className="inline-flex items-center gap-1.5 rounded-full border border-ocean-200 bg-white px-3 py-1 text-xs font-bold text-ocean-800">
             <UserCheck aria-hidden="true" className="size-3.5 text-emerald-600" />
-            {totals.onShift} em plantão
-            <span className="text-ocean-400">·</span>
-            {team.length - totals.onShift} fora
+            {members.length} em plantão
           </span>
         }
       />
@@ -152,149 +72,174 @@ export function ManagementTeamPage() {
         <SummaryTile
           icon={MapPin}
           label="Em plantão"
-          value={totals.onShift}
-          hint={`${team.length} no escopo`}
+          value={members.length}
+          hint="no escopo da coordenação"
         />
       </dl>
 
+      {status === "loading" && members.length === 0 ? (
+        <output className="block py-6 text-center text-sm font-semibold text-ocean-600">
+          Carregando a equipe
+        </output>
+      ) : null}
+
+      {message ? (
+        <div
+          role="alert"
+          className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-950"
+        >
+          <span>{sanitizeText(message, 200)}</span>
+          <button
+            type="button"
+            onClick={reload}
+            className="rounded-lg border border-amber-300 bg-white px-2 py-1 font-bold text-amber-950 hover:bg-amber-100"
+          >
+            Tentar de novo
+          </button>
+        </div>
+      ) : null}
+
+      {members.length === 0 && status === "ready" ? (
+        <div className="rounded-2xl border border-dashed border-ocean-300 bg-ocean-50/50 px-4 py-8 text-center">
+          <p className="text-sm font-bold text-ocean-950">
+            Nenhum plantão aberto agora
+          </p>
+          <p className="mt-1 text-xs text-ocean-700">
+            Quem abrir o console de campo aparece aqui na próxima leitura (até
+            15 s).
+          </p>
+        </div>
+      ) : null}
+
       <ul className="grid gap-2">
-        {team.map((member) => {
-          const isActive = member.status === "ACTIVE";
-          return (
-            <li
-              key={member.id}
-              className="rounded-2xl border border-ocean-900/10 bg-white p-3.5 shadow-sm"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <span
-                    aria-hidden="true"
-                    className={`grid size-9 place-items-center rounded-full text-xs font-black text-white ${
-                      isActive ? "bg-ocean-950" : "bg-ocean-300"
-                    }`}
-                  >
-                    {initialsOf(member.name)}
-                  </span>
-                  <div>
-                    <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-ocean-950">
-                      {member.name}
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
-                          isActive
-                            ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                            : "border-ocean-200 bg-ocean-50 text-ocean-600"
-                        }`}
-                      >
-                        {isActive ? "Em plantão" : "Fora"}
-                      </span>
-                    </p>
-                    <p className="text-[11px] text-ocean-600">
-                      {member.badgeNumber} · {member.shift}
-                    </p>
-                    <p className="flex items-center gap-1 text-[11px] text-ocean-500">
-                      <MapPin aria-hidden="true" className="size-3" />
-                      {member.stationName} · {member.beachName}
-                      {member.sector ? ` · ${member.sector}` : ""}
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => toggleStatus(member.id)}
-                  className={[
-                    "inline-flex min-h-9 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition",
-                    isActive
-                      ? "border border-coral-300 bg-coral-50 text-coral-900 hover:bg-coral-100"
-                      : "bg-ocean-950 text-white hover:bg-ocean-900",
-                  ].join(" ")}
-                >
-                  {isActive ? (
-                    <UserX aria-hidden="true" className="size-3.5" />
-                  ) : (
-                    <Power aria-hidden="true" className="size-3.5" />
-                  )}
-                  {isActive ? "Desativar" : "Ativar"}
-                </button>
-              </div>
-
-              <div className="mt-3 grid gap-2 rounded-xl border border-ocean-100 bg-ocean-50/60 p-2.5 sm:grid-cols-2">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-ocean-500">
-                    Última posição conhecida
-                  </p>
-                  {member.lastPosition ? (
-                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ocean-700">
-                      <span className="font-mono font-bold text-ocean-900">
-                        {member.lastPosition.latitude.toFixed(5)},{" "}
-                        {member.lastPosition.longitude.toFixed(5)}
-                      </span>
-                      <span>
-                        {formatDateTime(member.lastPosition.at)} ·{" "}
-                        {formatAccuracy(member.lastPosition.accuracyMeters)}
-                      </span>
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${member.lastPosition.latitude},${member.lastPosition.longitude}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-md border border-ocean-200 bg-white px-1.5 py-0.5 font-bold text-ocean-800 transition hover:bg-ocean-100"
-                      >
-                        <ExternalLink aria-hidden="true" className="size-3" />
-                        GPS
-                      </a>
-                    </div>
-                  ) : (
-                    <p className="mt-0.5 text-[11px] text-ocean-500">
-                      Sem posição no plantão atual.
-                    </p>
-                  )}
-                  {member.onShiftSince ? (
-                    <p className="mt-1 text-[10px] text-ocean-500">
-                      Plantão desde {formatDateTime(member.onShiftSince)}
-                    </p>
-                  ) : null}
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-ocean-500">
-                    Volume do dia
-                  </p>
-                  <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-bold">
-                    <Counter
-                      label="ocorrências"
-                      value={member.occurrencesToday}
-                      tone="border-ocean-200 bg-white text-ocean-900"
-                    />
-                    <Counter
-                      label="em campo"
-                      value={member.fieldAttendedToday}
-                      tone="border-emerald-200 bg-emerald-50 text-emerald-900"
-                    />
-                    <Counter
-                      label="sinalizações"
-                      value={member.signalsToday}
-                      tone="border-sand-300 bg-sand-100 text-ocean-950"
-                    />
-                    <Counter
-                      label="CIOSP"
-                      value={member.ciospPending}
-                      tone="border-amber-300 bg-amber-50 text-amber-900"
-                    />
-                  </div>
-                </div>
-              </div>
-            </li>
-          );
-        })}
+        {members.map((member) => (
+          <TeamMemberCard key={member.shiftId} member={member} />
+        ))}
       </ul>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ocean-500">
         A posição é a última conhecida durante o plantão e só aparece para a
-        coordenação do escopo; não há rastreamento contínuo nem histórico de
-        trajeto (RN17). Nenhuma alteração desta tela é enviada ao servidor
-        enquanto `identity`/`shift_sessions` não estiverem integrados.
+        coordenação em rota autenticada e `no-store`; não há rastreamento
+        contínuo nem histórico de trajeto (RN17). Posição mais velha que 30 min
+        aparece como "sem sinal".
       </p>
     </div>
+  );
+}
+
+function TeamMemberCard({ member }: { readonly member: TeamMember }) {
+  const position = member.lastPosition;
+  return (
+    <li className="rounded-2xl border border-ocean-900/10 bg-white p-3.5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            aria-hidden="true"
+            className={`grid size-9 place-items-center rounded-full text-xs font-black text-white ${
+              position && !position.stale ? "bg-ocean-950" : "bg-ocean-300"
+            }`}
+          >
+            {initialsOf(member.name)}
+          </span>
+          <div>
+            <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-ocean-950">
+              {sanitizeText(member.name, 80)}
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                  !position
+                    ? "border-ocean-200 bg-ocean-50 text-ocean-600"
+                    : position.stale
+                      ? "border-amber-300 bg-amber-50 text-amber-900"
+                      : "border-emerald-300 bg-emerald-50 text-emerald-900"
+                }`}
+              >
+                {!position
+                  ? "Sem GPS"
+                  : position.stale
+                    ? "Sem sinal"
+                    : "Em plantão"}
+              </span>
+            </p>
+            <p className="text-[11px] text-ocean-600">
+              {member.badgeNumber ?? "Sem matrícula"} · desde{" "}
+              {formatDateTime(member.onShiftSince)}
+            </p>
+            <p className="flex items-center gap-1 text-[11px] text-ocean-500">
+              <MapPin aria-hidden="true" className="size-3" />
+              {[member.stationName, member.beachName, member.sectorLabel]
+                .filter(Boolean)
+                .join(" · ") || "Sem estrutura vinculada"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 rounded-xl border border-ocean-100 bg-ocean-50/60 p-2.5 sm:grid-cols-2">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-ocean-500">
+            Última posição conhecida
+          </p>
+          {position ? (
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ocean-700">
+              <span className="font-mono font-bold text-ocean-900">
+                {position.latitude.toFixed(5)}, {position.longitude.toFixed(5)}
+              </span>
+              <span>
+                {formatDateTime(position.at ?? member.lastSeenAt)} ·{" "}
+                {formatAccuracy(position.accuracyMeters ?? undefined)}
+              </span>
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${position.latitude},${position.longitude}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-ocean-200 bg-white px-1.5 py-0.5 font-bold text-ocean-800 transition hover:bg-ocean-100"
+              >
+                <ExternalLink aria-hidden="true" className="size-3" />
+                GPS
+              </a>
+            </div>
+          ) : (
+            <p className="mt-0.5 text-[11px] text-ocean-500">
+              Sem posição no plantão atual.
+            </p>
+          )}
+          <p className="mt-1 text-[10px] text-ocean-500">
+            Último sinal de vida em {formatDateTime(member.lastSeenAt)}
+            {member.lastPosition?.stale
+              ? " · posição vencida, mostrada como sem sinal"
+              : ""}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-ocean-500">
+            Volume do dia
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] font-bold">
+            <Counter
+              label="ocorrências"
+              value={member.occurrencesToday}
+              tone="border-ocean-200 bg-white text-ocean-900"
+            />
+            <Counter
+              label="em campo"
+              value={member.fieldAttendedToday}
+              tone="border-emerald-200 bg-emerald-50 text-emerald-900"
+            />
+            <Counter
+              label="sinalizações"
+              value={member.signalsToday}
+              tone="border-sand-300 bg-sand-100 text-ocean-950"
+            />
+            <Counter
+              label="CIOSP"
+              value={member.ciospPending}
+              tone="border-amber-300 bg-amber-50 text-amber-900"
+            />
+          </div>
+        </div>
+      </div>
+    </li>
   );
 }
 
