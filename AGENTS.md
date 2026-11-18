@@ -21,11 +21,12 @@
 
 - **Operacional (`/operador`)**:
   - **SOS**: Listas (fila aberta e em atendimento) ordenadas **do mais recente para o mais antigo** (`created_at DESC` / `acknowledged_at DESC`) no backend e cliente. Permitir **encerrar atendimento na própria tela do SOS** via `SosCallCloser`.
-  - **Plantão e Bases Móveis (ADR-025)**: Bases móveis encerradas saem do seletor; abrir turno em base móvel exige criar nova base na posição atual e desativá-la ao encerrar o plantão. Lease renovado a cada 5 min (`PT15M` timeout).
+  - **Plantão e Bases Móveis (ADR-025)**: Bases móveis encerradas saem do seletor; abrir turno em base móvel exige criar nova base na posição atual e desativá-la ao encerrar o plantão. Lease renovado a cada 60 s (`PT15M` timeout), só com a aba visível.
   - **Ocorrências**: Paginação por cursor (`occurred_at DESC, number DESC`) e filtros; encerramento (`V20`) fecha o SOS na mesma transação.
 - **Coordenação (`/gestao`)**:
-  - **Home (Mapa de Situação - ADR-026)**: Mapa em tempo real (polling 60 s, ponto único sem histórico de trajeto) com camadas alternáveis (guarda-vidas em plantão, postos/bases ativos, sinalizações vigentes e ocorrências) e lista lateral sincronizada (`flyTo` + abertura da ficha). Se `beaches` estiver vazia, exibir convite para `/gestao/importar`.
-  - **Abas**: Importar mapa (`/gestao/importar`), Postos (`/gestao/postos`), CMS Aprender (`/gestao/aprender` — CRUD de vídeos YouTube e materiais de divulgação), Ocorrências e Triagem (`unmapped_signals`).
+  - **Home (Mapa de Situação - ADR-026)**: Mapa de tela cheia com camadas alternáveis **em memória** (`useState`, sem storage): guarda-vidas em plantão, postos/bases ativos, sinalizações vigentes e ocorrências ativas/CIOSP pendente. Todo pin e cada item da lista lateral são clicáveis (`flyTo` + ficha `StationSheet`/`SignalSheet`/`OccurrenceSheet`). Equipe consultada a cada 15 s; posição do plantão (ponto único, sem histórico) a cada 60 s. Se `beaches` estiver vazia, exibir convite para `/gestao/importar`.
+  - **Equipe (`/gestao/equipe`)**: dados reais de `GET /api/v1/management/team` (`COORDINATOR`/`ADMIN`, `Cache-Control: no-store`), com posição/`stale`, lease e contadores do dia. Encerrar o plantão remove o guarda-vidas da lista e do mapa.
+  - **Abas**: Importar mapa (`/gestao/importar`), Equipe, Postos (`/gestao/postos` — leitura e ativação/desativação de estruturas via `/api/v1/operations/stations`), CMS Aprender (`/gestao/aprender` — CRUD de vídeos YouTube e materiais de divulgação), Ocorrências e Triagem (`unmapped_signals`).
 - **Administração (`/admin`)**:
   - **Usuários (ADR-027)**: CRUD sem exclusão física, ativação/desativação e reset gerando **senha temporária** com troca obrigatória (`must_change_password = true`) no primeiro login.
   - **Logs e Auditoria**: Tela pesquisável (`traceId`, ator, ação, período) sobre `audit_log` append-only.
@@ -46,15 +47,14 @@
 - **Frontend/MapLibre**: Nunca aplicar `transform`, `scale` ou `transition` no elemento raiz do marcador MapLibre (usar elemento filho). Overlays acessíveis via `useOverlay` (`<dialog open>`, `<output>`).
 - **Git & Qualidade**: Commits em **pt-BR** (Conventional Commits); classes em inglês; **nunca commitar sem aval explícito**. Manter `./gradlew clean check`, `npm run lint` e `npm run build` verdes e zero issues críticas no SonarQube.
 
-## Backlog Ativo (Fatias 11–15)
+## Backlog Ativo (Fatias 12–15)
 
 | Fatia  | Escopo                                                                                                                                               | Migrations               |
 | :----- | :--------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------- |
-| **11** | Home da Coordenação como Mapa de Situação real-time (camadas + lista sincronizada `flyTo`) + aba de postos na gestão (ADR-026)                       | `V23` (se necessário)    |
-| **12** | Módulo `content` (CMS Aprender na gestão + tela `/aprender`) + atualização dinâmica de bandeiras/postos no mapa público                              | `V24`                    |
-| **13** | Gestão real de usuários (senha temporária obrigatória), blacklist JWT Redis, MFA (TOTP) e consulta de `audit_log` (ADR-027)                          | `V25`, `V26`             |
+| **12** | Módulo `content` (CMS Aprender na gestão + tela `/aprender`) + atualização dinâmica de bandeiras/postos no mapa público                              | `V23`                    |
+| **13** | Gestão real de usuários (senha temporária obrigatória), blacklist JWT Redis, MFA (TOTP) e consulta de `audit_log` (ADR-027)                          | `V24`, `V25`             |
 | **14** | Coleta anônima de amostras de ocupação no mapa público                                                                                               | —                        |
-| **15** | Revisão de dual write/idempotência, otimizações SQL, virtual threads, testes k6, SonarQube e docs (`backend/ARCHITECTURE.md`, `web/ARCHITECTURE.md`) | `V27`                    |
+| **15** | Revisão de dual write/idempotência, otimizações SQL, virtual threads, testes k6, SonarQube e docs (`backend/ARCHITECTURE.md`, `web/ARCHITECTURE.md`) | `V26`                    |
 
 ## Onde Consultar Detalhes
 
@@ -63,3 +63,4 @@
 - `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` — diagnóstico das fatias 10–13.
 - `docs/history/fatias-1-9-e-endurecimento.md` — histórico das Fatias 1 a 9 (migrações `V1`–`V20`).
 - `docs/history/fatias-10.md` — histórico da Fatia 10 (sem migration; `V22` segue livre).
+- `docs/history/fatias-11.md` — histórico da Fatia 11 (mapa de situação, equipe real e aba de postos; sem migration).

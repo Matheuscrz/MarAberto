@@ -122,10 +122,11 @@ Registro manual (`POST /occurrences`, `FIELD_ATTENDED`), busca por protocolo do 
 
 ## 2. Fatia 11 — painel de situação da coordenação
 
-**Branch:** `31-feature-painel-de-situacao-da-coordenacao`
+**Branch:** `64-feature-painel-de-situação-da-coordenação-mapa-operacional-em-camadas-e-aba-de-postos`
 **Migração:** nenhuma (posição já vive em `shift_sessions.last_position` /
 `last_position_at` / `last_position_accuracy_m`).
 **Decisão de privacidade:** ADR-026.
+**Status:** entregue em 2026-11-18 — ver `docs/history/fatias-11.md`.
 
 ### 2.1 Equipe com dados reais
 
