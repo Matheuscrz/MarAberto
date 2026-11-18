@@ -3,7 +3,7 @@
  *
  * <p>Não existe `watchPosition` nem persistência: cada chamada é uma leitura
  * sob demanda para o plantão ou para o cadastro de um ponto. Quem chama decide
- * quando repetir — o console do operador repete a cada 5 minutos com a aba
+ * quando repetir — o console do operador repete a cada 60 segundos com a aba
  * aberta para manter a última posição utilizável na seleção do SOS.
  */
 

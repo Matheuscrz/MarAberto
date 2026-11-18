@@ -58,7 +58,7 @@ interface ShiftPanelProps {
  * <p>Sem plantão aberto o PostGIS não escolhe o operador para nenhum chamado.
  * Ao abrir, a posição atual do aparelho é capturada (e pode ser corrigida na
  * mão); depois disso o console oferece atualização sob demanda e renova a
- * posição a cada 5 min enquanto a aba está aberta. Nada é guardado no
+ * posição a cada 60 s enquanto a aba está aberta. Nada é guardado no
  * navegador e não há rastreamento em segundo plano.
  */
 export function ShiftPanel({ onArmAlerts }: ShiftPanelProps) {

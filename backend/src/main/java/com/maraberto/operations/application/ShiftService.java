@@ -170,10 +170,10 @@ public class ShiftService {
     /**
      * Sinal de vida barato do plantão.
      *
-     * <p>O console envia a posição a cada 5 min; quando o GPS não está
+     * <p>O console envia a posição a cada 60 s; quando o GPS não está
      * disponível (ou não faz sentido reenviar), este batimento mantém o turno
      * aberto sem payload e sem consulta espacial. É o que separa 1 requisição
-     * minúscula a cada 5 min de um polling caro.
+     * minúscula por minuto de um polling caro.
      */
     @Transactional
     public Instant heartbeat(UUID userId) {
