@@ -112,7 +112,7 @@ export function OccurrenceSheet({
       open
       aria-modal="true"
       aria-labelledby="occurrence-sheet-title"
-      className="fixed inset-0 z-50 m-0 h-dvh max-h-none w-screen max-w-none overflow-y-auto bg-ocean-950/50 p-0 backdrop-blur-sm sm:flex sm:justify-center sm:p-6"
+      className="pointer-events-auto fixed inset-0 z-50 m-0 h-dvh max-h-none w-screen max-w-none overflow-y-auto bg-ocean-950/50 p-0 backdrop-blur-sm sm:flex sm:justify-center sm:p-6"
     >
       <div className="mx-auto min-h-dvh w-full bg-ocean-50 text-ocean-950 shadow-2xl sm:min-h-0 sm:max-w-2xl sm:rounded-2xl sm:border sm:border-ocean-900/10">
         <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-ocean-900/10 bg-ocean-50/95 px-4 py-3 backdrop-blur">
