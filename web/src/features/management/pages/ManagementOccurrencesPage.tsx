@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, ClipboardList, RefreshCw } from "lucide-react";
+import { CalendarDays, ChevronDown, ClipboardList, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/shared/components/Card";
 import {
   OccurrenceList,
@@ -10,15 +10,50 @@ import {
 
 type Filter = "ACTIVE" | "CLOSED" | "CIOSP";
 
+/** Converte `YYYY-MM-DD` do input em instante ISO-8601 (início do dia local). */
+function startOfDay(date: string): string | undefined {
+  if (!date) return undefined;
+  const parsed = new Date(`${date}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+/** Fim do dia local, exclusivo: o servidor compara com `occurred_at < to`. */
+function endOfDay(date: string): string | undefined {
+  if (!date) return undefined;
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  parsed.setDate(parsed.getDate() + 1);
+  return parsed.toISOString();
+}
+
 /**
  * Visão da coordenação sobre as ocorrências (ADR-013).
  *
  * <p>A coordenação vê todas as ocorrências e pode editar qualquer ficha para
  * completar o que só apareceu depois (vítima identificada, protocolo do
- * CIOSP). O recorte é aplicado pelo servidor; aqui ficam apenas os filtros de
- * leitura.
+ * CIOSP). O recorte é aplicado pelo servidor — situação e período viram
+ * parâmetros da consulta —, então o histórico grande é consultado por página
+ * em vez de baixar tudo para filtrar no navegador.
  */
 export function ManagementOccurrencesPage() {
+  const [filter, setFilter] = useState<Filter>("ACTIVE");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [selectedOccurrenceId, setSelectedOccurrenceId] = useState<
+    string | null
+  >(null);
+
+  const query = useMemo(
+    () => ({
+      active: filter === "ACTIVE",
+      closed: filter === "CLOSED",
+      ciospPending: filter === "CIOSP",
+      from: startOfDay(from),
+      to: endOfDay(to),
+    }),
+    [filter, from, to],
+  );
+
   const {
     occurrences,
     status,
@@ -27,12 +62,10 @@ export function ManagementOccurrencesPage() {
     loadingMore,
     loadMore,
     reload,
-  } = useOccurrences();
-  const [filter, setFilter] = useState<Filter>("ACTIVE");
-  const [selectedOccurrenceId, setSelectedOccurrenceId] = useState<
-    string | null
-  >(null);
+  } = useOccurrences(query);
 
+  // Contagem da página já carregada: os totais por situação são do servidor e
+  // mudam com o filtro, por isso aparecem como "nesta tela" e não como total.
   const counts = useMemo(() => {
     return occurrences.reduce(
       (acc, occurrence) => {
@@ -45,14 +78,12 @@ export function ManagementOccurrencesPage() {
     );
   }, [occurrences]);
 
-  const shown = useMemo(() => {
-    if (filter === "ACTIVE") return occurrences.filter(isActiveOccurrence);
-    if (filter === "CLOSED")
-      return occurrences.filter((occurrence) => !isActiveOccurrence(occurrence));
-    return occurrences.filter(
-      (occurrence) => occurrence.ciospStatus === "PENDING",
-    );
-  }, [occurrences, filter]);
+  const periodLabel =
+    from || to
+      ? `Período: ${from ? formatDate(from) : "início"} até ${
+          to ? formatDate(to) : "hoje"
+        }`
+      : "Todo o histórico";
 
   return (
     <div>
@@ -72,32 +103,79 @@ export function ManagementOccurrencesPage() {
       />
 
       <dl className="mb-4 grid grid-cols-3 gap-2">
-        <SummaryTile label="Ocorrências" value={counts.total} />
+        <SummaryTile label="Nesta tela" value={counts.total} />
         <SummaryTile label="Em atendimento" value={counts.inProgress} />
         <SummaryTile label="CIOSP pendente" value={counts.ciosp} />
       </dl>
 
-      <div
-        role="tablist"
-        aria-label="Filtro das ocorrências"
-        className="mb-3 inline-flex flex-wrap rounded-xl border border-ocean-200 bg-white p-1"
-      >
-        <FilterButton
-          active={filter === "ACTIVE"}
-          onClick={() => setFilter("ACTIVE")}
-          label={`Em atendimento (${counts.inProgress})`}
-        />
-        <FilterButton
-          active={filter === "CLOSED"}
-          onClick={() => setFilter("CLOSED")}
-          label={`Encerradas (${counts.total - counts.inProgress})`}
-        />
-        <FilterButton
-          active={filter === "CIOSP"}
-          onClick={() => setFilter("CIOSP")}
-          label={`CIOSP pendente (${counts.ciosp})`}
-        />
+      <div className="mb-3 grid gap-2 rounded-xl border border-ocean-200 bg-white p-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+        <div
+          role="tablist"
+          aria-label="Filtro das ocorrências"
+          className="inline-flex flex-wrap rounded-xl border border-ocean-200 bg-white p-1"
+        >
+          <FilterButton
+            active={filter === "ACTIVE"}
+            onClick={() => setFilter("ACTIVE")}
+            label="Em atendimento"
+          />
+          <FilterButton
+            active={filter === "CLOSED"}
+            onClick={() => setFilter("CLOSED")}
+            label="Encerradas"
+          />
+          <FilterButton
+            active={filter === "CIOSP"}
+            onClick={() => setFilter("CIOSP")}
+            label="CIOSP pendente"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="grid gap-1 text-[11px] font-bold text-ocean-700">
+            De
+            <input
+              type="date"
+              value={from}
+              max={to || undefined}
+              onChange={(event) => setFrom(event.target.value)}
+              className="min-h-9 rounded-xl border border-ocean-200 bg-white px-2 text-xs font-medium text-ocean-950"
+            />
+          </label>
+          <label className="grid gap-1 text-[11px] font-bold text-ocean-700">
+            Até
+            <input
+              type="date"
+              value={to}
+              min={from || undefined}
+              onChange={(event) => setTo(event.target.value)}
+              className="min-h-9 rounded-xl border border-ocean-200 bg-white px-2 text-xs font-medium text-ocean-950"
+            />
+          </label>
+          {from || to ? (
+            <button
+              type="button"
+              onClick={() => {
+                setFrom("");
+                setTo("");
+              }}
+              className="min-h-9 rounded-xl border border-ocean-300 bg-white px-3 text-xs font-bold text-ocean-800 hover:bg-ocean-50"
+            >
+              Limpar período
+            </button>
+          ) : null}
+          {!from && !to ? (
+            <p className="flex items-center gap-1 pb-2 text-[11px] text-ocean-500">
+              <CalendarDays aria-hidden="true" className="size-3.5" />
+              Sem período definido: a lista abre pelas mais recentes.
+            </p>
+          ) : null}
+        </div>
       </div>
+
+      <p className="mb-2 text-[11px] font-semibold text-ocean-600">
+        {periodLabel} · {FILTER_HINT[filter]}
+      </p>
 
       {message ? (
         <output className="mb-2 block rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
@@ -112,15 +190,9 @@ export function ManagementOccurrencesPage() {
       ) : (
         <>
           <OccurrenceList
-            occurrences={shown}
+            occurrences={occurrences}
             onSelect={(occurrence) => setSelectedOccurrenceId(occurrence.id)}
-            emptyMessage={
-              filter === "ACTIVE"
-                ? "Nenhum atendimento em curso no momento."
-                : filter === "CLOSED"
-                  ? "Nenhuma ocorrência encerrada no período."
-                  : "Nenhuma pendência de CIOSP no período."
-            }
+            emptyMessage={EMPTY_MESSAGE[filter]}
           />
           {hasMore ? (
             <div className="mt-3 text-center">
@@ -158,6 +230,25 @@ export function ManagementOccurrencesPage() {
       </p>
     </div>
   );
+}
+
+const FILTER_HINT: Record<Filter, string> = {
+  ACTIVE: "atendimentos abertos ou em curso e pendências de CIOSP.",
+  CLOSED: "só atendimentos encerrados, com desfecho.",
+  CIOSP: "só o que ainda falta transcrever para o CIOSP.",
+};
+
+const EMPTY_MESSAGE: Record<Filter, string> = {
+  ACTIVE: "Nenhum atendimento em curso ou pendência de CIOSP no período.",
+  CLOSED: "Nenhuma ocorrência encerrada no período.",
+  CIOSP: "Nenhuma pendência de CIOSP no período.",
+};
+
+/** `YYYY-MM-DD` para exibição `dd/mm/aaaa`, sem depender do fuso do horário. */
+function formatDate(date: string): string {
+  const [year, month, day] = date.split("-");
+  if (!year || !month || !day) return date;
+  return `${day}/${month}/${year}`;
 }
 
 function FilterButton({

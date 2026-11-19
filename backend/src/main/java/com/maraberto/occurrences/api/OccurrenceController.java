@@ -56,7 +56,9 @@ public class OccurrenceController {
             summary = "Listar ocorrências",
             description = "Guarda-vidas vê as ocorrências que ele mesmo atendeu; coordenação e TI "
                     + "veem todas. Ordenadas da mais recente para a mais antiga, pelo horário do "
-                    + "fato, com paginação por cursor. Envie `nextCursor.occurredAt` em "
+                    + "fato, com paginação por cursor. Filtre por `status`, `active`, "
+                    + "`ciospPending` e pelo período `from`/`to` (ISO-8601) para consultar o "
+                    + "histórico sem carregar tudo. Envie `nextCursor.occurredAt` em "
                     + "`beforeOccurredAt` e `nextCursor.number` em `beforeNumber` para a próxima "
                     + "página; o cursor é estável mesmo quando uma ocorrência é encerrada entre "
                     + "duas páginas. `emergencyCallId` localiza a ficha aberta pelo ack de um "
@@ -79,6 +81,16 @@ public class OccurrenceController {
             @Parameter(description = "Só o que ainda pede ação: atendimento aberto/em curso "
                     + "ou CIOSP pendente")
             @RequestParam(required = false, defaultValue = "false") boolean active,
+            @Parameter(description = "Só as encerradas (inclui desfecho, cancelamento e falso alarme)")
+            @RequestParam(required = false, defaultValue = "false") boolean closed,
+            @Parameter(description = "Só o que ainda falta transcrever no CIOSP")
+            @RequestParam(required = false, defaultValue = "false") boolean ciospPending,
+            @Parameter(description = "Início do período do fato (ISO-8601, inclusive)",
+                    example = "2026-11-01T00:00:00Z")
+            @RequestParam(required = false) String from,
+            @Parameter(description = "Fim do período do fato (ISO-8601, exclusivo)",
+                    example = "2026-12-01T00:00:00Z")
+            @RequestParam(required = false) String to,
             @Parameter(description = "Horário do fato da última ocorrência da página anterior",
                     example = "2026-11-16T12:00:00Z")
             @RequestParam(required = false) String beforeOccurredAt,
@@ -92,7 +104,11 @@ public class OccurrenceController {
                 status,
                 emergencyCallId,
                 active,
-                parseInstant(beforeOccurredAt),
+                closed,
+                ciospPending,
+                parseInstant(from, "from"),
+                parseInstant(to, "to"),
+                parseInstant(beforeOccurredAt, "beforeOccurredAt"),
                 parseNumber(beforeNumber),
                 limit);
     }
@@ -194,7 +210,7 @@ public class OccurrenceController {
      * Cursor como texto para que um valor inválido vire 400 com tipo estável,
      * em vez de um erro genérico de conversão do Spring.
      */
-    private static Instant parseInstant(String value) {
+    private static Instant parseInstant(String value, String parameter) {
         if (value == null || value.isBlank()) {
             return null;
         }
@@ -202,7 +218,7 @@ public class OccurrenceController {
             return Instant.parse(value);
         } catch (DateTimeParseException exception) {
             throw new IllegalArgumentException(
-                    "beforeOccurredAt deve ser um instante ISO-8601, por exemplo "
+                    parameter + " deve ser um instante ISO-8601, por exemplo "
                             + "2026-11-16T12:00:00Z.");
         }
     }

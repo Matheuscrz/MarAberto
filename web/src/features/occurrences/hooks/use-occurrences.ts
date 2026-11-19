@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchOccurrences,
   occurrenceErrorMessage,
@@ -39,6 +39,14 @@ export interface UseOccurrencesOptions {
    * atendimento ou pendência de CIOSP. O filtro é do servidor.
    */
   readonly active?: boolean;
+  /** Só as encerradas (desfecho, cancelamento ou falso alarme). */
+  readonly closed?: boolean;
+  /** Só o que ainda falta transcrever no CIOSP. */
+  readonly ciospPending?: boolean;
+  /** Início do período do fato (ISO-8601, inclusive). */
+  readonly from?: string;
+  /** Fim do período do fato (ISO-8601, exclusivo). */
+  readonly to?: string;
   /** Tamanho da primeira página e das seguintes; o servidor limita a 100. */
   readonly pageSize?: number;
 }
@@ -55,6 +63,10 @@ export function useOccurrences(
   options: UseOccurrencesOptions = {},
 ): OccurrencesState {
   const active = options.active ?? false;
+  const closed = options.closed ?? false;
+  const ciospPending = options.ciospPending ?? false;
+  const from = options.from;
+  const to = options.to;
   const pageSize = options.pageSize ?? PAGE_SIZE;
   const [occurrences, setOccurrences] =
     useState<readonly Occurrence[]>(EMPTY);
@@ -64,10 +76,13 @@ export function useOccurrences(
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // O polling recarrega só a primeira página; as antigas já carregadas ficam.
+  const paged = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     let timer = 0;
+    paged.current = false;
 
     const schedule = () => {
       timer = window.setTimeout(() => {
@@ -82,11 +97,29 @@ export function useOccurrences(
         return;
       }
       try {
-        const page = await fetchOccurrences({ limit: pageSize, active });
+        const page = await fetchOccurrences({
+          limit: pageSize,
+          active,
+          closed,
+          ciospPending,
+          from,
+          to,
+        });
         if (cancelled) return;
-        setOccurrences(page.items);
-        setCursor(page.nextCursor);
-        setHasMore(page.hasMore);
+        if (paged.current) {
+          // Mantém as páginas antigas: o cursor do servidor não pode voltar.
+          setOccurrences((current) => {
+            const fresh = new Set(page.items.map((occurrence) => occurrence.id));
+            return [
+              ...page.items,
+              ...current.filter((occurrence) => !fresh.has(occurrence.id)),
+            ];
+          });
+        } else {
+          setOccurrences(page.items);
+          setCursor(page.nextCursor);
+          setHasMore(page.hasMore);
+        }
         setStatus("ready");
         setMessage(null);
       } catch (error) {
@@ -115,7 +148,7 @@ export function useOccurrences(
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", onVisible);
     };
-  }, [attempt, active, pageSize]);
+  }, [attempt, active, closed, ciospPending, from, pageSize, to]);
 
   const reload = useCallback(() => {
     setStatus("loading");
@@ -131,6 +164,10 @@ export function useOccurrences(
         const page = await fetchOccurrences({
           limit: pageSize,
           active,
+          closed,
+          ciospPending,
+          from,
+          to,
           beforeOccurredAt: cursor.occurredAt,
           beforeNumber: cursor.number,
         });
@@ -143,6 +180,7 @@ export function useOccurrences(
         });
         setCursor(page.nextCursor);
         setHasMore(page.hasMore);
+        paged.current = true;
         setMessage(null);
       } catch (error) {
         setMessage(occurrenceErrorMessage(error));
@@ -151,7 +189,7 @@ export function useOccurrences(
       }
     };
     void run();
-  }, [cursor, loadingMore, active, pageSize]);
+  }, [cursor, loadingMore, active, closed, ciospPending, from, to, pageSize]);
 
   return {
     occurrences,

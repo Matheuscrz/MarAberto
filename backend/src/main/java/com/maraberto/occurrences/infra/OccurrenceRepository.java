@@ -183,6 +183,10 @@ public class OccurrenceRepository {
             OccurrenceStatus status,
             UUID emergencyCallId,
             boolean activeOnly,
+            boolean closedOnly,
+            boolean ciospPending,
+            Instant from,
+            Instant to,
             Instant beforeOccurredAt,
             Long beforeNumber,
             int limit) {
@@ -198,6 +202,22 @@ public class OccurrenceRepository {
             // ficha aberta/em atendimento ou pendência de transcrição no CIOSP.
             sql.append(" AND (o.status IN ('OPEN', 'IN_PROGRESS')"
                     + " OR o.ciosp_status = 'PENDING')");
+        }
+        if (ciospPending) {
+            // Histórico do CIOSP: só o que ainda não foi transcrito.
+            sql.append(" AND o.ciosp_status = 'PENDING'");
+        }
+        if (closedOnly) {
+            // "Encerradas" inclui desfecho normal, cancelamento e falso alarme.
+            sql.append(" AND o.status NOT IN ('OPEN', 'IN_PROGRESS')");
+        }
+        if (from != null) {
+            sql.append(" AND o.occurred_at >= :from");
+            params.addValue("from", OffsetDateTime.ofInstant(from, ZoneOffset.UTC));
+        }
+        if (to != null) {
+            sql.append(" AND o.occurred_at < :to");
+            params.addValue("to", OffsetDateTime.ofInstant(to, ZoneOffset.UTC));
         }
         if (emergencyCallId != null) {
             sql.append(" AND o.emergency_call_id = :emergencyCallId");

@@ -46,6 +46,10 @@ public class OccurrenceQueryService {
             OccurrenceStatus status,
             UUID emergencyCallId,
             boolean activeOnly,
+            boolean closedOnly,
+            boolean ciospPending,
+            Instant from,
+            Instant to,
             Instant beforeOccurredAt,
             Long beforeNumber,
             int limit) {
@@ -53,11 +57,15 @@ public class OccurrenceQueryService {
             throw new IllegalArgumentException(
                     "Informe beforeOccurredAt e beforeNumber juntos para paginar.");
         }
+        if (from != null && to != null && !from.isBefore(to)) {
+            throw new IllegalArgumentException(
+                    "`from` precisa ser anterior a `to` no filtro por período.");
+        }
         int size = clamp(limit);
         // Uma linha a mais decide `hasMore` sem uma segunda consulta de count.
         List<OccurrenceView> rows = occurrenceRepository.findAll(
-                userId, allScopes, status, emergencyCallId, activeOnly,
-                beforeOccurredAt, beforeNumber, size + 1);
+                userId, allScopes, status, emergencyCallId, activeOnly, closedOnly,
+                ciospPending, from, to, beforeOccurredAt, beforeNumber, size + 1);
         boolean hasMore = rows.size() > size;
         List<OccurrenceView> items = hasMore
                 ? List.copyOf(rows.subList(0, size))

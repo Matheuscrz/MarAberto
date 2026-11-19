@@ -15,6 +15,14 @@ export interface OccurrenceQuery {
   readonly status?: OccurrenceStatus;
   /** Só o que ainda pede ação: atendimento aberto/em curso ou CIOSP pendente. */
   readonly active?: boolean;
+  /** Só as encerradas (desfecho, cancelamento ou falso alarme). */
+  readonly closed?: boolean;
+  /** Só o que ainda falta transcrever no CIOSP. */
+  readonly ciospPending?: boolean;
+  /** Início do período do fato (ISO-8601, inclusive). */
+  readonly from?: string;
+  /** Fim do período do fato (ISO-8601, exclusivo). */
+  readonly to?: string;
   /** Localiza a ficha aberta pelo ack de um chamado do SOS. */
   readonly emergencyCallId?: string;
   readonly beforeOccurredAt?: string;
@@ -57,6 +65,10 @@ function queryString(query: OccurrenceQuery): string {
   params.set("limit", String(query.limit ?? 20));
   if (query.status) params.set("status", query.status);
   if (query.active) params.set("active", "true");
+  if (query.closed) params.set("closed", "true");
+  if (query.ciospPending) params.set("ciospPending", "true");
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
   if (query.emergencyCallId) {
     params.set("emergencyCallId", query.emergencyCallId);
   }
