@@ -24,6 +24,9 @@ interface FieldStationListProps {
   readonly locating: boolean;
   readonly locationError: string | null;
   readonly onLocate: () => void;
+  /** Texto do estado vazio; muda com o filtro de estado escolhido. */
+  readonly emptyTitle?: string;
+  readonly emptyHint?: string;
 }
 
 /**
@@ -42,6 +45,8 @@ export function FieldStationList({
   locating,
   locationError,
   onLocate,
+  emptyTitle = "Nenhum posto ou base cadastrado",
+  emptyHint = "Cadastre a estrutura na posição em que você está.",
 }: FieldStationListProps) {
   const ordered = [...stations].sort((first, second) => {
     if (first.active !== second.active) {
@@ -98,10 +103,10 @@ export function FieldStationList({
       {ordered.length === 0 ? (
         <Card className="border-dashed bg-ocean-50/40 text-center">
           <p className="text-sm font-bold text-ocean-950">
-            Nenhum posto ou base cadastrado
+            {emptyTitle}
           </p>
           <p className="mt-1 text-xs text-ocean-700">
-            Cadastre a estrutura na posição em que você está.
+            {emptyHint}
           </p>
         </Card>
       ) : (

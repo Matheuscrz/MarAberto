@@ -48,6 +48,25 @@ export interface AdminStation {
   readonly photoUrls: readonly string[];
 }
 
+/** Página de estruturas (`GET /api/v1/operations/stations|admin/stations`). */
+export interface StationPage {
+  readonly items: readonly AdminStation[];
+  /** Cursor opaco da próxima página; `null` na última. */
+  readonly nextCursor: string | null;
+  readonly hasMore: boolean;
+  /** Total que atende ao filtro, independente da página carregada. */
+  readonly total: number;
+}
+
+/** Filtros e cursor da lista de estruturas. */
+export interface StationListQuery {
+  readonly active?: boolean;
+  readonly kind?: StationKind;
+  readonly q?: string;
+  readonly limit?: number;
+  readonly cursor?: string;
+}
+
 /** Cadastro de posto/base na posição atual (RF11). */
 export interface CreateStationInput {
   readonly kind: StationKind;

@@ -4,6 +4,8 @@ import com.maraberto.media.api.MediaCatalog;
 import com.maraberto.operations.api.CreateStationRequest;
 import com.maraberto.operations.api.PublicStation;
 import com.maraberto.operations.api.StationAdminView;
+import com.maraberto.operations.api.StationCursor;
+import com.maraberto.operations.api.StationPage;
 import com.maraberto.operations.api.StationPositionRequest;
 import com.maraberto.operations.domain.StationKind;
 import com.maraberto.operations.domain.StationNotFoundException;
@@ -11,6 +13,7 @@ import com.maraberto.operations.domain.StationOutsideShiftException;
 import com.maraberto.operations.domain.StationPositionSource;
 import com.maraberto.operations.infra.PublicOperationsRepository;
 import java.math.BigDecimal;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -40,6 +43,11 @@ public class StationService {
     /** Teto de fotos por estrutura, o mesmo da sinalização. */
     private static final int MAX_PHOTOS = 3;
 
+    /** Página padrão/teto da lista de estruturas e tamanho do termo de busca. */
+    private static final int DEFAULT_PAGE_SIZE = 50;
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final int MAX_QUERY_LENGTH = 120;
+
     private final PublicOperationsRepository publicRepository;
     private final MediaCatalog mediaCatalog;
     private final NamedParameterJdbcTemplate jdbc;
@@ -64,54 +72,18 @@ public class StationService {
         return findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
     }
 
+    /**
+     * Lista paginada do painel da TI, com filtros de estado, tipo e nome.
+     *
+     * <p>A página é do servidor: o cliente escolhe "só ativos" (o padrão da
+     * coordenação), um tipo e um termo de busca, e avança pelo cursor estável
+     * de {@code (kind, name, id)}. O total considera o filtro, não a página,
+     * para a tela mostrar quantos registros existem sem carregar tudo.
+     */
     @Transactional(readOnly = true)
-    public List<StationAdminView> adminStations() {
-        return jdbc.query("""
-                        SELECT p.id,
-                               'FIXED' AS kind,
-                               p.name,
-                               p.beach_id,
-                               b.name AS beach_name,
-                               ST_Y(p.location::geometry) AS latitude,
-                               ST_X(p.location::geometry) AS longitude,
-                               p.position_source,
-                               p.position_accuracy_m,
-                               p.position_updated_at,
-                               p.active,
-                               p.deactivated_at,
-                               p.status_note,
-                               ARRAY(
-                                   SELECT '/api/v1/media/' || pm.media_id
-                                     FROM lifeguard_post_media pm
-                                    WHERE pm.post_id = p.id
-                                    ORDER BY pm.display_order, pm.media_id
-                               ) AS photo_urls
-                          FROM lifeguard_posts p
-                          JOIN beaches b ON b.id = p.beach_id
-                        UNION ALL
-                        SELECT m.id,
-                               'MOBILE' AS kind,
-                               m.name,
-                               NULL::uuid AS beach_id,
-                               NULL::text AS beach_name,
-                               ST_Y(m.location::geometry) AS latitude,
-                               ST_X(m.location::geometry) AS longitude,
-                               m.position_source,
-                               m.position_accuracy_m,
-                               m.position_updated_at,
-                               m.active,
-                               m.deactivated_at,
-                               m.status_note,
-                               ARRAY(
-                                   SELECT '/api/v1/media/' || mm.media_id
-                                     FROM mobile_base_media mm
-                                    WHERE mm.base_id = m.id
-                                    ORDER BY mm.display_order, mm.media_id
-                               ) AS photo_urls
-                          FROM mobile_bases m
-                         ORDER BY kind, name
-                        """,
-                (rs, rowNum) -> adminView(rs));
+    public StationPage adminStations(
+            Boolean active, StationKind kind, String query, int limit, String cursor) {
+        return listStations(active, kind, query, limit, cursor);
     }
 
     /**
@@ -123,8 +95,103 @@ public class StationService {
      * continua restrita à estrutura do próprio plantão (ADR-024).
      */
     @Transactional(readOnly = true)
-    public List<StationAdminView> fieldStations() {
-        return adminStations();
+    public StationPage fieldStations(
+            Boolean active, StationKind kind, String query, int limit, String cursor) {
+        return listStations(active, kind, query, limit, cursor);
+    }
+
+    private StationPage listStations(
+            Boolean active, StationKind kind, String query, int limit, String cursor) {
+        int size = clampLimit(limit);
+        String term = normalizedQuery(query);
+        StationCursor after = StationCursor.decode(cursor);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("active", active, Types.BOOLEAN)
+                .addValue("kind", kind == null ? null : kind.name(), Types.VARCHAR)
+                .addValue("q", term == null ? null : "%" + term + "%", Types.VARCHAR)
+                .addValue("limit", size + 1);
+        StringBuilder sql = new StringBuilder("""
+                        SELECT id,
+                               kind,
+                               name,
+                               beach_id,
+                               beach_name,
+                               ST_Y(location::geometry) AS latitude,
+                               ST_X(location::geometry) AS longitude,
+                               position_source,
+                               position_accuracy_m,
+                               position_updated_at,
+                               active,
+                               deactivated_at,
+                               status_note,
+                               photo_urls
+                          FROM station_catalog
+                         WHERE (:active IS NULL OR active = :active)
+                           AND (:kind IS NULL OR kind = :kind)
+                           AND (:q IS NULL OR name ILIKE :q)
+                        """);
+        if (after != null) {
+            // Keyset explícito (e não comparação de linha) para o driver
+            // inferir o tipo de cada parâmetro sem depender de cast implícito.
+            sql.append("""
+                             AND (kind > :afterKind
+                                  OR (kind = :afterKind AND name > :afterName)
+                                  OR (kind = :afterKind AND name = :afterName AND id > :afterId))
+                            """);
+            params.addValue("afterKind", after.kind().name());
+            params.addValue("afterName", after.name());
+            params.addValue("afterId", after.id(), Types.OTHER);
+        }
+        sql.append(" ORDER BY kind, name, id LIMIT :limit");
+
+        List<StationAdminView> rows = jdbc.query(
+                sql.toString(), params, (rs, rowNum) -> adminView(rs));
+        boolean hasMore = rows.size() > size;
+        List<StationAdminView> items = hasMore
+                ? List.copyOf(rows.subList(0, size))
+                : List.copyOf(rows);
+        String nextCursor = null;
+        if (hasMore && !items.isEmpty()) {
+            StationAdminView last = items.getLast();
+            nextCursor = new StationCursor(last.kind(), last.name(), last.id()).encode();
+        }
+        return new StationPage(items, nextCursor, hasMore, countStations(active, kind, term));
+    }
+
+    private long countStations(Boolean active, StationKind kind, String term) {
+        Long total = jdbc.queryForObject("""
+                        SELECT COUNT(*)
+                          FROM station_catalog
+                         WHERE (:active IS NULL OR active = :active)
+                           AND (:kind IS NULL OR kind = :kind)
+                           AND (:q IS NULL OR name ILIKE :q)
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("active", active, Types.BOOLEAN)
+                        .addValue("kind", kind == null ? null : kind.name(), Types.VARCHAR)
+                        .addValue("q", term == null ? null : "%" + term + "%", Types.VARCHAR),
+                Long.class);
+        return total == null ? 0 : total;
+    }
+
+    private static int clampLimit(int limit) {
+        if (limit <= 0) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(limit, MAX_PAGE_SIZE);
+    }
+
+    private static String normalizedQuery(String query) {
+        if (query == null) {
+            return null;
+        }
+        String trimmed = query.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        return trimmed.length() > MAX_QUERY_LENGTH
+                ? trimmed.substring(0, MAX_QUERY_LENGTH)
+                : trimmed;
     }
 
     /**
@@ -307,56 +374,28 @@ public class StationService {
     }
 
     private java.util.Optional<StationAdminView> findAdmin(StationKind kind, UUID id) {
-        String sql = kind == StationKind.FIXED
-                ? """
-                  SELECT p.id,
-                         'FIXED' AS kind,
-                         p.name,
-                         p.beach_id,
-                         b.name AS beach_name,
-                         ST_Y(p.location::geometry) AS latitude,
-                         ST_X(p.location::geometry) AS longitude,
-                         p.position_source,
-                         p.position_accuracy_m,
-                         p.position_updated_at,
-                         p.active,
-                         p.deactivated_at,
-                         p.status_note,
-                         ARRAY(
-                             SELECT '/api/v1/media/' || pm.media_id
-                               FROM lifeguard_post_media pm
-                              WHERE pm.post_id = p.id
-                              ORDER BY pm.display_order, pm.media_id
-                         ) AS photo_urls
-                    FROM lifeguard_posts p
-                    JOIN beaches b ON b.id = p.beach_id
-                   WHERE p.id = :id
-                  """
-                : """
-                  SELECT m.id,
-                         'MOBILE' AS kind,
-                         m.name,
-                         NULL::uuid AS beach_id,
-                         NULL::text AS beach_name,
-                         ST_Y(m.location::geometry) AS latitude,
-                         ST_X(m.location::geometry) AS longitude,
-                         m.position_source,
-                         m.position_accuracy_m,
-                         m.position_updated_at,
-                         m.active,
-                         m.deactivated_at,
-                         m.status_note,
-                         ARRAY(
-                             SELECT '/api/v1/media/' || mm.media_id
-                               FROM mobile_base_media mm
-                              WHERE mm.base_id = m.id
-                              ORDER BY mm.display_order, mm.media_id
-                         ) AS photo_urls
-                    FROM mobile_bases m
-                   WHERE m.id = :id
-                  """;
-        return jdbc.query(sql,
-                new MapSqlParameterSource("id", id),
+        return jdbc.query("""
+                        SELECT id,
+                               kind,
+                               name,
+                               beach_id,
+                               beach_name,
+                               ST_Y(location::geometry) AS latitude,
+                               ST_X(location::geometry) AS longitude,
+                               position_source,
+                               position_accuracy_m,
+                               position_updated_at,
+                               active,
+                               deactivated_at,
+                               status_note,
+                               photo_urls
+                          FROM station_catalog
+                         WHERE kind = :kind
+                           AND id = :id
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("kind", kind.name())
+                        .addValue("id", id, Types.OTHER),
                 (rs, rowNum) -> adminView(rs)).stream().findFirst();
     }
 

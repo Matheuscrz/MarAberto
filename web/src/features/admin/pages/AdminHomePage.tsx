@@ -20,8 +20,7 @@ export function AdminHomePage() {
   const activeUsers = adminUsers.filter(
     (user) => user.status === "ACTIVE",
   ).length;
-  const { stations, status } = useAdminStations();
-  const activeStations = stations.filter((station) => station.active).length;
+  const { total, status } = useAdminStations({ active: true, limit: 1 });
 
   return (
     <div>
@@ -40,10 +39,10 @@ export function AdminHomePage() {
         <StatCard
           icon={ShieldCheck}
           label="Postos e bases ativos"
-          value={status === "ready" ? activeStations : "—"}
+          value={status === "ready" ? total : "—"}
           hint={
             status === "ready"
-              ? `${stations.length} no total`
+              ? "ativos no mapa público"
               : "Carregando as estruturas"
           }
         />

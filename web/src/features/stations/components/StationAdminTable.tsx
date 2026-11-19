@@ -1,5 +1,13 @@
-import { useState, type FormEvent } from "react";
-import { CheckCircle, Crosshair, Power, RefreshCw, X } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  CheckCircle,
+  ChevronDown,
+  Crosshair,
+  Power,
+  RefreshCw,
+  Search,
+  X,
+} from "lucide-react";
 import { Card } from "@/shared/components/Card";
 import { PhotoGallery } from "@/shared/components/PhotoGallery";
 import { formatDateTime } from "@/shared/lib/format";
@@ -9,8 +17,13 @@ import type { StationAdminSource } from "@/features/stations/hooks/use-admin-sta
 import { StationPositionForm } from "@/features/stations/components/StationPositionForm";
 import {
   POSITION_SOURCE_LABEL,
+  STATION_KIND_LABEL,
   type AdminStation,
+  type StationKind,
 } from "@/features/stations/types";
+
+type StatusFilter = "ACTIVE" | "INACTIVE" | "ALL";
+type KindFilter = "ALL" | StationKind;
 
 /**
  * Cadastro de postos e bases no painel da TI.
@@ -25,17 +38,46 @@ export function StationAdminTable({
   /** `admin` (TI) ou `coordination` (aba de postos da gestão). */
   readonly source?: StationAdminSource;
 }) {
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ACTIVE");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("ALL");
+  const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+
+  // Busca com pequena espera: digitar não dispara uma consulta por tecla.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAppliedSearch(search.trim()), 350);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const query = useMemo(
+    () => ({
+      active:
+        statusFilter === "ACTIVE"
+          ? true
+          : statusFilter === "INACTIVE"
+            ? false
+            : undefined,
+      kind: kindFilter === "ALL" ? undefined : kindFilter,
+      q: appliedSearch || undefined,
+    }),
+    [appliedSearch, kindFilter, statusFilter],
+  );
+
   const {
     stations,
+    total,
+    hasMore,
+    loadingMore,
     status,
     message,
     feedback,
     busyId,
     reload,
+    loadMore,
     setActive,
     applyUpdate,
     dismissFeedback,
-  } = useAdminStations({ source });
+  } = useAdminStations({ source, ...query });
   const [reason, setReason] = useState<{ id: string; note: string } | null>(null);
   const [repositionId, setRepositionId] = useState<string | null>(null);
 
@@ -70,6 +112,70 @@ export function StationAdminTable({
 
   return (
     <div className="grid gap-3">
+      <Card className="grid gap-2">
+        <div
+          role="tablist"
+          aria-label="Filtro por estado da estrutura"
+          className="inline-flex w-fit flex-wrap rounded-xl border border-ocean-200 bg-white p-1"
+        >
+          <FilterButton
+            active={statusFilter === "ACTIVE"}
+            onClick={() => setStatusFilter("ACTIVE")}
+            label="Ativos"
+          />
+          <FilterButton
+            active={statusFilter === "INACTIVE"}
+            onClick={() => setStatusFilter("INACTIVE")}
+            label="Inativos"
+          />
+          <FilterButton
+            active={statusFilter === "ALL"}
+            onClick={() => setStatusFilter("ALL")}
+            label="Todos"
+          />
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
+          <label className="relative block">
+            <span className="sr-only">Buscar estrutura pelo nome</span>
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-ocean-500"
+            />
+            <input
+              type="search"
+              value={search}
+              maxLength={120}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar pelo nome"
+              className="min-h-10 w-full rounded-xl border border-ocean-200 bg-white pl-9 pr-3 text-sm font-medium text-ocean-950 placeholder:text-ocean-400"
+            />
+          </label>
+          <label className="grid gap-1 text-[11px] font-bold text-ocean-700">
+            <span className="sr-only">Tipo de estrutura</span>
+            <select
+              value={kindFilter}
+              onChange={(event) => setKindFilter(event.target.value as KindFilter)}
+              className="min-h-10 rounded-xl border border-ocean-200 bg-white px-3 text-sm font-medium text-ocean-950"
+            >
+              <option value="ALL">Todos os tipos</option>
+              <option value="FIXED">{STATION_KIND_LABEL.FIXED}</option>
+              <option value="MOBILE">{STATION_KIND_LABEL.MOBILE}</option>
+            </select>
+          </label>
+        </div>
+
+        <p className="text-[11px] text-ocean-600">
+          {stations.length === 0
+            ? total === 0
+              ? "Nenhuma estrutura para este filtro."
+              : "Carregando a primeira página…"
+            : `Mostrando ${stations.length} de ${total} ${
+                total === 1 ? "estrutura" : "estruturas"
+              }.`}
+        </p>
+      </Card>
+
       {feedback ? (
         <div className="flex items-start justify-between gap-2 rounded-xl border border-ocean-200 bg-ocean-50 px-3 py-2 text-xs font-semibold text-ocean-900">
           <output className="flex items-start gap-1.5">
@@ -90,11 +196,11 @@ export function StationAdminTable({
       {stations.length === 0 ? (
         <Card className="border-dashed bg-ocean-50/40 text-center">
           <p className="text-sm font-bold text-ocean-950">
-            Nenhum posto ou base cadastrado
+            Nenhuma estrutura para este filtro
           </p>
           <p className="mt-1 text-xs text-ocean-700">
-            As estruturas chegam pela importação do mapeamento e pelo cadastro
-            do órgão.
+            Ajuste o estado, o tipo ou o nome buscado. As estruturas chegam pela
+            importação do mapeamento e pelo cadastro do órgão.
           </p>
         </Card>
       ) : (
@@ -228,7 +334,51 @@ export function StationAdminTable({
           ))}
         </ul>
       )}
+
+      {hasMore ? (
+        <div className="text-center">
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-ocean-300 bg-white px-3 py-1.5 text-xs font-bold text-ocean-800 transition hover:bg-ocean-50 disabled:cursor-progress disabled:opacity-70"
+          >
+            <ChevronDown aria-hidden="true" className="size-3.5" />
+            {loadingMore ? "Carregando…" : "Carregar mais estruturas"}
+          </button>
+          <p className="mt-1 text-[11px] text-ocean-500">
+            A página seguinte vem do servidor pelo cursor; ativar ou desativar
+            uma estrutura durante a consulta não repete registros.
+          </p>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function FilterButton({
+  active,
+  onClick,
+  label,
+}: {
+  readonly active: boolean;
+  readonly onClick: () => void;
+  readonly label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`rounded-lg px-3 py-1 text-[11px] font-bold transition ${
+        active
+          ? "bg-ocean-950 text-white"
+          : "text-ocean-700 hover:bg-ocean-50"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

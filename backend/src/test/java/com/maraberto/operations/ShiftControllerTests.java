@@ -211,7 +211,8 @@ class ShiftControllerTests extends PostgisIntegrationTest {
                 .isNull();
 
         JsonNode stations = json(exchange(
-                "/api/v1/operations/stations", HttpMethod.GET, null));
+                "/api/v1/operations/stations?q=" + baseId,
+                HttpMethod.GET, null)).get("items");
         JsonNode fieldBase = findTargetOrNull(stations, baseId.toString());
         assertThat(fieldBase)
                 .as("a estrutura continua no console de campo, inclusive inativa")
