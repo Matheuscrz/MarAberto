@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
   CheckCircle,
+  ExternalLink,
   MapPin,
   MapPinned,
   RefreshCw,
@@ -286,6 +287,21 @@ function UnmappedSignalCard({
           <MapPin aria-hidden="true" className="size-3.5 text-ocean-500" />
           {signal.latitude.toFixed(5)}, {signal.longitude.toFixed(5)}
         </span>
+        {/*
+         * Abre o ponto exato no Google Maps: a coordenação confere no satélite
+         * se o local já corresponde a uma área mapeada antes de identificar ou
+         * pedir um novo KML. Link externo em nova aba, sem enviar o pin como
+         * parâmetro de rastreio.
+         */}
+        <a
+          href={`https://www.google.com/maps?q=${signal.latitude},${signal.longitude}`}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex items-center gap-1 rounded-lg border border-ocean-200 bg-white px-2 py-0.5 font-bold text-ocean-900 transition hover:bg-ocean-50"
+        >
+          <ExternalLink aria-hidden="true" className="size-3" />
+          Abrir no Google Maps
+        </a>
         <span>
           {formatAccuracy(signal.accuracyMeters ?? undefined)}
         </span>
