@@ -11,10 +11,10 @@ import java.util.UUID;
  * Sinalização registrada fora do mapeamento (RF12/RN17).
  *
  * <p>É o que o guarda-vidas vê depois de lançar a bandeira num ponto que o
- * KML não cobre: o registro existe e foi para a coordenação, mas **nada é
- * publicado no mapa** — não há praia nem setor para o pin. A coordenação
- * identifica o local (associando a uma área existente), pede um novo
- * mapeamento ou descarta o registro.
+ * KML não cobre: o registro existe, vai para a coordenação e aparece no mapa
+ * como alerta de área não mapeada — não como bandeira de praia, porque não há
+ * praia nem setor para o pin. A coordenação identifica o local (associando a
+ * uma área existente), pede um novo mapeamento ou descarta o registro.
  *
  * <p>A coordenada é a do lançamento, não um rastro do aparelho. A área mais
  * próxima é uma sugestão de triagem calculada na consulta, nunca um vínculo
@@ -39,6 +39,7 @@ import java.util.UUID;
  * @param nearestBeachDistanceMeters distância até a área mais próxima, em metros
  * @param decisionNotes             justificativa da coordenação
  * @param createdAt                 quando o registro entrou na fila
+ * @param validUntil                fim do alerta no mapa; depois disso só a triagem
  * @param decidedAt                 quando a coordenação decidiu; nulo se pendente
  * @param photoUrls                 fotos do registro, na ordem de exibição
  */
@@ -66,6 +67,8 @@ public record UnmappedSignalView(
         Long nearestBeachDistanceMeters,
         String decisionNotes,
         Instant createdAt,
+        @Schema(description = "Fim do alerta no mapa; depois disso o registro só existe na triagem")
+        Instant validUntil,
         Instant decidedAt,
         @Schema(description = "Fotos do registro") List<String> photoUrls) {
 

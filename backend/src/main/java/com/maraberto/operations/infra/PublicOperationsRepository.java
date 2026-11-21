@@ -2,12 +2,11 @@ package com.maraberto.operations.infra;
 
 import com.maraberto.operations.api.PublicFlag;
 import com.maraberto.operations.api.PublicStation;
+import com.maraberto.operations.api.PublicUnmappedSignal;
 import com.maraberto.operations.domain.FlagColor;
 import com.maraberto.operations.domain.StationKind;
-import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -16,18 +15,20 @@ import org.springframework.stereotype.Repository;
  * Leitura pública das estruturas e da sinalização (RF01/RF12/RF38).
  *
  * <p>Vigência é decidida aqui, na consulta, e não por mutação: nada é apagado
- * nem desativado por tempo. Posto inativo some, base móvel sem plantão vivo
- * some e bandeira vencida ou encerrada some — o histórico continua intacto.
+ * nem desativado por tempo. Posto e base inativos somem, bandeira vencida ou
+ * encerrada some e alerta de área não mapeada sai quando vence ou é triado — o
+ * histórico continua intacto.
  */
 @Repository
 public class PublicOperationsRepository {
 
     /**
-     * Postos fixos ativos e bases móveis com plantão vivo.
+     * Postos fixos e bases móveis ativos.
      *
-     * <p>A base móvel só entra com plantão aberto e dentro do lease; a posição
-     * é a última conhecida do turno (nunca rastreamento contínuo — RN17) e cai
-     * para a posição cadastrada quando o console ainda não mandou GPS.
+     * <p>A base móvel é uma estrutura própria: aparece no mapa enquanto estiver
+     * ativa, na posição em que foi cadastrada. Ela não depende de plantão vivo
+     * nem segue o guarda-vidas — a última posição do turno é do plantão e
+     * aparece como pin de guarda-vidas no mapa de situação (RN17).
      */
     private static final String STATIONS_SQL = """
             SELECT p.id,
@@ -52,9 +53,9 @@ public class PublicOperationsRepository {
                    'MOBILE' AS kind,
                    m.name,
                    NULL::text AS beach_name,
-                   ST_Y(COALESCE(s.last_position, m.location)::geometry) AS latitude,
-                   ST_X(COALESCE(s.last_position, m.location)::geometry) AS longitude,
-                   COALESCE(s.last_position_at, s.last_seen_at) AS position_updated_at,
+                   ST_Y(m.location::geometry) AS latitude,
+                   ST_X(m.location::geometry) AS longitude,
+                   m.position_updated_at,
                    ARRAY(
                        SELECT '/api/v1/media/' || mm.media_id
                          FROM mobile_base_media mm
@@ -62,15 +63,6 @@ public class PublicOperationsRepository {
                         ORDER BY mm.display_order, mm.media_id
                    ) AS photo_urls
               FROM mobile_bases m
-              JOIN LATERAL (
-                  SELECT s.last_position, s.last_position_at, s.last_seen_at
-                    FROM shift_sessions s
-                   WHERE s.mobile_base_id = m.id
-                     AND s.ended_at IS NULL
-                     AND s.last_seen_at >= NOW() - make_interval(secs => :idleSeconds)
-                   ORDER BY s.last_seen_at DESC
-                   LIMIT 1
-              ) s ON TRUE
              WHERE m.active
              ORDER BY kind, name
             """;
@@ -148,19 +140,42 @@ public class PublicOperationsRepository {
              ORDER BY created_at DESC, sector_id
             """.formatted(FLAG_COLUMNS);
 
-    private final NamedParameterJdbcTemplate jdbc;
-    private final Duration idleTimeout;
+    /**
+     * Alertas de sinalização fora do mapeamento, para o mapa público.
+     *
+     * <p>O pin é o ponto do lançamento — não há praia nem setor para herdar.
+     * Só entra o que está pendente de triagem e dentro da validade; decidir ou
+     * vencer tira o alerta do mapa, mas o registro continua na fila.
+     */
+    private static final String UNMAPPED_ALERTS_SQL = """
+            SELECT u.id,
+                   u.flag,
+                   u.notes,
+                   ST_Y(u.location::geometry) AS latitude,
+                   ST_X(u.location::geometry) AS longitude,
+                   u.location_accuracy_m,
+                   u.created_at,
+                   u.valid_until,
+                   ARRAY(
+                       SELECT '/api/v1/media/' || m.media_id
+                         FROM unmapped_signal_media m
+                        WHERE m.signal_id = u.id
+                        ORDER BY m.display_order, m.media_id
+                   ) AS photo_urls
+              FROM unmapped_signals u
+             WHERE u.status = 'PENDING'
+               AND u.valid_until > NOW()
+             ORDER BY u.created_at DESC, u.id
+            """;
 
-    public PublicOperationsRepository(
-            NamedParameterJdbcTemplate jdbc,
-            @Value("${maraberto.dispatch.shift-idle-timeout:PT15M}") Duration idleTimeout) {
+    private final NamedParameterJdbcTemplate jdbc;
+
+    public PublicOperationsRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = jdbc;
-        this.idleTimeout = idleTimeout;
     }
 
     public List<PublicStation> findStations() {
-        return jdbc.query(STATIONS_SQL,
-                new MapSqlParameterSource("idleSeconds", idleTimeout.toSeconds()),
+        return jdbc.query(STATIONS_SQL, new MapSqlParameterSource(),
                 (rs, rowNum) -> new PublicStation(
                         rs.getObject("id", UUID.class),
                         StationKind.valueOf(rs.getString("kind")),
@@ -188,6 +203,31 @@ public class PublicOperationsRepository {
         return jdbc.query(LATEST_FLAGS_SQL,
                 new MapSqlParameterSource("beachId", beachId),
                 (rs, rowNum) -> flagRow(rs));
+    }
+
+    /**
+     * Alertas de sinalização lançada fora do mapeamento.
+     *
+     * <p>Só o que está pendente de triagem e dentro da validade: o alerta não
+     * espera decisão para aparecer, e sai do mapa quando vence. A fila de
+     * triagem continua com o registro completo em {@code /management}.
+     */
+    public List<PublicUnmappedSignal> findActiveUnmappedAlerts() {
+        return jdbc.query(UNMAPPED_ALERTS_SQL, new MapSqlParameterSource(),
+                (rs, rowNum) -> {
+                    java.math.BigDecimal accuracy = rs.getObject("location_accuracy_m",
+                            java.math.BigDecimal.class);
+                    return new PublicUnmappedSignal(
+                            rs.getObject("id", UUID.class),
+                            FlagColor.valueOf(rs.getString("flag")),
+                            rs.getString("notes"),
+                            rs.getDouble("latitude"),
+                            rs.getDouble("longitude"),
+                            accuracy == null ? null : accuracy.doubleValue(),
+                            instant(rs, "created_at"),
+                            instant(rs, "valid_until"),
+                            photoUrls(rs));
+                });
     }
 
     private static PublicFlag flagRow(java.sql.ResultSet rs) throws java.sql.SQLException {

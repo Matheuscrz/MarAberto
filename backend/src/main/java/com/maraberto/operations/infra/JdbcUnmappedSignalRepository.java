@@ -42,6 +42,7 @@ public class JdbcUnmappedSignalRepository {
             n.distance_m AS nearest_distance_m,
             u.decision_notes,
             u.created_at,
+            u.valid_until,
             u.decided_at,
             ARRAY(
                 SELECT '/api/v1/media/' || m.media_id
@@ -78,18 +79,20 @@ public class JdbcUnmappedSignalRepository {
             String notes,
             double latitude,
             double longitude,
-            Double accuracyMeters) {
+            Double accuracyMeters,
+            Instant validUntil) {
         return jdbc.queryForObject("""
                         INSERT INTO unmapped_signals
                             (flag, notes, location, location_accuracy_m,
-                             reported_by, reported_post_id)
+                             reported_by, reported_post_id, valid_until)
                         VALUES (:flag, :notes,
                                 CAST(ST_SetSRID(ST_MakePoint(
                                         CAST(:longitude AS double precision),
                                         CAST(:latitude AS double precision)), 4326)
                                     AS geography),
                                 CAST(:accuracy AS numeric(7, 1)),
-                                :reportedBy, :reportedPostId)
+                                :reportedBy, :reportedPostId,
+                                CAST(:validUntil AS timestamptz))
                         RETURNING id
                         """,
                 new MapSqlParameterSource()
@@ -99,7 +102,8 @@ public class JdbcUnmappedSignalRepository {
                         .addValue("longitude", longitude)
                         .addValue("accuracy", accuracyMeters)
                         .addValue("reportedBy", reportedBy)
-                        .addValue("reportedPostId", reportedPostId),
+                        .addValue("reportedPostId", reportedPostId)
+                        .addValue("validUntil", java.sql.Timestamp.from(validUntil)),
                 UUID.class);
     }
 
@@ -203,6 +207,7 @@ public class JdbcUnmappedSignalRepository {
                 distance == null ? null : Math.round(distance.doubleValue()),
                 rs.getString("decision_notes"),
                 instant(rs, "created_at"),
+                instant(rs, "valid_until"),
                 instant(rs, "decided_at"),
                 photoUrls(rs));
     }

@@ -71,6 +71,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET,
                                 "/api/v1/stations/**",
                                 "/api/v1/flags/**",
+                                // Alerta de sinalização lançada fora do mapeamento: o
+                                // banhista vê o ponto mesmo sem praia cadastrada.
+                                "/api/v1/unmapped-signals/**",
                                 // A foto da sinalização aparece no mapa e na ficha: leitura pública.
                                 "/api/v1/media/**",
                                 "/api/v1/risk-zones/**").permitAll()

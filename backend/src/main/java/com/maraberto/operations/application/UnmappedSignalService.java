@@ -1,11 +1,13 @@
 package com.maraberto.operations.application;
 
 import com.maraberto.operations.api.LaunchFlagRequest;
+import com.maraberto.operations.api.PublicUnmappedSignal;
 import com.maraberto.operations.api.UnmappedSignalDecisionRequest;
 import com.maraberto.operations.api.UnmappedSignalView;
 import com.maraberto.operations.domain.UnmappedSignalNotFoundException;
 import com.maraberto.operations.domain.UnmappedSignalStatus;
 import com.maraberto.operations.infra.JdbcUnmappedSignalRepository;
+import com.maraberto.operations.infra.PublicOperationsRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -19,9 +21,11 @@ import org.springframework.transaction.annotation.Transactional;
  * Fila de triagem da sinalização feita fora do mapeamento (RF12/RN17).
  *
  * <p>O registro nasce no lançamento por localização quando nenhuma área ativa
- * contém o ponto. Ele **não** é uma bandeira: nada aparece no mapa público e a
- * ficha da praia não muda. A coordenação decide o destino na triagem —
- * identificar numa área existente, pedir um novo mapeamento ou descartar.
+ * contém o ponto. Ele **não** é uma bandeira de praia — não há área nem setor
+ * para herdar —, mas aparece no mapa público e no mapa de situação como alerta
+ * de área não mapeada enquanto estiver pendente e dentro da validade. A
+ * coordenação decide o destino na triagem — identificar numa área existente,
+ * pedir um novo mapeamento ou descartar.
  *
  * <p>A área mais próxima é devolvida como sugestão; o vínculo só é gravado com
  * a decisão humana. Uma decisão pode ser revista (inclusive reaberta com
@@ -33,12 +37,15 @@ public class UnmappedSignalService {
     private static final int MAX_LIST_SIZE = 200;
 
     private final JdbcUnmappedSignalRepository repository;
+    private final PublicOperationsRepository publicRepository;
     private final NamedParameterJdbcTemplate jdbc;
 
     public UnmappedSignalService(
             JdbcUnmappedSignalRepository repository,
+            PublicOperationsRepository publicRepository,
             NamedParameterJdbcTemplate jdbc) {
         this.repository = repository;
+        this.publicRepository = publicRepository;
         this.jdbc = jdbc;
     }
 
@@ -46,14 +53,17 @@ public class UnmappedSignalService {
      * Guarda o lançamento que caiu fora do mapeamento.
      *
      * <p>As fotos já foram validadas pelo chamador (existem e são de quem está
-     * lançando); aqui só entram na tabela de ligação do registro.
+     * lançando); aqui só entram na tabela de ligação do registro. A validade é
+     * a mesma da bandeira e começa a contar no lançamento: o alerta não espera
+     * a triagem para aparecer, nem fica no mapa depois de vencer.
      */
     @Transactional
     public UnmappedSignalView record(
             UUID reportedBy,
             UUID reportedPostId,
             LaunchFlagRequest request,
-            List<UUID> mediaIds) {
+            List<UUID> mediaIds,
+            Instant validUntil) {
         UUID id = repository.insert(
                 reportedBy,
                 reportedPostId,
@@ -61,10 +71,23 @@ public class UnmappedSignalService {
                 blankToNull(request.notes()),
                 request.latitude(),
                 request.longitude(),
-                request.accuracyMeters());
+                request.accuracyMeters(),
+                validUntil);
         repository.attachMedia(id, mediaIds);
         return repository.findById(id)
                 .orElseThrow(UnmappedSignalNotFoundException::new);
+    }
+
+    /**
+     * Alertas vigentes para o mapa público.
+     *
+     * <p>Devolve apenas registros {@code PENDING} dentro da validade. Decidir
+     * na triagem ou deixar o alerta vencer tira o pin do mapa; a linha continua
+     * na fila da coordenação.
+     */
+    @Transactional(readOnly = true)
+    public List<PublicUnmappedSignal> publicAlerts() {
+        return publicRepository.findActiveUnmappedAlerts();
     }
 
     /**
