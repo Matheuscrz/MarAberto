@@ -132,9 +132,8 @@ export function useShift(): ShiftConsole {
   /**
    * Recarrega só os destinos depois de abrir/encerrar o plantão.
    *
-   * <p>Sem isso o seletor continuaria mostrando a base móvel que o turno
-   * acabou de desativar (ou esconderia a que acabou de nascer) até a próxima
-   * leitura completa.
+   * <p>Sem isso o seletor poderia continuar mostrando uma base que acabou de
+   * ser desativada em outro aparelho até a próxima leitura completa.
    */
   const reloadTargets = useCallback(async () => {
     try {
@@ -309,8 +308,8 @@ export function useShift(): ShiftConsole {
         message:
           "Plantão encerrado. Você deixou de receber chamados do SOS até abrir um novo plantão.",
       });
-      // A base móvel do turno foi desativada no servidor: recarrega para ela
-      // sair do seletor sem esperar a próxima leitura completa.
+      // A base móvel tem ciclo próprio: ela continua ativa e no seletor depois
+      // do turno. A recarga só reconcilia o que outra pessoa mudou.
       await reloadTargets();
       return true;
     } catch (error) {

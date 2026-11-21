@@ -32,10 +32,10 @@ interface FieldStationListProps {
 /**
  * Estruturas cadastradas no console de campo.
  *
- * <p>A lista pública esconde a base móvel sem plantão vivo; esta mantém o
- * cadastro à vista para o guarda-vidas saber onde o posto/base fica e por que
- * ele não está no mapa agora. A distância é calculada de uma leitura pontual do
- * aparelho — nada de `watchPosition` nem de coordenada persistida.
+ * <p>A lista pública e esta compartilham o mesmo cadastro: a base móvel ativa
+ * aparece nos dois, com ou sem plantão aberto, para o guarda-vidas saber onde a
+ * estrutura fica. A distância é calculada de uma leitura pontual do aparelho —
+ * nada de `watchPosition` nem de coordenada persistida.
  */
 export function FieldStationList({
   stations,
@@ -68,8 +68,8 @@ export function FieldStationList({
               Estruturas cadastradas
             </h2>
             <p className="mt-1 text-[11px] leading-snug text-ocean-600">
-              Inclui a base móvel sem plantão vivo, que sai do mapa público mas
-              continua cadastrada. A distância é calculada da sua posição agora.
+              Inclui posto e base móvel ativos, com ou sem plantão aberto. A
+              distância é calculada da sua posição agora.
             </p>
           </div>
           <button
@@ -238,11 +238,6 @@ export function FieldStationList({
                       {station.statusNote
                         ? ` Motivo: ${sanitizeText(station.statusNote, 200)}`
                         : ""}
-                    </p>
-                  ) : publicReady && station.kind === "MOBILE" && !onMap ? (
-                    <p className="mt-2 rounded-xl border border-ocean-200 bg-ocean-50 px-3 py-2 text-[11px] font-semibold text-ocean-700">
-                      A base móvel só entra no mapa com plantão vivo. Abra o
-                      plantão nela para publicar o ponto.
                     </p>
                   ) : null}
 

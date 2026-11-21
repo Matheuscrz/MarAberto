@@ -73,9 +73,10 @@ export function StationSheet({ station, onClose }: StationSheetProps) {
 
         {isMobile ? (
           <p className="mt-3 rounded-xl border border-ocean-100 bg-ocean-50/70 p-3 text-[11px] leading-snug text-ocean-700">
-            A base móvel aparece no mapa enquanto o plantão está aberto.
+            A base móvel aparece no mapa enquanto estiver ativa, mesmo sem
+            plantão aberto.
             {station.positionUpdatedAt
-              ? ` Última posição informada em ${formatDateTime(
+              ? ` Posição registrada em ${formatDateTime(
                   station.positionUpdatedAt,
                 )}.`
               : ""}

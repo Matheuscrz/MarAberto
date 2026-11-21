@@ -20,9 +20,9 @@ const POLL_MS = 30_000;
 /**
  * Estruturas visíveis no mapa público.
  *
- * <p>O servidor decide o que está visível (posto ativo, base com plantão vivo).
- * O polling é curto porque a base móvel se move e some quando o turno acaba;
- * com a aba escondida nada é consultado e ao voltar a leitura é imediata.
+ * <p>O servidor decide o que está visível: posto e base ativos. O polling é
+ * curto porque uma estrutura pode ser desativada em campo; com a aba escondida
+ * nada é consultado e ao voltar a leitura é imediata.
  */
 export function usePublicStations(): PublicStationsState {
   const [stations, setStations] = useState<readonly PublicStation[]>([]);

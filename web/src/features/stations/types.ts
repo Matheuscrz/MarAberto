@@ -1,8 +1,9 @@
 /**
  * Tipo de estrutura operacional, como vem de `/api/v1/stations`.
  *
- * <p>Posto fixo tem posição cadastrada; base móvel aparece na última posição do
- * plantão e some do mapa quando o turno encerra ou o lease expira (RN17).
+ * <p>Posto fixo tem posição cadastrada; base móvel é uma estrutura própria, com
+ * nome e fotos, que aparece no mapa enquanto estiver ativa. A posição do
+ * plantão é outra coisa: ela é do guarda-vidas e pode estar longe da base.
  */
 export type StationKind = "FIXED" | "MOBILE";
 

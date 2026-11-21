@@ -18,12 +18,12 @@ type StatusFilter = "ACTIVE" | "INACTIVE" | "ALL";
  * gerencia a estrutura do plantão e confere todas as estruturas cadastradas.
  *
  * <p>O cadastro usa a posição atual do aparelho (RF11). A estrutura do plantão
- * aberto pode ser desativada e reativada pelo próprio guarda-vidas; a TI
- * continua alternando qualquer uma em `/admin/postos`. A lista do console
- * inclui a base móvel sem plantão vivo (que o mapa público esconde) e mostra a
- * posição registrada e a distância da leitura atual do aparelho. A aba abre nos
- * ativos — cada base móvel encerrada vira uma linha inativa no histórico —, e o
- * filtro de estado é aplicado pelo servidor.
+ * aberto, quando existe, pode ser desativada e reativada pelo próprio
+ * guarda-vidas; a TI continua alternando qualquer uma em `/admin/postos`. O
+ * plantão sem posto/base aparece como tal e não gerencia estrutura. A lista do
+ * console inclui a base móvel ativa sem plantão vivo e mostra a posição
+ * registrada e a distância da leitura atual do aparelho. A aba abre nos ativos e
+ * o filtro de estado é aplicado pelo servidor.
  */
 export function OperatorStationsPage() {
   const nearby = useNearbyBeaches();
