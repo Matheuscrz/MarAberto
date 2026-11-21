@@ -6,6 +6,8 @@ import com.maraberto.media.domain.MediaNotFoundException;
 import com.maraberto.shared.api.ApiProblem;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -16,12 +18,16 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import software.amazon.awssdk.core.exception.SdkException;
 
 /**
  * Erros da mídia em RFC 9457, com {@code type} estável.
  */
 @RestControllerAdvice(basePackageClasses = MediaController.class)
 public class MediaApiExceptionHandler extends ResponseEntityExceptionHandler {
+
+    private static final Logger LOGGER =
+            LoggerFactory.getLogger(MediaApiExceptionHandler.class);
 
     private static final MediaType PROBLEM_JSON_UTF8 =
             new MediaType(MediaType.APPLICATION_PROBLEM_JSON, StandardCharsets.UTF_8);
@@ -70,6 +76,24 @@ public class MediaApiExceptionHandler extends ResponseEntityExceptionHandler {
                 "https://maraberto.org/problems/media-not-found",
                 "Mídia não encontrada",
                 exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    /**
+     * Falha do storage (S3/Garage indisponível ou mal configurado) não é erro
+     * do pedido: o arquivo é válido, mas não dá para guardar agora. Devolver
+     * 503 com um {@code type} estável permite ao cliente oferecer "tentar de
+     * novo" em vez de exibir um 500 genérico.
+     */
+    @ExceptionHandler(SdkException.class)
+    public ResponseEntity<Object> handleStorageUnavailable(
+            SdkException exception, WebRequest request) {
+        LOGGER.warn("Storage de mídia indisponível: {}", exception.getMessage(), exception);
+        return response(problem(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "https://maraberto.org/problems/storage-unavailable",
+                "Armazenamento indisponível",
+                "Não foi possível guardar a foto agora. Tente de novo em instantes.",
                 request), new HttpHeaders());
     }
 

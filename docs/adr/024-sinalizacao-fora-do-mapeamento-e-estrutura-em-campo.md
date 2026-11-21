@@ -4,6 +4,9 @@
 - Relacionadas: ADR-012 (dados sensíveis e sanitização), ADR-013 (ocorrências), ADR-015 (frontend feature-based), ADR-016 (importação de mapeamento), ADR-021 (área de banho), ADR-022 (ciclo de vida da sinalização e das estruturas), ADR-023 (sinalização/estruturas ancoradas no aparelho e mídia).
 - Requisitos: RF11, RF12, RF38, RF39, RF41; RN01, RN17; RNF04.
 - Emenda: substitui a recusa `422 outside-mapped-area` da ADR-023 e amplia a ativação/desativação da ADR-022 para o guarda-vidas em campo.
+- Emenda 2 (2026-11-20): a parte "nada é publicado no mapa" foi revista pela
+  ADR-029 — o registro pendente e dentro da validade passa a aparecer como
+  alerta de área não mapeada no mapa público e no de situação.
 
 ## Contexto
 

@@ -91,6 +91,35 @@ class SosDispatchEligibilityTests extends PostgisIntegrationTest {
     }
 
     @Test
+    void notifiesAFreeShiftInsideTheDefaultCoverageRadius() throws Exception {
+        UUID userId = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
+        EmergencyTestData.openFreeShift(jdbcTemplate, userId, LATITUDE + 0.0020, LONGITUDE);
+
+        UUID callId = createCall(LATITUDE, LONGITUDE);
+
+        assertThat(recipientsOf(callId)).containsExactly(userId);
+        assertThat(jdbcTemplate.queryForMap("""
+                        SELECT recipient_post_id, recipient_base_id, distance_m
+                          FROM emergency_dispatches
+                         WHERE emergency_call_id = ?
+                        """, callId))
+                .as("plantão livre não tem estrutura: o destinatário é o operador")
+                .containsEntry("recipient_post_id", null)
+                .containsEntry("recipient_base_id", null);
+        assertThat(distanceOf(callId, userId)).isLessThan(500.0);
+    }
+
+    @Test
+    void aFreeShiftOutsideTheDefaultRadiusIsNotNotified() throws Exception {
+        UUID userId = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
+        EmergencyTestData.openFreeShift(jdbcTemplate, userId, LATITUDE + 0.1620, LONGITUDE);
+
+        UUID callId = createCall(LATITUDE, LONGITUDE);
+
+        assertThat(recipientsOf(callId)).doesNotContain(userId);
+    }
+
+    @Test
     void excludesShiftOutsideItsCoverageRadiusWhenSomeoneIsCloser() throws Exception {
         UUID nearUser = EmergencyTestData.createOperator(jdbcTemplate, "LIFEGUARD");
         UUID nearPost = EmergencyTestData.createPost(

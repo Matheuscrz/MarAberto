@@ -409,6 +409,58 @@ class OccurrenceFromSosTests extends PostgisIntegrationTest {
                 .isEqualTo("https://maraberto.org/problems/occurrence-already-closed");
     }
 
+    /**
+     * O mapa de situação da coordenação só quer o que ainda pede ação: ficha
+     * aberta/em atendimento ou pendência de transcrição no CIOSP. A ficha
+     * encerrada sem protocolo continua no filtro; a registrada sai.
+     */
+    @Test
+    void activeFilterKeepsOnlyOccurrencesThatStillNeedAction() throws Exception {
+        Area area = createArea(-10.574, -38.501, null);
+        TestOperatorAuth.Session lifeguard = lifeguardAt(area, "LIFEGUARD");
+
+        UUID registeredCall = createEmergencyCall(area.centerLatitude(), area.centerLongitude());
+        ack(registeredCall, lifeguard.accessToken());
+        UUID pendingCall = createEmergencyCall(area.centerLatitude(), area.centerLongitude());
+        ack(pendingCall, lifeguard.accessToken());
+
+        assertThat(listActive(lifeguard.accessToken())).hasSize(2);
+
+        String registeredId = occurrenceIdOf(registeredCall);
+        String pendingId = occurrenceIdOf(pendingCall);
+
+        // Encerrada com o protocolo do CIOSP: não pede mais ação.
+        assertThat(post(
+                "/api/v1/occurrences/" + registeredId + "/close",
+                """
+                {
+                  "outcome": "RESOLVED",
+                  "ciospProtocol": "CIOSP-2026-777",
+                  "summary": "Banhista retirado da água sem ferimentos."
+                }
+                """,
+                lifeguard.accessToken()).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        JsonNode[] active = listActive(lifeguard.accessToken());
+        assertThat(active).hasSize(1);
+        assertThat(active[0].get("id").asText()).isEqualTo(pendingId);
+
+        // Encerrar não basta: sem protocolo, a pendência do CIOSP segue pedindo ação.
+        assertThat(post(
+                "/api/v1/occurrences/" + pendingId + "/close",
+                """
+                {"outcome": "RESOLVED", "summary": "Atendimento concluído na areia."}
+                """,
+                lifeguard.accessToken()).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        JsonNode[] stillPending = listActive(lifeguard.accessToken());
+        assertThat(stillPending).hasSize(1);
+        assertThat(stillPending[0].get("ciospStatus").asText()).isEqualTo("PENDING");
+
+        // O filtro é só do que pede ação: o histórico completo continua igual.
+        assertThat(list(lifeguard.accessToken(), 50)).hasSize(2);
+    }
+
     @Test
     void cursorPaginationDoesNotRepeatOrSkipWhenAnOccurrenceClosesBetweenPages() throws Exception {
         Area area = createArea(-10.974, -38.501, null);
@@ -480,6 +532,17 @@ class OccurrenceFromSosTests extends PostgisIntegrationTest {
 
     private JsonNode[] listByStatus(String accessToken, String status) throws Exception {
         return items(getPage(accessToken, "status=" + status));
+    }
+
+    /** Fichas que ainda pedem ação (`active=true`), como no mapa de situação. */
+    private JsonNode[] listActive(String accessToken) throws Exception {
+        return items(getPage(accessToken, "active=true"));
+    }
+
+    private String occurrenceIdOf(UUID callId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM occurrences WHERE emergency_call_id = ?",
+                UUID.class, callId).toString();
     }
 
     private JsonNode getDetail(String occurrenceId, String accessToken) throws Exception {

@@ -164,6 +164,29 @@ export function ShiftStationCard({ onChanged }: ShiftStationCardProps) {
     );
   }
 
+  // Plantão livre: não há estrutura para ativar/desativar. O guarda-vidas é o
+  // ponto no mapa e a estrutura, se precisar, é cadastrada à parte.
+  if (!stationId) {
+    return (
+      <Card className="border-dashed bg-ocean-50/40">
+        <p className="text-sm font-bold text-ocean-950">
+          Seu plantão está sem posto ou base
+        </p>
+        <p className="mt-1 text-xs text-ocean-700">
+          Você aparece no mapa pela posição do aparelho. Para vincular uma
+          estrutura, cadastre a base móvel com nome e fotos em{" "}
+          <Link
+            to="/operador/postos"
+            className="font-bold underline decoration-2 underline-offset-2"
+          >
+            Postos e bases
+          </Link>{" "}
+          e reabra o plantão escolhendo essa estrutura.
+        </p>
+      </Card>
+    );
+  }
+
   return (
     <Card
       className={`flex flex-col gap-3 ${

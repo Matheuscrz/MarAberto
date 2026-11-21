@@ -1,7 +1,8 @@
 # ADR-026: Mapa de situação da coordenação e cadência da posição do plantão
 
-- Status: **Proposto (2026-11-13)** — decisão a confirmar ao abrir a branch
-  `31-feature-painel-de-situacao-da-coordenacao`.
+- Status: **Aceito (2026-11-18)** — implementado na branch
+  `64-feature-painel-de-situação-da-coordenação-mapa-operacional-em-camadas-e-aba-de-postos`
+  (issue 64, Fatia 11). Sem migração.
 - Relacionadas: ADR-018 (despacho), ADR-020 (escala e caminho crítico), ADR-022/ADR-024
   (estruturas e sinalização), ADR-025 (base móvel), ADR-027 (auditoria).
 - Requisitos: RF40, RN17, RNF07/RNF09 (desempenho/carga), matriz §13.2.
@@ -90,6 +91,26 @@ plantão em curso). A RN17 ganha a ressalva de cadência; não ganha histórico.
 | Rastreamento em segundo plano (app fechado) | Viola RN17 e a política de dados; consumo de bateria e base legal desproporcional |
 | Tabela de telemetria para "histórico do turno" | Vira rastro permanente; se um dia for requisito, entra com retenção curta, base legal e ADR própria |
 | Mostrar posição para todos os operadores | Fora do escopo da RN17 e desnecessário para o trabalho em campo |
+
+## Implementação (2026-11-18)
+
+- **Contrato.** `GET /api/v1/management/team` em `operations` (`ManagementTeamController` /
+  `ManagementTeamService`), restrito a `COORDINATOR`/`ADMIN` pela `SecurityConfig`,
+  respondendo `Cache-Control: no-store` + `Pragma: no-cache`. Nome e matrícula vêm da porta
+  pública `identity.api.OperatorProfiles` — o módulo `operations` nunca decifra o cadastro.
+  `ModularityTests` continua verde porque a dependência é só de `api/`.
+- **Consulta.** Um `LEFT JOIN LATERAL` por contador e outro para resolver praia/setor por
+  `ST_Contains` na última posição; `Ended_at IS NULL` + `last_seen_at` dentro do lease;
+  ordenação `last_position_at ASC NULLS FIRST`. Sem migration: a `V8`/`V9`/`V17`/`V20` já
+  tinham todas as colunas e índices (incluindo `idx_occ_responder`).
+- **Cadência.** `SIGNAL_INTERVAL_MS` no console do operador passou de 5 min para 60 s, com
+  jitter de 5 s; aba escondida não envia. Nenhuma coluna nova, nenhum histórico.
+- **Ocorrências ativas.** `GET /api/v1/occurrences?active=true` filtra
+  `status IN ('OPEN','IN_PROGRESS') OR ciosp_status = 'PENDING'` mantendo o keyset existente.
+- **Frontend.** A home de `/gestao` virou o mapa de situação (`AreaShell flush`); as camadas
+  são estado de sessão. O `features/map` ganhou os pins `LIFEGUARD`/`OCCURRENCE` e o foco em
+  ponto (`flyTo`), sem `transform`/`scale` no elemento raiz do marcador. A aba `/gestao/postos`
+  reusa `StationAdminTable` com `source="coordination"`.
 
 ## Consequências
 

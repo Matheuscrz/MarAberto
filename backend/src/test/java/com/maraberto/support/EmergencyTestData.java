@@ -104,6 +104,22 @@ public final class EmergencyTestData {
     }
 
     /**
+     * Plantão sem posto nem base móvel. A posição do aparelho é a única
+     * referência espacial da seleção do SOS.
+     */
+    public static UUID openFreeShift(
+            JdbcTemplate jdbc, UUID userId, double latitude, double longitude) {
+        UUID shiftId = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO shift_sessions
+                    (id, user_id, started_at, last_position, last_position_at)
+                VALUES (?, ?, NOW(),
+                        CAST(ST_SetSRID(ST_MakePoint(?, ?), 4326) AS geography), NOW())
+                """, shiftId, userId, longitude, latitude);
+        return shiftId;
+    }
+
+    /**
      * Registra a última posição conhecida do plantão, como o
      * {@code PUT /api/v1/dispatch/shifts/current/position} faria. É a posição que
      * o despacho usa para decidir o raio — a estrutura só entra quando ela não

@@ -32,8 +32,9 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>O escopo pode ser escolhido no console (praia/setor) ou resolvido a partir
  * do ponto do aparelho. Quando o ponto está dentro do mapeamento, o lançamento
  * guarda a área e o setor: o mapa público precisa de um pin e a ficha precisa
- * de um dono. Quando não está, o registro vai para a triagem da coordenação
- * como área não identificada, sem publicar bandeira (RF12/RN17).
+ * de um dono. Quando não está, o registro vira um alerta de área não mapeada
+ * (visível no mapa, sem praia nem setor) e entra na triagem da coordenação
+ * (RF12/RN17).
  */
 @Service
 public class FlagService {
@@ -71,9 +72,9 @@ public class FlagService {
      * apaga a bandeira da praia: o setor passa a ter a sua, e os demais setores
      * continuam herdando a da praia na ficha.
      *
-     * <p>Ponto fora do mapeamento não é recusa: o lançamento vira um registro
-     * de área não identificada para a coordenação triar (RF12/RN17). Nesse
-     * desfecho nenhuma bandeira é publicada no mapa.
+     * <p>Ponto fora do mapeamento não é recusa: o lançamento vira um alerta de
+     * área não identificada, visível no mapa como ponto sem praia, e entra na
+     * fila de triagem da coordenação (RF12/RN17).
      */
     @Transactional
     public FlagLaunchResponse launch(UUID userId, LaunchFlagRequest request) {
@@ -82,15 +83,15 @@ public class FlagService {
         List<UUID> mediaIds = distinctMediaIds(userId, request.mediaIds());
         Optional<Scope> resolved = resolveScope(request);
         UUID postId = currentPostId(userId);
+        Instant now = Instant.now();
+        Duration validity = validityOf(request.validityHours());
 
         if (resolved.isEmpty()) {
             return FlagLaunchResponse.unmapped(unmappedSignals.record(
-                    userId, postId, request, mediaIds));
+                    userId, postId, request, mediaIds, now.plus(validity)));
         }
 
         Scope scope = resolved.get();
-        Instant now = Instant.now();
-        Duration validity = validityOf(request.validityHours());
 
         flags.lockScope(scope.beachId(), scope.sectorId());
         flags.closeScope(scope.beachId(), scope.sectorId(), userId, now);

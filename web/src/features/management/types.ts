@@ -1,36 +1,43 @@
 /**
- * Membro da equipe visto pela coordenação. O cadastro e o convite são da TI
- * (`/admin`); a coordenação só ativa/desativa o guarda-vidas do seu escopo de
- * praia/setor e acompanha o campo. Contrato provisório até o módulo `identity`
- * e a `shift_sessions` existirem.
+ * Membro da equipe em plantão, como vem de `GET /api/v1/management/team`.
+ *
+ * <p>A rota é da coordenação e `no-store`: a posição é a última conhecida do
+ * turno (RN17), não um histórico. O cadastro e o convite do operador são da TI;
+ * aqui só se acompanha quem está em campo.
  */
-export type TeamMemberStatus = "ACTIVE" | "INACTIVE";
-
-export interface TeamMemberPosition {
+export interface TeamPosition {
   readonly latitude: number;
   readonly longitude: number;
-  readonly accuracyMeters: number;
-  readonly at: string;
+  readonly accuracyMeters: number | null;
+  readonly at: string | null;
+  /** Posição mais velha que `position-stale-after`: "sem sinal", nunca atual. */
+  readonly stale: boolean;
 }
 
 export interface TeamMember {
-  readonly id: string;
+  /** Plantão (shift session) aberto. */
+  readonly shiftId: string;
+  readonly userId: string;
   readonly name: string;
-  readonly badgeNumber: string;
-  readonly stationName: string;
-  readonly beachName: string;
-  readonly sector?: string;
-  readonly shift: string;
-  readonly status: TeamMemberStatus;
-  /** Início do plantão atual; ausente quando não está de plantão. */
-  readonly onShiftSince?: string;
-  /** Última posição conhecida durante o plantão (RN17). */
-  readonly lastPosition?: TeamMemberPosition;
+  readonly badgeNumber: string | null;
+  readonly stationName: string | null;
+  readonly beachName: string | null;
+  readonly sectorLabel: string | null;
+  readonly onShiftSince: string;
+  readonly lastSeenAt: string;
+  readonly leaseAlive: boolean;
+  /** Ausente quando o console não enviou GPS neste turno. */
+  readonly lastPosition: TeamPosition | null;
   readonly occurrencesToday: number;
   readonly fieldAttendedToday: number;
   readonly signalsToday: number;
   readonly ciospPending: number;
-  readonly updatedAt: string;
+}
+
+/** Instantâneo da equipe em plantão. */
+export interface ManagementTeam {
+  readonly generatedAt: string;
+  readonly members: readonly TeamMember[];
 }
 
 /**

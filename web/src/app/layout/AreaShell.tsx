@@ -22,6 +22,11 @@ interface AreaShellProps {
   readonly title: string;
   readonly subtitle: string;
   readonly nav: readonly AreaNavItem[];
+  /**
+   * Tela cheia para páginas que vivem no mapa (situação da coordenação): o
+   * `<main>` ocupa a altura restante, sem largura máxima nem rodapé de texto.
+   */
+  readonly flush?: boolean;
 }
 
 /**
@@ -29,7 +34,7 @@ interface AreaShellProps {
  * cabeçalho com identificação do usuário, navegação por seção e saída. As
  * páginas em si ficam nas features de cada área; a composição mora no `app/`.
  */
-export function AreaShell({ title, subtitle, nav }: AreaShellProps) {
+export function AreaShell({ title, subtitle, nav, flush = false }: AreaShellProps) {
   const user = useAuthSession((state) => state.user);
   const { logout, pending } = useLogout();
 
@@ -47,7 +52,12 @@ export function AreaShell({ title, subtitle, nav }: AreaShellProps) {
   };
 
   return (
-    <div className="min-h-dvh bg-ocean-50 text-ocean-950">
+    <div
+      className={[
+        "bg-ocean-50 text-ocean-950",
+        flush ? "flex h-dvh flex-col overflow-hidden" : "min-h-dvh",
+      ].join(" ")}
+    >
       <header className="border-b border-ocean-900/10 bg-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2.5">
@@ -116,10 +126,19 @@ export function AreaShell({ title, subtitle, nav }: AreaShellProps) {
         ) : null}
       </header>
 
-      <div className="mx-auto max-w-6xl px-4 py-4 md:py-6">
+      <div
+        className={
+          flush
+            ? "flex min-h-0 flex-1 flex-col px-2 pb-2 pt-2"
+            : "mx-auto max-w-6xl px-4 py-4 md:py-6"
+        }
+      >
         <nav
           aria-label={`Seções de ${title}`}
-          className="mb-4 flex gap-1.5 overflow-x-auto pb-1"
+          className={[
+            "flex gap-1.5 overflow-x-auto pb-1",
+            flush ? "mb-2 shrink-0" : "mb-4",
+          ].join(" ")}
         >
           {nav.map((item) => {
             const Icon = item.icon;
@@ -144,9 +163,11 @@ export function AreaShell({ title, subtitle, nav }: AreaShellProps) {
           })}
         </nav>
 
-        <p className="mb-4 text-xs text-ocean-600">{subtitle}</p>
+        {flush ? null : (
+          <p className="mb-4 text-xs text-ocean-600">{subtitle}</p>
+        )}
 
-        <main>
+        <main className={flush ? "min-h-0 flex-1" : undefined}>
           <Outlet />
         </main>
       </div>

@@ -1,8 +1,9 @@
 /**
  * Tipo de estrutura operacional, como vem de `/api/v1/stations`.
  *
- * <p>Posto fixo tem posição cadastrada; base móvel aparece na última posição do
- * plantão e some do mapa quando o turno encerra ou o lease expira (RN17).
+ * <p>Posto fixo tem posição cadastrada; base móvel é uma estrutura própria, com
+ * nome e fotos, que aparece no mapa enquanto estiver ativa. A posição do
+ * plantão é outra coisa: ela é do guarda-vidas e pode estar longe da base.
  */
 export type StationKind = "FIXED" | "MOBILE";
 
@@ -46,6 +47,25 @@ export interface AdminStation {
   readonly statusNote: string | null;
   /** Fotos do posto/base, até 3. */
   readonly photoUrls: readonly string[];
+}
+
+/** Página de estruturas (`GET /api/v1/operations/stations|admin/stations`). */
+export interface StationPage {
+  readonly items: readonly AdminStation[];
+  /** Cursor opaco da próxima página; `null` na última. */
+  readonly nextCursor: string | null;
+  readonly hasMore: boolean;
+  /** Total que atende ao filtro, independente da página carregada. */
+  readonly total: number;
+}
+
+/** Filtros e cursor da lista de estruturas. */
+export interface StationListQuery {
+  readonly active?: boolean;
+  readonly kind?: StationKind;
+  readonly q?: string;
+  readonly limit?: number;
+  readonly cursor?: string;
 }
 
 /** Cadastro de posto/base na posição atual (RF11). */

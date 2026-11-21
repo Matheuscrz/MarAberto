@@ -57,9 +57,19 @@ const OperatorStationsPage = lazy(() =>
 const ImportMapPage = lazy(() =>
   import("@/features/management").then((m) => ({ default: m.ImportMapPage })),
 );
+const ManagementSituationPage = lazy(() =>
+  import("@/features/management").then((m) => ({
+    default: m.ManagementSituationPage,
+  })),
+);
 const ManagementTeamPage = lazy(() =>
   import("@/features/management").then((m) => ({
     default: m.ManagementTeamPage,
+  })),
+);
+const ManagementStationsPage = lazy(() =>
+  import("@/features/management").then((m) => ({
+    default: m.ManagementStationsPage,
   })),
 );
 const ManagementOccurrencesPage = lazy(() =>
@@ -132,10 +142,11 @@ export function AppRoutes() {
           </RequireRole>
         }
       >
-        {/* A importação é a primeira tela da coordenação (ADR-016). */}
-        <Route index element={withFallback(<ImportMapPage />)} />
+        {/* A home é o mapa de situação da coordenação (ADR-026). */}
+        <Route index element={withFallback(<ManagementSituationPage />)} />
         <Route path="importar" element={withFallback(<ImportMapPage />)} />
         <Route path="equipe" element={withFallback(<ManagementTeamPage />)} />
+        <Route path="postos" element={withFallback(<ManagementStationsPage />)} />
         <Route
           path="areas-nao-identificadas"
           element={withFallback(<ManagementUnmappedSignalsPage />)}

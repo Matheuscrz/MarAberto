@@ -4,6 +4,8 @@ import type {
   CreateStationInput,
   PublicStation,
   StationKind,
+  StationListQuery,
+  StationPage,
   StationPositionInput,
 } from "@/features/stations/types";
 
@@ -18,9 +20,14 @@ export async function fetchPublicStations(): Promise<readonly PublicStation[]> {
   return apiRequest<readonly PublicStation[]>("/api/v1/stations", {});
 }
 
-/** Todas as estruturas, inclusive inativas, para o painel da TI. */
-export async function fetchAdminStations(): Promise<readonly AdminStation[]> {
-  return apiRequest<readonly AdminStation[]>("/api/v1/admin/stations", {});
+/** Todas as estruturas, com filtros e página, para o painel da TI. */
+export async function fetchAdminStations(
+  query: StationListQuery = {},
+): Promise<StationPage> {
+  return apiRequest<StationPage>(
+    `/api/v1/admin/stations${stationQuery(query)}`,
+    {},
+  );
 }
 
 /**
@@ -28,10 +35,27 @@ export async function fetchAdminStations(): Promise<readonly AdminStation[]> {
  *
  * <p>A lista pública esconde a base sem turno aberto; aqui ela aparece com a
  * posição cadastrada e a data, para o operador saber onde a estrutura fica e
- * por que ela não está no mapa agora.
+ * por que ela não está no mapa agora. Filtros e cursor são os mesmos do painel.
  */
-export async function fetchFieldStations(): Promise<readonly AdminStation[]> {
-  return apiRequest<readonly AdminStation[]>("/api/v1/operations/stations", {});
+export async function fetchFieldStations(
+  query: StationListQuery = {},
+): Promise<StationPage> {
+  return apiRequest<StationPage>(
+    `/api/v1/operations/stations${stationQuery(query)}`,
+    {},
+  );
+}
+
+/** Monta a query-string da lista; valores ausentes ficam de fora. */
+function stationQuery(query: StationListQuery): string {
+  const params = new URLSearchParams();
+  if (query.active !== undefined) params.set("active", String(query.active));
+  if (query.kind) params.set("kind", query.kind);
+  if (query.q) params.set("q", query.q);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  if (query.cursor) params.set("cursor", query.cursor);
+  const serialized = params.toString();
+  return serialized ? `?${serialized}` : "";
 }
 
 /** Estrutura única no console de campo, inclusive desativada. */

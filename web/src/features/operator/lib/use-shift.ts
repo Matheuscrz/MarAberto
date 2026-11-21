@@ -17,18 +17,18 @@ import {
 import type { ShiftSnapshot, ShiftTarget } from "@/features/operator/types";
 
 /**
- * Sinal de vida do plantão: a cada 5 minutos o console faz **uma** chamada.
+ * Sinal de vida do plantão: a cada 60 segundos o console faz **uma** chamada.
  *
  * <p>Se o GPS já está autorizado, essa chamada é a atualização de posição (que
  * também renova o lease e mantém o limiar de 30 min de `position-stale-after`);
- * sem GPS, é o batimento vazio de `204`. Assim o plantão não expira na web nem
- * no app sem transformar o painel em rastreamento contínuo — 12 requisições por
- * hora, no máximo.
+ * sem GPS, é o batimento vazio de `204`. É a cadência do mapa de situação da
+ * coordenação (ADR-026): supervisão com até 60 s de atraso, sem histórico de
+ * trajeto e sem rastreamento em segundo plano.
  */
-const SIGNAL_INTERVAL_MS = 5 * 60 * 1000;
+const SIGNAL_INTERVAL_MS = 60 * 1000;
 
-/** Jitter para 50 consoles abertos não baterem no servidor no mesmo segundo. */
-const SIGNAL_JITTER_MS = 45 * 1000;
+/** Jitter curto para 50 consoles abertos não baterem no servidor no mesmo segundo. */
+const SIGNAL_JITTER_MS = 5 * 1000;
 
 const IDLE_EXPIRED_MESSAGE =
   "O plantão foi encerrado por inatividade: o console ficou sem contato com o servidor. Abra um novo plantão para voltar a receber chamados.";
@@ -64,7 +64,7 @@ export interface ShiftConsole {
  * <p>Abrir o plantão é o que torna o operador elegível para o SOS: a posição
  * informada (GPS do aparelho, com ajuste manual) é a última posição conhecida
  * usada pelo PostGIS. Depois disso o console oferece atualização sob demanda e
- * um sinal de vida a cada 5 minutos enquanto a aba está visível — nada é
+ * um sinal de vida a cada 60 segundos enquanto a aba está visível — nada é
  * rastreado em segundo plano e nenhuma coordenada é persistida no navegador.
  *
  * <p>O sinal de vida é o que sustenta o plantão: se o app é fechado à força, o
@@ -132,9 +132,8 @@ export function useShift(): ShiftConsole {
   /**
    * Recarrega só os destinos depois de abrir/encerrar o plantão.
    *
-   * <p>Sem isso o seletor continuaria mostrando a base móvel que o turno
-   * acabou de desativar (ou esconderia a que acabou de nascer) até a próxima
-   * leitura completa.
+   * <p>Sem isso o seletor poderia continuar mostrando uma base que acabou de
+   * ser desativada em outro aparelho até a próxima leitura completa.
    */
   const reloadTargets = useCallback(async () => {
     try {
@@ -187,7 +186,9 @@ export function useShift(): ShiftConsole {
       }
       try {
         if (autoPosition.current) {
-          const position = await getDevicePosition({ maximumAge: 60_000 });
+          // Uma captura por minuto: 15 s de cache evita reenviar o mesmo ponto
+          // quando o ciclo anterior acabou de ler o GPS.
+          const position = await getDevicePosition({ maximumAge: 15_000 });
           const updated = await updateShiftPosition(position);
           if (!cancelled && mounted.current) setShift(updated);
         } else {
@@ -307,8 +308,8 @@ export function useShift(): ShiftConsole {
         message:
           "Plantão encerrado. Você deixou de receber chamados do SOS até abrir um novo plantão.",
       });
-      // A base móvel do turno foi desativada no servidor: recarrega para ela
-      // sair do seletor sem esperar a próxima leitura completa.
+      // A base móvel tem ciclo próprio: ela continua ativa e no seletor depois
+      // do turno. A recarga só reconcilia o que outra pessoa mudou.
       await reloadTargets();
       return true;
     } catch (error) {

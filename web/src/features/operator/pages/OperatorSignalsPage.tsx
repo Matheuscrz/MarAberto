@@ -540,13 +540,10 @@ export function OperatorSignalsPage() {
           </label>
 
           <div className="grid gap-1.5">
-            <label
-              htmlFor="signal-photos"
-              className="flex items-center gap-1 text-xs font-bold text-ocean-800"
-            >
+            <span className="flex items-center gap-1 text-xs font-bold text-ocean-800">
               <Camera aria-hidden="true" className="size-3.5" />
               Fotos (opcional, até {MAX_SIGNAL_PHOTOS})
-            </label>
+            </span>
             <input
               id="signal-photos"
               ref={fileInput}
@@ -555,8 +552,29 @@ export function OperatorSignalsPage() {
               multiple
               disabled={photos.length >= MAX_SIGNAL_PHOTOS}
               onChange={(event) => addPhotos(event.target.files)}
-              className="block w-full cursor-pointer rounded-xl border border-dashed border-ocean-300 bg-ocean-50/60 px-3 py-2.5 text-xs font-semibold text-ocean-800 file:mr-3 file:rounded-lg file:border-0 file:bg-ocean-950 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:border-ocean-500 disabled:opacity-60"
+              className="peer sr-only"
             />
+            <div className="flex flex-wrap items-center gap-2">
+              <label
+                htmlFor="signal-photos"
+                className={[
+                  "inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-ocean-300 bg-ocean-50 px-3 text-xs font-bold text-ocean-900 transition hover:bg-ocean-100 peer-focus-visible:ring-2 peer-focus-visible:ring-ocean-500 peer-disabled:cursor-not-allowed peer-disabled:opacity-60",
+                  photos.length >= MAX_SIGNAL_PHOTOS
+                    ? "pointer-events-none opacity-60"
+                    : "cursor-pointer",
+                ].join(" ")}
+              >
+                <Camera aria-hidden="true" className="size-3.5" />
+                Escolher fotos
+              </label>
+              <span className="text-[11px] font-semibold text-ocean-600">
+                {photos.length === 0
+                  ? "Nenhuma foto adicionada"
+                  : `${photos.length} de ${MAX_SIGNAL_PHOTOS} adicionada${
+                      photos.length === 1 ? "" : "s"
+                    }`}
+              </span>
+            </div>
             <p className="text-[11px] leading-snug text-ocean-600">
               A foto é reduzida e tem os metadados do aparelho removidos no
               servidor. A localização do pin é a que você enviou, não o EXIF.

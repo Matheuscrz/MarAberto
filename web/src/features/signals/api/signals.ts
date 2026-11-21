@@ -5,6 +5,7 @@ import type {
   LaunchFlagInput,
   LaunchFlagResult,
   LaunchedFlag,
+  PublicUnmappedSignal,
 } from "@/features/signals/types";
 
 interface ApiSignal {
@@ -33,6 +34,22 @@ interface ApiSignal {
 export async function fetchActiveSignals(): Promise<readonly BeachFlagSignal[]> {
   const signals = await apiRequest<readonly ApiSignal[]>("/api/v1/flags", {});
   return signals.map(toSignal);
+}
+
+/**
+ * Alertas de sinalização lançada fora do mapeamento, para o mapa público.
+ *
+ * <p>O servidor devolve apenas registros pendentes de triagem e dentro da
+ * validade: o pin é o ponto do lançamento, não uma bandeira de praia. Decidir
+ * na triagem ou vencer tira o alerta da resposta.
+ */
+export async function fetchUnmappedAlerts(): Promise<
+  readonly PublicUnmappedSignal[]
+> {
+  return apiRequest<readonly PublicUnmappedSignal[]>(
+    "/api/v1/unmapped-signals",
+    {},
+  );
 }
 
 /**

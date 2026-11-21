@@ -5,7 +5,6 @@ import com.maraberto.operations.domain.StationKind;
 import com.maraberto.shared.api.ApiProblem;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -13,7 +12,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -23,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -51,19 +50,33 @@ public class OperationStationController {
     @GetMapping
     @Operation(
             summary = "Listar estruturas no console de campo",
-            description = "Devolve postos fixos e bases móveis, inclusive inativos. A base móvel "
+            description = "Devolve postos fixos e bases móveis, inclusive inativos, em páginas "
+                    + "ordenadas por tipo e nome. Filtre por `active`, `kind` e `q` (trecho do "
+                    + "nome); devolva `nextCursor` em `cursor` para a próxima página. A base móvel "
                     + "aparece mesmo sem plantão vivo, com a posição cadastrada e a data, para o "
                     + "operador saber onde ela fica e por que não está no mapa agora.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Estruturas cadastradas",
-                    content = @Content(array = @ArraySchema(
-                            schema = @Schema(implementation = StationAdminView.class)))),
+            @ApiResponse(responseCode = "200", description = "Página de estruturas",
+                    content = @Content(schema = @Schema(implementation = StationPage.class))),
+            @ApiResponse(responseCode = "400", description = "Cursor inválido (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class))),
             @ApiResponse(responseCode = "401", description = "Sem sessão válida (RFC 9457)",
                     content = @Content(mediaType = "application/problem+json",
                             schema = @Schema(implementation = ApiProblem.class)))
     })
-    public List<StationAdminView> list() {
-        return stationService.fieldStations();
+    public StationPage list(
+            @Parameter(description = "Filtra por estado; omitido devolve ativos e inativos")
+            @RequestParam(required = false) Boolean active,
+            @Parameter(description = "Filtra por tipo de estrutura")
+            @RequestParam(required = false) StationKind kind,
+            @Parameter(description = "Trecho do nome da estrutura")
+            @RequestParam(required = false) String q,
+            @Parameter(description = "Tamanho da página (1 a 100)", example = "50")
+            @RequestParam(required = false, defaultValue = "50") int limit,
+            @Parameter(description = "Cursor opaco devolvido em nextCursor")
+            @RequestParam(required = false) String cursor) {
+        return stationService.fieldStations(active, kind, q, limit, cursor);
     }
 
     @PostMapping

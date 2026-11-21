@@ -83,6 +83,23 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
               AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point,
                              LEAST(COALESCE(b.coverage_radius_m, :defaultRadiusMeters),
                                    :maxRadiusMeters))
+            UNION ALL
+            -- Plantão sem posto/base: só a posição do guarda-vidas conta. O
+            -- raio é o padrão da instalação; não há estrutura para herdar.
+            SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
+                   ST_Distance(s.last_position, sos.point) AS distance_m,
+                   (s.last_position_at IS NULL OR s.last_position_at < :staleBefore)
+                       AS position_stale
+            FROM shift_sessions s
+            JOIN sos ON TRUE
+            JOIN operational_users u ON u.id = s.user_id AND u.active
+            WHERE s.ended_at IS NULL
+              AND s.post_id IS NULL
+              AND s.mobile_base_id IS NULL
+              AND s.last_position IS NOT NULL
+              AND s.last_seen_at >= :aliveSince
+              AND ST_DWithin(s.last_position, sos.point,
+                             LEAST(:defaultRadiusMeters, :maxRadiusMeters))
             ORDER BY distance_m
             LIMIT :maxResults
             """;
@@ -118,6 +135,21 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
               AND s.last_seen_at >= :aliveSince
               AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point, :ringMeters)
               AND NOT (s.user_id = ANY (CAST(:excluded AS uuid[])))
+            UNION ALL
+            SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
+                   ST_Distance(s.last_position, sos.point) AS distance_m,
+                   (s.last_position_at IS NULL OR s.last_position_at < :staleBefore)
+                       AS position_stale
+            FROM shift_sessions s
+            JOIN sos ON TRUE
+            JOIN operational_users u ON u.id = s.user_id AND u.active
+            WHERE s.ended_at IS NULL
+              AND s.post_id IS NULL
+              AND s.mobile_base_id IS NULL
+              AND s.last_position IS NOT NULL
+              AND s.last_seen_at >= :aliveSince
+              AND ST_DWithin(s.last_position, sos.point, :ringMeters)
+              AND NOT (s.user_id = ANY (CAST(:excluded AS uuid[])))
             ORDER BY distance_m
             LIMIT :maxResults
             """;
@@ -151,6 +183,19 @@ public class JdbcEligibleRespondersRepository implements EligibleRespondersPort 
               AND s.last_seen_at >= :aliveSince
               AND s.mobile_base_id IS NOT NULL
               AND ST_DWithin(COALESCE(s.last_position, b.location), sos.point, :maxRadiusMeters)
+            UNION ALL
+            SELECT s.user_id, s.id, s.post_id, s.mobile_base_id,
+                   ST_Distance(s.last_position, sos.point) AS distance_m,
+                   (s.last_position_at IS NULL OR s.last_position_at < :staleBefore) AS position_stale
+            FROM shift_sessions s
+            JOIN sos ON TRUE
+            JOIN operational_users u ON u.id = s.user_id AND u.active
+            WHERE s.ended_at IS NULL
+              AND s.post_id IS NULL
+              AND s.mobile_base_id IS NULL
+              AND s.last_position IS NOT NULL
+              AND s.last_seen_at >= :aliveSince
+              AND ST_DWithin(s.last_position, sos.point, :maxRadiusMeters)
             ORDER BY distance_m
             LIMIT :fallbackResults
             """;

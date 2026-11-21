@@ -85,7 +85,7 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
     }
 
     @Test
-    void thePublicMapShowsTheActivePostAndTheLiveMobileBase() throws Exception {
+    void thePublicMapShowsActiveStructuresAtTheirRegisteredPosition() throws Exception {
         JsonNode stations = publicStations();
 
         JsonNode fixed = findStationByName(stations, "Posto Teste Fixo");
@@ -96,9 +96,10 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
         assertThat(fixed.get("name").asText()).isEqualTo("Posto Teste Fixo");
         assertThat(fixed.get("beachName").asText()).isEqualTo("Praia Teste");
         assertThat(mobile.get("name").asText()).isEqualTo("Base Teste Móvel");
-        // A base usa a última posição do plantão, não a posição cadastrada.
-        assertThat(mobile.get("latitude").asDouble()).isEqualTo(-10.030, within(0.0001));
-        assertThat(mobile.get("longitude").asDouble()).isEqualTo(-35.030, within(0.0001));
+        // A base é uma estrutura própria: o pin é a posição cadastrada dela, não
+        // a última posição do plantão (que é do guarda-vidas).
+        assertThat(mobile.get("latitude").asDouble()).isEqualTo(-10.040, within(0.0001));
+        assertThat(mobile.get("longitude").asDouble()).isEqualTo(-35.040, within(0.0001));
     }
 
     @Test
@@ -116,7 +117,7 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
         assertThat(findStationByName(publicStations(), "Posto Teste Fixo")).isNull();
         assertThat(findStationByName(publicStations(), "Base Teste Móvel")).isNotNull();
 
-        JsonNode adminList = adminStations();
+        JsonNode adminList = adminStations("Posto+Teste+Fixo");
         JsonNode fixed = findStationByName(adminList, "Posto Teste Fixo");
         assertThat(fixed.get("active").asBoolean()).isFalse();
         assertThat(fixed.get("statusNote").asText()).isEqualTo("Em reforma");
@@ -138,7 +139,8 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
                 new HttpEntity<>(Map.of("active", true), bearer(admin)),
                 String.class);
 
-        JsonNode fixed = findStationByName(adminStations(), "Posto Teste Fixo");
+        JsonNode fixed = findStationByName(
+                adminStations("Posto+Teste+Fixo"), "Posto Teste Fixo");
         assertThat(fixed.get("active").asBoolean()).isTrue();
         assertThat(fixed.get("deactivatedAt").isNull()).isTrue();
         assertThat(fixed.get("statusNote").asText()).isEqualTo("Em reforma");
@@ -156,18 +158,24 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
     }
 
     @Test
-    void aMobileBaseWithoutALiveShiftDisappearsFromTheMap() throws Exception {
+    void aMobileBaseStaysOnTheMapWhileActiveEvenWithoutALiveShift() throws Exception {
         jdbcTemplate.update("""
                 UPDATE shift_sessions
                    SET last_seen_at = NOW() - INTERVAL '20 minutes'
                  WHERE mobile_base_id = ?
                 """, mobileBaseId);
 
-        assertThat(findStationByName(publicStations(), "Base Teste Móvel")).isNull();
+        JsonNode base = findStationByName(publicStations(), "Base Teste Móvel");
+        assertThat(base)
+                .as("base móvel ativa não depende de plantão vivo")
+                .isNotNull();
+        // O pin é a posição cadastrada da estrutura, não a última do turno.
+        assertThat(base.get("latitude").asDouble()).isEqualTo(-10.040, within(0.0001));
+        assertThat(base.get("longitude").asDouble()).isEqualTo(-35.040, within(0.0001));
     }
 
     @Test
-    void theFieldConsoleListsStructuresEvenWhenTheMobileBaseIsOffTheMap() throws Exception {
+    void theFieldConsoleAndTheMapListTheMobileBaseEvenWithoutALiveShift() throws Exception {
         jdbcTemplate.update("""
                 UPDATE shift_sessions
                    SET last_seen_at = NOW() - INTERVAL '20 minutes'
@@ -179,9 +187,16 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
                  WHERE id = ?
                 """, mobileBaseId);
 
-        JsonNode stations = publicJson("/api/v1/operations/stations", lifeguard);
+        // A lista é paginada: o teste recorta pelo tipo e pelo nome em vez de
+        // baixar todas as estruturas deixadas pelos outros testes da suíte.
+        JsonNode stations = publicJson(
+                "/api/v1/operations/stations?kind=MOBILE&q=Base+Teste", lifeguard)
+                .get("items");
 
-        assertThat(findStationByName(publicStations(), "Base Teste Móvel")).isNull();
+        JsonNode publicBase = findStationByName(publicStations(), "Base Teste Móvel");
+        assertThat(publicBase).as("a base ativa aparece no mapa público").isNotNull();
+        assertThat(publicBase.get("latitude").asDouble()).isEqualTo(-10.040, within(0.0001));
+        assertThat(publicBase.get("longitude").asDouble()).isEqualTo(-35.040, within(0.0001));
         JsonNode mobile = findStationByName(stations, "Base Teste Móvel");
         assertThat(mobile).as("base sem plantão vivo continua no console de campo").isNotNull();
         assertThat(mobile.get("active").asBoolean()).isTrue();
@@ -190,7 +205,51 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
         assertThat(mobile.get("longitude").asDouble()).isEqualTo(-35.040, within(0.0001));
         assertThat(mobile.get("positionAccuracyM").asDouble()).isEqualTo(12.5);
         assertThat(mobile.get("positionUpdatedAt").isNull()).isFalse();
-        assertThat(findStationByName(stations, "Posto Teste Fixo")).isNotNull();
+        assertThat(publicJson(
+                "/api/v1/operations/stations?kind=FIXED&q=Posto+Teste+Fixo", lifeguard)
+                .get("items")).isNotEmpty();
+    }
+
+    @Test
+    void theStationListIsFilteredAndPagedOnTheServer() throws Exception {
+        JsonNode fixedActive = publicJson(
+                "/api/v1/admin/stations?active=true&kind=FIXED&q=Posto+Teste+Fixo", admin);
+        assertThat(fixedActive.get("total").asLong()).isEqualTo(1);
+        assertThat(fixedActive.get("items")).hasSize(1);
+        assertThat(fixedActive.get("items").get(0).get("name").asText())
+                .isEqualTo("Posto Teste Fixo");
+        assertThat(fixedActive.get("hasMore").asBoolean()).isFalse();
+        assertThat(fixedActive.get("nextCursor").isNull()).isTrue();
+
+        // Duas estruturas no escopo: a primeira página traz uma e o cursor leva à outra.
+        JsonNode first = publicJson("/api/v1/admin/stations?limit=1", admin);
+        assertThat(first.get("items")).hasSize(1);
+        assertThat(first.get("total").asLong()).isGreaterThanOrEqualTo(2);
+        assertThat(first.get("hasMore").asBoolean()).isTrue();
+
+        String cursor = first.get("nextCursor").asText();
+        JsonNode second = publicJson(
+                "/api/v1/admin/stations?limit=1&cursor=" + cursor, admin);
+        assertThat(second.get("items")).hasSize(1);
+        assertThat(second.get("items").get(0).get("id").asText())
+                .isNotEqualTo(first.get("items").get(0).get("id").asText());
+    }
+
+    @Test
+    void theActiveFilterKeepsTheDeactivatedPostOutOfTheList() throws Exception {
+        restTemplate.exchange(
+                "/api/v1/admin/stations/FIXED/" + postId,
+                HttpMethod.PATCH,
+                new HttpEntity<>(Map.of("active", false), bearer(admin)),
+                String.class);
+
+        JsonNode active = publicJson(
+                "/api/v1/admin/stations?active=true&q=Posto+Teste+Fixo", admin);
+        assertThat(findStationByName(active.get("items"), "Posto Teste Fixo")).isNull();
+
+        JsonNode inactive = publicJson(
+                "/api/v1/admin/stations?active=false&q=Posto+Teste+Fixo", admin);
+        assertThat(findStationByName(inactive.get("items"), "Posto Teste Fixo")).isNotNull();
     }
 
     @Test
@@ -299,8 +358,9 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
         return publicJson("/api/v1/stations");
     }
 
-    private JsonNode adminStations() throws Exception {
-        return publicJson("/api/v1/admin/stations", admin);
+    private JsonNode adminStations(String query) throws Exception {
+        return publicJson("/api/v1/admin/stations?limit=100&q=" + query, admin)
+                .get("items");
     }
 
     private JsonNode publicJson(String path) throws Exception {

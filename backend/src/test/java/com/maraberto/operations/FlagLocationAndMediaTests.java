@@ -19,6 +19,8 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -346,6 +348,74 @@ class FlagLocationAndMediaTests extends PostgisIntegrationTest {
         JsonNode all = objectMapper.readTree(get(coordinator.accessToken(),
                 "/api/v1/management/unmapped-signals").getBody());
         assertThat(all).hasSize(2);
+    }
+
+    @Test
+    void theUnmappedSignalIsAPublicAlertUntilItExpiresOrIsTriaged() throws Exception {
+        TestOperatorAuth.Session lifeguard = login("LIFEGUARD");
+        TestOperatorAuth.Session coordinator = login("COORDINATOR");
+
+        ResponseEntity<String> launched = launch(lifeguard.accessToken(), """
+                {
+                  "flag": "RED",
+                  "latitude": -20.500,
+                  "longitude": -44.000,
+                  "accuracyMeters": 18.0,
+                  "notes": "Ponto novo, ainda sem mapeamento",
+                  "validityHours": 1
+                }
+                """);
+        assertThat(launched.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        JsonNode launchedBody = objectMapper.readTree(launched.getBody());
+        assertThat(launchedBody.get("outcome").asText()).isEqualTo("UNMAPPED");
+        String signalId = launchedBody.get("unmapped").get("id").asText();
+
+        // Rota pública: o banhista vê o alerta sem autenticação e antes da
+        // triagem, com a mesma validade pedida no lançamento.
+        ResponseEntity<String> publicAlerts = restTemplate.getForEntity(
+                "/api/v1/unmapped-signals", String.class);
+        assertThat(publicAlerts.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode alerts = objectMapper.readTree(publicAlerts.getBody());
+        assertThat(alerts).hasSize(1);
+        JsonNode alert = alerts.get(0);
+        assertThat(alert.get("id").asText()).isEqualTo(signalId);
+        assertThat(alert.get("flag").asText()).isEqualTo("RED");
+        assertThat(alert.get("notes").asText()).isEqualTo("Ponto novo, ainda sem mapeamento");
+        assertThat(alert.get("latitude").asDouble()).isEqualTo(-20.500, within(0.0001));
+        assertThat(alert.get("longitude").asDouble()).isEqualTo(-44.000, within(0.0001));
+        assertThat(alert.get("accuracyMeters").asDouble()).isEqualTo(18.0);
+        assertThat(Instant.parse(alert.get("validUntil").asText()))
+                .as("o alerta usa a validade do lançamento, não o padrão de 12 h")
+                .isBefore(Instant.now().plus(Duration.ofHours(2)));
+
+        // Vencer tira o pin do mapa sem apagar o registro da triagem.
+        jdbcTemplate.update("""
+                UPDATE unmapped_signals
+                   SET valid_until = NOW() - INTERVAL '1 minute'
+                 WHERE id = CAST(? AS uuid)
+                """, signalId);
+        assertThat(objectMapper.readTree(restTemplate.getForEntity(
+                "/api/v1/unmapped-signals", String.class).getBody())).isEmpty();
+        assertThat(objectMapper.readTree(get(coordinator.accessToken(),
+                "/api/v1/management/unmapped-signals?status=PENDING").getBody()))
+                .as("o registro vencido continua na fila de triagem")
+                .hasSize(1);
+
+        // Decidir também tira o alerta do mapa, mesmo dentro da validade.
+        jdbcTemplate.update("""
+                UPDATE unmapped_signals
+                   SET valid_until = NOW() + INTERVAL '1 hour'
+                 WHERE id = CAST(? AS uuid)
+                """, signalId);
+        assertThat(objectMapper.readTree(restTemplate.getForEntity(
+                "/api/v1/unmapped-signals", String.class).getBody())).hasSize(1);
+        assertThat(decide(coordinator.accessToken(), signalId, """
+                {"decision": "NEEDS_MAPPING", "notes": "Pedir mapeamento da área"}
+                """).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(objectMapper.readTree(restTemplate.getForEntity(
+                "/api/v1/unmapped-signals", String.class).getBody()))
+                .as("registro triado sai do mapa público")
+                .isEmpty();
     }
 
     @Test

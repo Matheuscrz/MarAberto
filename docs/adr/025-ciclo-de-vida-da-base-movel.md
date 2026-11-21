@@ -1,8 +1,11 @@
 # ADR-025: Ciclo de vida da base móvel
 
-- Status: **Aceito (2026-11-17)** — opção A implementada na Fatia 10 (issue 63):
-  base móvel nasce no turno, é desativada ao encerrar o último plantão aberto que
-  a usa e não volta ao seletor. Ver `docs/history/fatias-10.md`.
+- Status: **Substituída pela ADR-028 (2026-11-20)** na parte que amarrava a base
+  ao turno. O diagnóstico e o histórico abaixo permanecem como registro.
+- Status anterior: Aceito (2026-11-17) — opção A implementada na Fatia 10
+  (issue 63): base móvel nasce no turno, é desativada ao encerrar o último
+  plantão aberto que a usa e não volta ao seletor. Ver
+  `docs/history/fatias-10.md`.
 - Relacionadas: ADR-016 (áreas), ADR-022 (ciclo de vida da sinalização e das estruturas),
   ADR-024 (estrutura em campo), ADR-026 (painel da coordenação).
 - Requisitos: RF11, RF39, RN17; `shift_sessions.mobile_base_id`, `mobile_bases`.
