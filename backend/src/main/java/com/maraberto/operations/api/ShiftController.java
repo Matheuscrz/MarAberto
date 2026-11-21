@@ -50,7 +50,9 @@ public class ShiftController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Abrir plantão",
-            description = "Vincula o operador autenticado a um posto fixo ou a uma base móvel.")
+            description = "Vincula o operador autenticado a um posto fixo, a uma base móvel ou a "
+                    + "nenhuma estrutura (plantão livre). Sem estrutura, a posição do aparelho é "
+                    + "obrigatória e entra na seleção espacial do SOS.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Plantão aberto",
                     content = @Content(schema = @Schema(implementation = ShiftResponse.class))),
@@ -160,9 +162,9 @@ public class ShiftController {
 
     @Schema(name = "OpenShiftRequest", description = "Destino e posição inicial do plantão")
     public record OpenShiftRequest(
-            @Schema(description = "Posto fixo do plantão (mutuamente exclusivo com a base móvel)")
+            @Schema(description = "Posto fixo do plantão (opcional; no máximo um destino com a base)")
             UUID postId,
-            @Schema(description = "Base móvel do plantão (mutuamente exclusivo com o posto fixo)")
+            @Schema(description = "Base móvel do plantão (opcional; no máximo um destino com o posto)")
             UUID mobileBaseId,
             @Schema(description = "Latitude atual do aparelho, quando aplicável", example = "-10.9472")
             @DecimalMin("-90.0") @DecimalMax("90.0") Double latitude,

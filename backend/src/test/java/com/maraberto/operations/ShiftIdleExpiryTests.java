@@ -206,7 +206,7 @@ class ShiftIdleExpiryTests extends PostgisIntegrationTest {
     }
 
     @Test
-    void lazyExpiryDeactivatesTheMobileBase() {
+    void lazyExpiryKeepsTheMobileBaseActive() {
         UUID baseId = EmergencyTestData.createMobileBase(
                 jdbcTemplate, LATITUDE, LONGITUDE, 500);
         UUID shiftId = openMobileShift(baseId);
@@ -216,15 +216,15 @@ class ShiftIdleExpiryTests extends PostgisIntegrationTest {
                 .getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT active FROM mobile_bases WHERE id = ?", Boolean.class, baseId))
-                .as("o lease vencido desativa a base móvel do turno")
-                .isFalse();
+                .as("o turno cai, mas a base móvel tem ciclo próprio")
+                .isTrue();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT deactivated_at FROM mobile_bases WHERE id = ?", Instant.class, baseId))
-                .isNotNull();
+                .isNull();
     }
 
     @Test
-    void sweepDeactivatesTheMobileBaseOfAnIdleShift() {
+    void sweepKeepsTheMobileBaseOfAnIdleShiftActive() {
         UUID baseId = EmergencyTestData.createMobileBase(
                 jdbcTemplate, LATITUDE, LONGITUDE, 500);
         UUID shiftId = openMobileShift(baseId);
@@ -233,7 +233,7 @@ class ShiftIdleExpiryTests extends PostgisIntegrationTest {
         assertThat(shiftService.closeIdleShifts()).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT active FROM mobile_bases WHERE id = ?", Boolean.class, baseId))
-                .isFalse();
+                .isTrue();
     }
 
     private UUID openShift() {

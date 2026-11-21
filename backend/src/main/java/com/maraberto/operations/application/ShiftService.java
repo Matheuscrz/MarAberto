@@ -73,29 +73,35 @@ public class ShiftService {
             """;
 
     private final ShiftSessionRepository shiftSessions;
-    private final StationService stationService;
     private final NamedParameterJdbcTemplate jdbc;
     private final Duration idleTimeout;
 
     public ShiftService(
             ShiftSessionRepository shiftSessions,
-            StationService stationService,
             NamedParameterJdbcTemplate jdbc,
             @Value("${maraberto.dispatch.shift-idle-timeout:PT15M}") Duration idleTimeout) {
         this.shiftSessions = shiftSessions;
-        this.stationService = stationService;
         this.jdbc = jdbc;
         this.idleTimeout = idleTimeout;
     }
 
     @Transactional
     public ShiftSession open(UUID userId, OpenShiftCommand command) {
-        if ((command.postId() == null) == (command.mobileBaseId() == null)) {
+        if (command.postId() != null && command.mobileBaseId() != null) {
             throw new IllegalArgumentException(
-                    "Informe exatamente um destino de plantão: posto fixo ou base móvel");
+                    "Informe no máximo um destino de plantão: posto fixo ou base móvel");
         }
         requireCompletePair(command.latitude(), command.longitude());
-        requireActiveTarget(command.postId(), command.mobileBaseId());
+        // Plantão livre: sem posto nem base, a posição do aparelho é o que
+        // coloca o guarda-vidas na seleção espacial do SOS.
+        if (command.postId() == null && command.mobileBaseId() == null
+                && (command.latitude() == null || command.longitude() == null)) {
+            throw new IllegalArgumentException(
+                    "Plantão sem posto ou base exige a posição atual do aparelho");
+        }
+        if (command.postId() != null || command.mobileBaseId() != null) {
+            requireActiveTarget(command.postId(), command.mobileBaseId());
+        }
         if (shiftSessions.existsByUserIdAndEndedAtIsNull(userId)) {
             throw new ShiftAlreadyOpenException();
         }
@@ -194,10 +200,7 @@ public class ShiftService {
             return shift;
         }
         shift.end(now, ShiftEndReason.MANUAL);
-        // O flush é necessário antes de decidir sobre a base móvel: a consulta
-        // de "outro plantão aberto" é SQL e precisa ver este turno já encerrado.
-        shiftSessions.saveAndFlush(shift);
-        deactivateMobileBaseIfUnused(shift);
+        shiftSessions.save(shift);
         return shift;
     }
 
@@ -208,7 +211,8 @@ public class ShiftService {
      * do plantão já aplicam o prazo (expiração preguiçosa). O job existe só para
      * carimbar {@code ended_at}/{@code ended_reason} nas linhas e manter o painel
      * da coordenação e os relatórios honestos — roda com intervalo largo e toca
-     * apenas as linhas vencidas (índice parcial da V9).
+     * apenas as linhas vencidas (índice parcial da V9). A base móvel não é
+     * desativada: ela tem ciclo próprio, independente do turno.
      *
      * @return quantidade de plantões encerrados nesta passagem
      */
@@ -221,21 +225,14 @@ public class ShiftService {
                     updated_at = NOW()
                 WHERE ended_at IS NULL
                   AND last_seen_at < NOW() - make_interval(secs => :seconds)
-                RETURNING mobile_base_id
                 """;
-        List<UUID> closed = jdbc.query(sql, new MapSqlParameterSource()
+        int closed = jdbc.update(sql, new MapSqlParameterSource()
                 .addValue("reason", ShiftEndReason.IDLE_TIMEOUT.name())
-                .addValue("seconds", idleTimeout.toSeconds()),
-                (resultSet, rowNumber) ->
-                        resultSet.getObject("mobile_base_id", UUID.class));
-        closed.stream()
-                .filter(mobileBaseId -> mobileBaseId != null)
-                .distinct()
-                .forEach(stationService::deactivateMobileBaseIfUnused);
-        if (!closed.isEmpty()) {
-            log.info("Plantões encerrados por inatividade: {}", closed.size());
+                .addValue("seconds", idleTimeout.toSeconds()));
+        if (closed > 0) {
+            log.info("Plantões encerrados por inatividade: {}", closed);
         }
-        return closed.size();
+        return closed;
     }
 
     /**
@@ -267,23 +264,16 @@ public class ShiftService {
             return false;
         }
         shift.end(lastSeen, ShiftEndReason.IDLE_TIMEOUT);
-        // Ver o comentário em close(): o SQL de desativação precisa do turno
-        // já marcado como encerrado.
-        shiftSessions.saveAndFlush(shift);
-        deactivateMobileBaseIfUnused(shift);
+        shiftSessions.save(shift);
         log.info("Plantão encerrado por inatividade: {}", shift.getId());
         return true;
     }
 
-    /**
-     * Base móvel deixa de ser destino quando o turno nela termina (ADR-025).
-     * Posto fixo continua ativo: ele não pertence ao turno.
-     */
-    private void deactivateMobileBaseIfUnused(ShiftSession shift) {
-        stationService.deactivateMobileBaseIfUnused(shift.getMobileBaseId());
-    }
-
-    private void requireActiveTarget(UUID postId, UUID mobileBaseId) {        String sql = postId != null
+    private void requireActiveTarget(UUID postId, UUID mobileBaseId) {
+        if (postId == null && mobileBaseId == null) {
+            return;
+        }
+        String sql = postId != null
                 ? "SELECT active FROM lifeguard_posts WHERE id = :id"
                 : "SELECT active FROM mobile_bases WHERE id = :id";
         UUID id = postId != null ? postId : mobileBaseId;

@@ -85,7 +85,7 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
     }
 
     @Test
-    void thePublicMapShowsTheActivePostAndTheLiveMobileBase() throws Exception {
+    void thePublicMapShowsActiveStructuresAtTheirRegisteredPosition() throws Exception {
         JsonNode stations = publicStations();
 
         JsonNode fixed = findStationByName(stations, "Posto Teste Fixo");
@@ -96,9 +96,10 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
         assertThat(fixed.get("name").asText()).isEqualTo("Posto Teste Fixo");
         assertThat(fixed.get("beachName").asText()).isEqualTo("Praia Teste");
         assertThat(mobile.get("name").asText()).isEqualTo("Base Teste Móvel");
-        // A base usa a última posição do plantão, não a posição cadastrada.
-        assertThat(mobile.get("latitude").asDouble()).isEqualTo(-10.030, within(0.0001));
-        assertThat(mobile.get("longitude").asDouble()).isEqualTo(-35.030, within(0.0001));
+        // A base é uma estrutura própria: o pin é a posição cadastrada dela, não
+        // a última posição do plantão (que é do guarda-vidas).
+        assertThat(mobile.get("latitude").asDouble()).isEqualTo(-10.040, within(0.0001));
+        assertThat(mobile.get("longitude").asDouble()).isEqualTo(-35.040, within(0.0001));
     }
 
     @Test
@@ -157,18 +158,24 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
     }
 
     @Test
-    void aMobileBaseWithoutALiveShiftDisappearsFromTheMap() throws Exception {
+    void aMobileBaseStaysOnTheMapWhileActiveEvenWithoutALiveShift() throws Exception {
         jdbcTemplate.update("""
                 UPDATE shift_sessions
                    SET last_seen_at = NOW() - INTERVAL '20 minutes'
                  WHERE mobile_base_id = ?
                 """, mobileBaseId);
 
-        assertThat(findStationByName(publicStations(), "Base Teste Móvel")).isNull();
+        JsonNode base = findStationByName(publicStations(), "Base Teste Móvel");
+        assertThat(base)
+                .as("base móvel ativa não depende de plantão vivo")
+                .isNotNull();
+        // O pin é a posição cadastrada da estrutura, não a última do turno.
+        assertThat(base.get("latitude").asDouble()).isEqualTo(-10.040, within(0.0001));
+        assertThat(base.get("longitude").asDouble()).isEqualTo(-35.040, within(0.0001));
     }
 
     @Test
-    void theFieldConsoleListsStructuresEvenWhenTheMobileBaseIsOffTheMap() throws Exception {
+    void theFieldConsoleAndTheMapListTheMobileBaseEvenWithoutALiveShift() throws Exception {
         jdbcTemplate.update("""
                 UPDATE shift_sessions
                    SET last_seen_at = NOW() - INTERVAL '20 minutes'
@@ -186,7 +193,10 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
                 "/api/v1/operations/stations?kind=MOBILE&q=Base+Teste", lifeguard)
                 .get("items");
 
-        assertThat(findStationByName(publicStations(), "Base Teste Móvel")).isNull();
+        JsonNode publicBase = findStationByName(publicStations(), "Base Teste Móvel");
+        assertThat(publicBase).as("a base ativa aparece no mapa público").isNotNull();
+        assertThat(publicBase.get("latitude").asDouble()).isEqualTo(-10.040, within(0.0001));
+        assertThat(publicBase.get("longitude").asDouble()).isEqualTo(-35.040, within(0.0001));
         JsonNode mobile = findStationByName(stations, "Base Teste Móvel");
         assertThat(mobile).as("base sem plantão vivo continua no console de campo").isNotNull();
         assertThat(mobile.get("active").asBoolean()).isTrue();

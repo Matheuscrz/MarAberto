@@ -87,11 +87,12 @@ public class StationService {
     }
 
     /**
-     * Estruturas no console de campo, inclusive a base móvel sem plantão vivo.
+     * Estruturas no console de campo, ativas ou não.
      *
-     * <p>A lista pública esconde a base móvel sem turno aberto; o operador
-     * precisa dela aqui para saber onde o posto/base foi cadastrado e por que
-     * ele não está no mapa agora. Ler não altera permissão: a ativação em campo
+     * <p>É a mesma visão da lista pública, com o histórico inativo que a
+     * coordenação mantém: o operador precisa saber onde o posto/base foi
+     * cadastrado e por que ele saiu do mapa. A base móvel ativa aparece com ou
+     * sem plantão aberto. Ler não altera permissão: a ativação em campo
      * continua restrita à estrutura do próprio plantão (ADR-024).
      */
     @Transactional(readOnly = true)
@@ -335,42 +336,6 @@ public class StationService {
             throw new StationNotFoundException();
         }
         return findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
-    }
-
-    /**
-     * Desativa a base móvel quando o último plantão aberto nela termina
-     * (ADR-025).
-     *
-     * <p>A base móvel existe para o turno: criada na posição atual ao abrir o
-     * plantão, ela não deve acumular no seletor de destinos depois que o turno
-     * acaba. A desativação só acontece quando não há nenhum outro plantão
-     * aberto usando a mesma base — dois operadores podem compartilhá-la. Nada é
-     * apagado: a linha continua em {@code GET /api/v1/operations/stations} e as
-     * FKs de plantões e ocorrências permanecem válidas.
-     */
-    @Transactional
-    public void deactivateMobileBaseIfUnused(UUID mobileBaseId) {
-        if (mobileBaseId == null) {
-            return;
-        }
-        jdbc.update("""
-                        UPDATE mobile_bases m
-                           SET active = FALSE,
-                               deactivated_at = COALESCE(m.deactivated_at, NOW()),
-                               status_note = CAST(:note AS text),
-                               updated_at = NOW()
-                         WHERE m.id = :id
-                           AND m.active
-                           AND NOT EXISTS (
-                               SELECT 1
-                                 FROM shift_sessions s
-                                WHERE s.mobile_base_id = m.id
-                                  AND s.ended_at IS NULL)
-                        """,
-                new MapSqlParameterSource()
-                        .addValue("id", mobileBaseId)
-                        .addValue("note",
-                                "Desativada automaticamente ao encerrar o plantão em base móvel."));
     }
 
     private java.util.Optional<StationAdminView> findAdmin(StationKind kind, UUID id) {
