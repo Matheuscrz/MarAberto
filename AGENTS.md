@@ -11,7 +11,7 @@
 
 ## Stack e Arquitetura
 
-- **Backend (`backend/`)**: Java 21, Spring Boot 3.3.4, **Spring Modulith 1.2.13** (ADR-011), Virtual Threads, Gradle, PostgreSQL 16 + PostGIS, Flyway (`ddl-auto: validate`, **próxima migration: `V23`**), Redis (opcional no boot, nunca fonte da verdade), RabbitMQ (opcional), S3 (Garage).
+- **Backend (`backend/`)**: Java 21, Spring Boot 3.3.4, **Spring Modulith 1.2.13** (ADR-011), Virtual Threads, Gradle, PostgreSQL 16 + PostGIS, Flyway (`ddl-auto: validate`, **próxima migration: `V24`**), Redis (opcional no boot, nunca fonte da verdade), RabbitMQ (opcional), S3 (Garage).
   - **Módulos (`com.maraberto.*`)**: `identity`, `region`, `beaches`, `operations`, `emergency`, `occurrences`, `safety`, `tides` (inativo), `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`.
   - **Fronteira estrita**: Módulos importam apenas pacotes `api/` públicos de outros módulos (`ModularityTests`).
 - **Frontend (`web/`)**: Vite 8, React 19, TypeScript 6, Tailwind 4, MapLibre GL + PMTiles, STOMP/WebSocket.
@@ -21,10 +21,10 @@
 
 - **Operacional (`/operador`)**:
   - **SOS**: Listas (fila aberta e em atendimento) ordenadas **do mais recente para o mais antigo** (`created_at DESC` / `acknowledged_at DESC`) no backend e cliente. Permitir **encerrar atendimento na própria tela do SOS** via `SosCallCloser`.
-  - **Plantão e Bases Móveis (ADR-025)**: Bases móveis encerradas saem do seletor; abrir turno em base móvel exige criar nova base na posição atual e desativá-la ao encerrar o plantão. Lease renovado a cada 60 s (`PT15M` timeout), só com a aba visível.
+  - **Plantão e Bases Móveis (ADR-028, substitui a ADR-025)**: O plantão pode ser aberto **sem estrutura** (posição do aparelho obrigatória, raio padrão no SOS) ou vinculado a um posto fixo/base móvel **ativa**. A base móvel é estrutura própria, cadastrada com nome e fotos, aparece no mapa enquanto ativa e **não é desativada ao encerrar o turno**. Lease renovado a cada 60 s (`PT15M` timeout), só com a aba visível.
   - **Ocorrências**: Paginação por cursor (`occurred_at DESC, number DESC`) e filtros de situação, CIOSP e período (`from`/`to`) aplicados no servidor; encerramento (`V20`) fecha o SOS na mesma transação.
 - **Coordenação (`/gestao`)**:
-  - **Home (Mapa de Situação - ADR-026)**: Mapa de tela cheia com camadas alternáveis **em memória** (`useState`, sem storage): guarda-vidas em plantão, postos/bases ativos, sinalizações vigentes e ocorrências ativas/CIOSP pendente. Todo pin e cada item da lista lateral são clicáveis (`flyTo` + ficha `StationSheet`/`SignalSheet`/`OccurrenceSheet`). Equipe consultada a cada 15 s; posição do plantão (ponto único, sem histórico) a cada 60 s. Se `beaches` estiver vazia, exibir convite para `/gestao/importar`.
+  - **Home (Mapa de Situação - ADR-026)**: Mapa de tela cheia com camadas alternáveis **em memória** (`useState`, sem storage): guarda-vidas em plantão, postos/bases ativos, sinalizações vigentes, **áreas não mapeadas** (alertas de sinalização em triagem, ADR-029) e ocorrências ativas/CIOSP pendente. Todo pin e cada item da lista lateral são clicáveis (`flyTo` + ficha `StationSheet`/`SignalSheet`/`UnmappedSignalSheet`/`OccurrenceSheet`). Equipe consultada a cada 15 s; posição do plantão (ponto único, sem histórico) a cada 60 s. Se `beaches` estiver vazia, exibir convite para `/gestao/importar`.
   - **Equipe (`/gestao/equipe`)**: dados reais de `GET /api/v1/management/team` (`COORDINATOR`/`ADMIN`, `Cache-Control: no-store`), com posição/`stale`, lease e contadores do dia. Encerrar o plantão remove o guarda-vidas da lista e do mapa.
   - **Abas**: Importar mapa (`/gestao/importar`), Equipe, Postos (`/gestao/postos` — leitura e ativação/desativação de estruturas via `/api/v1/operations/stations`, com abas Ativos/Inativos/Todos, tipo, busca e paginação por cursor), CMS Aprender (`/gestao/aprender` — CRUD de vídeos YouTube e materiais de divulgação), Ocorrências e Triagem (`unmapped_signals`, com link para o ponto exato no Google Maps).
 - **Administração (`/admin`)**:
@@ -51,17 +51,18 @@
 
 | Fatia  | Escopo                                                                                                                                               | Migrations               |
 | :----- | :--------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------- |
-| **12** | Módulo `content` (CMS Aprender na gestão + tela `/aprender`) + atualização dinâmica de bandeiras/postos no mapa público                              | `V23`                    |
-| **13** | Gestão real de usuários (senha temporária obrigatória), blacklist JWT Redis, MFA (TOTP) e consulta de `audit_log` (ADR-027)                          | `V24`, `V25`             |
+| **12** | Módulo `content` (CMS Aprender na gestão + tela `/aprender`) + atualização dinâmica de bandeiras/postos no mapa público                              | `V24`                    |
+| **13** | Gestão real de usuários (senha temporária obrigatória), blacklist JWT Redis, MFA (TOTP) e consulta de `audit_log` (ADR-027)                          | `V25`, `V26`             |
 | **14** | Coleta anônima de amostras de ocupação no mapa público                                                                                               | —                        |
-| **15** | Revisão de dual write/idempotência, otimizações SQL, virtual threads, testes k6, SonarQube e docs (`backend/ARCHITECTURE.md`, `web/ARCHITECTURE.md`) | `V26`                    |
+| **15** | Revisão de dual write/idempotência, otimizações SQL, virtual threads, testes k6, SonarQube e docs (`backend/ARCHITECTURE.md`, `web/ARCHITECTURE.md`) | `V27`                    |
 
 ## Onde Consultar Detalhes
 
 - `docs/Requirements.md` e `docs/Architecture.md` — requisitos e arquitetura detalhada.
-- `docs/adr/001`–`027` — decisões arquiteturais.
+- `docs/adr/001`–`029` — decisões arquiteturais.
 - `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` — diagnóstico das fatias 10–13.
 - `docs/history/fatias-1-9-e-endurecimento.md` — histórico das Fatias 1 a 9 (migrações `V1`–`V20`).
 - `docs/history/fatias-10.md` — histórico da Fatia 10 (sem migration; `V21` e `V22` vieram depois).
 - `docs/history/fatias-11.md` — histórico da Fatia 11 (mapa de situação, equipe real e aba de postos; sem migration).
 - `docs/history/correcoes-pos-fatia-11.md` — correções pós-Fatia 11 (equipe, ficha no mapa, mídia, filtros/paginação e Google Maps; migration `V22`).
+- `docs/history/alertas-e-plantao-livre.md` — alerta de área não mapeada no mapa (público e gestão) e plantão sem estrutura/base móvel autônoma; migration `V23` (ADR-028/ADR-029).
