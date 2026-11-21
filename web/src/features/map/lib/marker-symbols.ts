@@ -23,6 +23,7 @@ export type SymbolKey =
   | "STATION_FIXED"
   | "STATION_MOBILE"
   | "SIGNAL"
+  | "UNMAPPED_SIGNAL"
   | "LIFEGUARD"
   | "OCCURRENCE"
   | "CAMERA";
@@ -55,6 +56,21 @@ export const MARKER_SYMBOLS: Record<SymbolKey, readonly SymbolPrimitive[]> = {
       d: "M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z",
     },
     { kind: "line", x1: 4, y1: 22, x2: 4, y2: 15 },
+  ],
+  /**
+   * Ponto de interrogação dentro de um pino: a sinalização existe, mas a área
+   * ainda não está no mapeamento (RF12/RN17).
+   */
+  UNMAPPED_SIGNAL: [
+    {
+      kind: "path",
+      d: "M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7z",
+    },
+    {
+      kind: "path",
+      d: "M9.6 8.9a2.4 2.4 0 1 1 3.3 2.2c-.7.4-1 .9-1 1.7",
+    },
+    { kind: "circle", cx: 12, cy: 15.6, r: 0.9 },
   ],
   /** Câmera: selo de que a sinalização tem registro fotográfico. */
   CAMERA: [

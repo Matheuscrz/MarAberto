@@ -4,6 +4,7 @@ import type { FeatureCollection, Polygon } from "geojson";
 import {
   ExternalLink,
   MapPin,
+  MapPinOff,
   MapPinned,
   Siren,
   Users,
@@ -18,12 +19,13 @@ import { useBathingAreasAvailability } from "@/features/management/hooks/use-bat
 import { useManagementTeam } from "@/features/management/hooks/use-management-team";
 import type { TeamMember } from "@/features/management/types";
 import { StationSheet, usePublicStations } from "@/features/stations";
-import { SignalSheet, useSignals } from "@/features/signals";
+import { SignalSheet, UnmappedSignalSheet, useSignals, useUnmappedAlerts } from "@/features/signals";
 import { OccurrenceSheet, useOccurrences } from "@/features/occurrences";
 
 const LIFEGUARD_PREFIX = "lifeguard:";
 const STATION_PREFIX = "station:";
 const SIGNAL_PREFIX = "signal:";
+const UNMAPPED_PREFIX = "unmapped:";
 const OCCURRENCE_PREFIX = "occurrence:";
 
 /** O mapa de situação não desenha zonas de risco nem geometria de praia. */
@@ -52,6 +54,12 @@ const LAYERS = [
     icon: MapPin,
   },
   {
+    id: "unmapped",
+    label: "Áreas não mapeadas",
+    hint: "alerta em triagem, fora do KML",
+    icon: MapPinOff,
+  },
+  {
     id: "occurrences",
     label: "Ocorrências ativas",
     hint: "em atendimento ou CIOSP pendente",
@@ -65,6 +73,7 @@ const ALL_LAYERS: Record<LayerId, boolean> = {
   lifeguards: true,
   stations: true,
   signals: true,
+  unmapped: true,
   occurrences: true,
 };
 
@@ -73,8 +82,9 @@ const ALL_LAYERS: Record<LayerId, boolean> = {
  *
  * <p>A home de `/gestao` é um mapa de tela cheia com camadas ligáveis em
  * memória: guarda-vidas em plantão (posição de até 60 s), postos/bases ativos,
- * sinalizações vigentes e ocorrências que ainda pedem ação. Todo pin e todo
- * item da lista lateral centralizam o mapa e abrem a ficha já existente.
+ * sinalizações vigentes, alertas lançados fora do mapeamento (em triagem) e
+ * ocorrências que ainda pedem ação. Todo pin e todo item da lista lateral
+ * centralizam o mapa e abrem a ficha já existente.
  *
  * <p>A posição do operador só existe nesta rota autenticada e `no-store`; o
  * cliente não guarda coordenada em storage. As camadas valem para a sessão e
@@ -90,6 +100,7 @@ export function ManagementSituationPage() {
   const team = useManagementTeam();
   const { stations } = usePublicStations();
   const { signals } = useSignals();
+  const { alerts: unmappedAlerts } = useUnmappedAlerts();
   const occurrences = useOccurrences({ active: true, pageSize: 100 });
   const areas = useBathingAreasAvailability();
 
@@ -138,6 +149,20 @@ export function ManagementSituationPage() {
       }
     }
 
+    if (layers.unmapped) {
+      for (const alert of unmappedAlerts) {
+        result.push({
+          id: `${UNMAPPED_PREFIX}${alert.id}`,
+          kind: "UNMAPPED_SIGNAL",
+          latitude: alert.latitude,
+          longitude: alert.longitude,
+          label: "Área não mapeada",
+          color: FLAG_COLORS[alert.flag],
+          hasPhoto: alert.photoUrls.length > 0,
+        });
+      }
+    }
+
     if (layers.occurrences) {
       for (const occurrence of occurrences.occurrences) {
         if (occurrence.latitude === null || occurrence.longitude === null) {
@@ -154,7 +179,7 @@ export function ManagementSituationPage() {
     }
 
     return result;
-  }, [layers, team.team, stations, signals, occurrences.occurrences]);
+  }, [layers, team.team, stations, signals, unmappedAlerts, occurrences.occurrences]);
 
   const markersById = useMemo(
     () => new Map(markers.map((marker) => [marker.id, marker])),
@@ -202,6 +227,12 @@ export function ManagementSituationPage() {
     const id = selectedMarkerId.slice(SIGNAL_PREFIX.length);
     return signals.find((signal) => signal.id === id) ?? null;
   }, [selectedMarkerId, signals]);
+
+  const selectedUnmapped = useMemo(() => {
+    if (!selectedMarkerId?.startsWith(UNMAPPED_PREFIX)) return null;
+    const id = selectedMarkerId.slice(UNMAPPED_PREFIX.length);
+    return unmappedAlerts.find((alert) => alert.id === id) ?? null;
+  }, [selectedMarkerId, unmappedAlerts]);
 
   const selectedOccurrenceId = useMemo(() => {
     if (!selectedMarkerId?.startsWith(OCCURRENCE_PREFIX)) return null;
@@ -378,6 +409,14 @@ export function ManagementSituationPage() {
           <SignalSheet
             signal={selectedSignal}
             onClose={() => setSelectedMarkerId(null)}
+          />
+        ) : null}
+
+        {selectedUnmapped ? (
+          <UnmappedSignalSheet
+            alert={selectedUnmapped}
+            onClose={() => setSelectedMarkerId(null)}
+            triageHref="/gestao/areas-nao-identificadas"
           />
         ) : null}
 

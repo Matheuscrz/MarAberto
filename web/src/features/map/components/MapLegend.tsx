@@ -36,6 +36,15 @@ export function MapLegend({ className = "" }: MapLegendProps) {
             Sinalização <span className="text-ocean-500">(cor da bandeira)</span>
           </span>
         </li>
+        <li className="flex items-center gap-1.5">
+          <span className="grid size-5 shrink-0 place-items-center rounded-[50%_50%_50%_4px] border-2 border-dashed border-amber-100 bg-amber-700 text-white shadow-sm">
+            <MarkerSymbol symbol="UNMAPPED_SIGNAL" className="size-3" />
+          </span>
+          <span>
+            Área não mapeada{" "}
+            <span className="text-ocean-500">(alerta em triagem)</span>
+          </span>
+        </li>
       </ul>
     </aside>
   );

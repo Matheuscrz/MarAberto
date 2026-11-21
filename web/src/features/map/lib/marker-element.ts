@@ -9,6 +9,7 @@ const DEFAULT_PIN_COLORS: Record<MapMarkerKind, string> = {
   STATION_FIXED: "#1c6f8d",
   STATION_MOBILE: "#d6923f",
   SIGNAL: "#ef4444",
+  UNMAPPED_SIGNAL: "#b45309",
   LIFEGUARD: "#0f766e",
   OCCURRENCE: "#b91c1c",
 };
@@ -60,6 +61,8 @@ function symbolOf(kind: MapMarkerKind): SymbolKey {
       return "STATION_MOBILE";
     case "SIGNAL":
       return "SIGNAL";
+    case "UNMAPPED_SIGNAL":
+      return "UNMAPPED_SIGNAL";
     case "LIFEGUARD":
       return "LIFEGUARD";
     case "OCCURRENCE":
@@ -76,6 +79,8 @@ function accessibleLabel(marker: MapMarker): string {
       return `Base móvel de guarda-vidas: ${label}`;
     case "SIGNAL":
       return `Sinalização com bandeira: ${label}`;
+    case "UNMAPPED_SIGNAL":
+      return `Alerta em área não mapeada: ${label}`;
     case "LIFEGUARD":
       return `Guarda-vidas em plantão: ${label}`;
     case "OCCURRENCE":
@@ -103,10 +108,17 @@ function renderInner(inner: HTMLSpanElement, marker: MapMarker): void {
     pin.classList.add("mld-map-pin--dark-icon");
   }
 
+  if (marker.kind === "UNMAPPED_SIGNAL") {
+    pin.classList.add("mld-map-pin--unmapped");
+  }
+
   pin.appendChild(createSymbolSvg(symbolOf(marker.kind)));
   inner.appendChild(pin);
 
-  if (marker.kind === "SIGNAL" && marker.hasPhoto) {
+  if (
+    (marker.kind === "SIGNAL" || marker.kind === "UNMAPPED_SIGNAL") &&
+    marker.hasPhoto
+  ) {
     const badge = document.createElement("span");
     badge.className = "mld-photo-badge pointer-events-none";
     badge.appendChild(createSymbolSvg("CAMERA"));

@@ -7,8 +7,10 @@ import type {
 /**
  * Fila de sinalizações registradas fora do mapeamento.
  *
- * <p>O guarda-vidas registra o ponto; a coordenação decide o que ele é. Nada
- * desta fila é publicado no mapa: são registros de campo para triagem.
+ * <p>O guarda-vidas registra o ponto; a coordenação decide o que ele é. O
+ * registro pendente também alimenta o alerta do mapa público e do mapa de
+ * situação enquanto estiver dentro da validade; a fila continua sendo a fonte
+ * completa para a triagem.
  */
 export async function fetchUnmappedSignals(
   status?: UnmappedSignalStatus,

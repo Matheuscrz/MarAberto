@@ -151,6 +151,13 @@
     color: var(--color-ocean-950);
   }
 
+  /* Alerta fora do mapeamento: borda tracejada lembra que a área ainda não
+     está no mapa oficial. */
+  .mld-map-pin--unmapped {
+    border-style: dashed;
+    border-color: #fffbeb;
+  }
+
   .mld-photo-badge {
     position: absolute;
     top: -5px;

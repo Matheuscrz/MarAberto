@@ -35,7 +35,7 @@ import {
   useRiskZones,
 } from "@/features/beaches";
 import type { Beach, BeachesOutletContext } from "@/features/beaches";
-import { SignalSheet, useSignals } from "@/features/signals";
+import { SignalSheet, UnmappedSignalSheet, useSignals, useUnmappedAlerts } from "@/features/signals";
 import { StationSheet, usePublicStations } from "@/features/stations";
 import { MapLegend, type MapFocus, type MapMarker } from "@/features/map";
 import { DEMO_DATA_NOTICE } from "@/shared/lib/notices";
@@ -59,6 +59,7 @@ function MapFallback() {
 
 const STATION_PREFIX = "station:";
 const SIGNAL_PREFIX = "signal:";
+const UNMAPPED_PREFIX = "unmapped:";
 
 const quickTabs = [
   { to: "/praias", label: "Praias", icon: MapPin },
@@ -93,9 +94,11 @@ export function RootLayout() {
 
   // As praias vêm da importação do mapa, restritas a 30 km da posição atual.
   const nearby = useNearbyBeaches();
-  // Postos, bases e bandeiras são decididos pelo servidor: posto inativo, base
-  // sem plantão vivo e bandeira vencida não chegam nesta resposta.
+  // Postos, bases e bandeiras são decididos pelo servidor: posto e base
+  // inativos somem, bandeira vencida não chega nesta resposta. O alerta fora do
+  // mapeamento também vem filtrado: pendente de triagem e dentro da validade.
   const { signals } = useSignals();
+  const { alerts: unmappedAlerts } = useUnmappedAlerts();
   const { stations } = usePublicStations();
   const { zones: riskZones } = useRiskZones();
 
@@ -124,9 +127,21 @@ export function RootLayout() {
           ? `${signal.beachName} · ${signal.sectorLabel}`
           : signal.beachName,
         color: FLAG_COLORS[signal.flag],
+        hasPhoto: signal.photoUrls.length > 0,
+      })),
+      // Alerta lançado fora do mapeamento: o pin é o ponto do lançamento, sem
+      // praia ou setor. A cor é a que o guarda-vidas lançou.
+      ...unmappedAlerts.map((alert) => ({
+        id: `${UNMAPPED_PREFIX}${alert.id}`,
+        kind: "UNMAPPED_SIGNAL" as const,
+        latitude: alert.latitude,
+        longitude: alert.longitude,
+        label: "Área não mapeada",
+        color: FLAG_COLORS[alert.flag],
+        hasPhoto: alert.photoUrls.length > 0,
       })),
     ],
-    [stations, signals],
+    [stations, signals, unmappedAlerts],
   );
 
   // A praia selecionada mora na URL (`?praia=<id>`), não em estado paralelo:
@@ -151,6 +166,12 @@ export function RootLayout() {
     const id = selectedMarkerId.slice(STATION_PREFIX.length);
     return stations.find((station) => station.id === id) ?? null;
   }, [selectedMarkerId, stations]);
+
+  const selectedUnmapped = useMemo(() => {
+    if (!selectedMarkerId?.startsWith(UNMAPPED_PREFIX)) return null;
+    const id = selectedMarkerId.slice(UNMAPPED_PREFIX.length);
+    return unmappedAlerts.find((alert) => alert.id === id) ?? null;
+  }, [selectedMarkerId, unmappedAlerts]);
 
   // Geometria da praia selecionada: buscada uma vez por praia e desenhada pelo mapa.
   const beachMapState = useBeachMap(selectedBeach?.id ?? null);
@@ -464,6 +485,13 @@ export function RootLayout() {
         {selectedStation ? (
           <StationSheet
             station={selectedStation}
+            onClose={() => setSelectedMarkerId(null)}
+          />
+        ) : null}
+
+        {selectedUnmapped ? (
+          <UnmappedSignalSheet
+            alert={selectedUnmapped}
             onClose={() => setSelectedMarkerId(null)}
           />
         ) : null}

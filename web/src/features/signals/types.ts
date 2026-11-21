@@ -102,7 +102,29 @@ export interface UnmappedSignal {
   readonly nearestBeachDistanceMeters: number | null;
   readonly decisionNotes: string | null;
   readonly createdAt: string;
+  /** Fim do alerta no mapa; depois disso só a triagem. */
+  readonly validUntil: string;
   readonly decidedAt: string | null;
+  readonly photoUrls: readonly string[];
+}
+
+/**
+ * Alerta público de sinalização em área ainda não mapeada.
+ *
+ * <p>O ponto pode ser uma praia nova, um trecho de rio sem KML ou uma barragem
+ * que passou a receber banhistas. Não é bandeira de praia: não há área, setor
+ * nem ficha para herdar. Aparece no mapa enquanto está pendente de triagem e
+ * dentro da validade — decidir ou vencer tira o pin sem apagar o registro.
+ */
+export interface PublicUnmappedSignal {
+  readonly id: string;
+  readonly flag: FlagColor;
+  readonly notes: string | null;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly accuracyMeters: number | null;
+  readonly createdAt: string;
+  readonly validUntil: string;
   readonly photoUrls: readonly string[];
 }
 

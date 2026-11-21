@@ -55,9 +55,11 @@ type DecisionMode = Exclude<UnmappedSignalDecision, "PENDING"> | null;
  * <p>O guarda-vidas pode estar numa praia nova, num trecho de rio sem KML ou
  * numa barragem que passou a receber banhistas. O registro chega aqui em vez de
  * ser recusado: a coordenação confere o ponto e as fotos, identifica uma área
- * existente, pede um novo mapeamento ou descarta o registro. Nada é publicado
- * no mapa enquanto a triagem não decide — e decidir também não publica
- * bandeira: a sinalização continua sendo lançada em campo.
+ * existente, pede um novo mapeamento ou descarta o registro. Enquanto está
+ * pendente e dentro da validade, o mesmo ponto aparece no mapa público e no de
+ * situação como alerta de área não mapeada. Decidir ou vencer tira o alerta do
+ * mapa — decidir não publica bandeira: a sinalização continua sendo lançada em
+ * campo.
  */
 export function ManagementUnmappedSignalsPage() {
   const [filter, setFilter] = useState<UnmappedSignalsFilter>("PENDING");
@@ -150,8 +152,9 @@ export function ManagementUnmappedSignalsPage() {
           </p>
           <p className="mt-1 text-[11px] leading-snug text-ocean-700">
             Um lançamento por localização aparece aqui quando o ponto não está
-            em nenhuma área de banho ativa. Nada é publicado no mapa até a
-            triagem.
+            em nenhuma área de banho ativa. Enquanto estiver pendente e dentro
+            da validade, ele também aparece no mapa como alerta de área não
+            mapeada.
           </p>
         </Card>
       ) : (
@@ -270,6 +273,13 @@ function UnmappedSignalCard({
             {signal.reportedPostName
               ? ` • ${sanitizeText(signal.reportedPostName, 80)}`
               : ""}
+          </p>
+          <p className="mt-0.5 text-[11px] text-ocean-500">
+            {!pending
+              ? "Alerta encerrado pela triagem."
+              : `Alerta no mapa até ${formatDateTime(
+                  signal.validUntil,
+                )}; depois disso segue só na triagem.`}
           </p>
         </div>
         <span

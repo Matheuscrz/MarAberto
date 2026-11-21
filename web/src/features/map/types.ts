@@ -4,13 +4,15 @@
  * a lista e resolve o item selecionado de volta para a entidade do seu domínio.
  *
  * Praia não tem marcador: a praia é acessada pela lista e pela ficha, e o
- * mapa mostra apenas postos/bases, sinalizações, guarda-vidas em plantão e
- * ocorrências ativas (mapa de situação da coordenação, ADR-026).
+ * mapa mostra apenas postos/bases, sinalizações (inclusive as lançadas fora do
+ * mapeamento), guarda-vidas em plantão e ocorrências ativas (mapa de situação
+ * da coordenação, ADR-026).
  */
 export type MapMarkerKind =
   | "STATION_FIXED"
   | "STATION_MOBILE"
   | "SIGNAL"
+  | "UNMAPPED_SIGNAL"
   | "LIFEGUARD"
   | "OCCURRENCE";
 
