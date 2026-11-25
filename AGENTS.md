@@ -61,10 +61,4 @@
 - `docs/Requirements.md` e `docs/Architecture.md` — requisitos e arquitetura detalhada.
 - `docs/adr/001`–`029` — decisões arquiteturais.
 - `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` — diagnóstico das fatias 10–13.
-- `docs/history/fatias-1-9-e-endurecimento.md` — histórico das Fatias 1 a 9 (migrações `V1`–`V20`).
-- `docs/history/fatias-10.md` — histórico da Fatia 10 (sem migration; `V21` e `V22` vieram depois).
-- `docs/history/fatias-11.md` — histórico da Fatia 11 (mapa de situação, equipe real e aba de postos; sem migration).
-- `docs/history/correcoes-pos-fatia-11.md` — correções pós-Fatia 11 (equipe, ficha no mapa, mídia, filtros/paginação e Google Maps; migration `V22`).
-- `docs/history/alertas-e-plantao-livre.md` — alerta de área não mapeada no mapa (público e gestão) e plantão sem estrutura/base móvel autônoma; migration `V23` (ADR-028/ADR-029).
-- `docs/history/administracao-de-identidade-e-auditoria.md` — administração real de usuários com senha temporária e trilha `audit_log` consultável; migrations `V24`/`V25` (ADR-027).
-- `docs/history/atualizacao-dinamica-do-mapa-publico.md` — eventos `FlagChanged`/`PostChanged`, cache público de 10 s e atualização do mapa já carregado sem F5 (sem migration).
+- Histórico das entregas anteriores (Fatias 1–12, correções pós-Fatia 11, alertas/plantão livre, identidade/auditoria e atualização dinâmica do mapa público) está persistido no `ai-memory` (`history/*`).
