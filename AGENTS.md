@@ -1,6 +1,6 @@
 # AGENTS.md — Contexto Operacional do Projeto MarAberto
 
-> **Regra 0 (Higiene de Contexto):** Este arquivo deve permanecer **curto, direto e estritamente operacional**. **Não** registre histórico de entregas passadas, changelogs ou explicações longas aqui — todo histórico vai para `ai-memory`, especificações para `docs/Requirements.md` e `docs/Architecture.md`, e decisões para `docs/adr/`. **Use sempre o `ai-memory` já configurado no ambiente** para persistir e consultar contexto contínuo de trabalho em vez de inflar este arquivo. Se o código divergir deste documento, **confie no código** e atualize ambos no mesmo PR.
+> **Regra 0 (Higiene de Contexto):** Este arquivo deve permanecer **curto, direto e estritamente operacional**. **Não** registre histórico de entregas passadas, changelogs ou explicações longas aqui — todo histórico vai para `ai-memory`, especificações para `docs/Requirements.md` e `docs/Architecture.md`, e decisões para `docs/adr/`. **Use sempre o `ai-memory` já configurado no ambiente e acessível via cli** para persistir e consultar contexto contínuo de trabalho em vez de inflar este arquivo. Se o código divergir deste documento, **confie no código** e atualize ambos no mesmo PR.
 
 ## Visão Geral e Escopo (v1)
 
