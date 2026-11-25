@@ -30,6 +30,29 @@ export function HomePage() {
     );
   }, [query, beaches]);
 
+  if (status === "idle") {
+    return (
+      <div className="mt-2 rounded-xl border border-ocean-200 bg-ocean-50/60 p-4">
+        <p className="text-xs font-bold text-ocean-950">
+          Ative a localização para ver praias próximas
+        </p>
+        <p className="mt-1 text-[11px] leading-snug text-ocean-700">
+          Sua posição não é salva nem rastreada: ela serve só para listar
+          praias num raio de 30 km e gerar uma previsão aproximada de ocupação
+          por setor (não é um valor real).
+        </p>
+        <button
+          type="button"
+          onClick={onRetryLocation}
+          className="mt-2.5 inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-ocean-950 px-3 text-[11px] font-bold text-white transition hover:bg-ocean-900"
+        >
+          <Navigation aria-hidden="true" className="size-3.5" />
+          Permitir localização
+        </button>
+      </div>
+    );
+  }
+
   if (status === "locating") {
     return (
       <div className="mt-2 flex items-center gap-2 rounded-xl border border-ocean-100 bg-ocean-50/60 p-4">

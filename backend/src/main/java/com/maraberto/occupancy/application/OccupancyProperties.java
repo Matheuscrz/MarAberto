@@ -22,13 +22,25 @@ public class OccupancyProperties {
     /** Amostra mínima para sair de "dados insuficientes" (RN06). */
     private int minimumSample = 5;
 
-    /** A partir daqui a faixa é MODERATE. */
+    /** Espaço médio ocupado por uma pessoa na área de banho (em m²). */
+    private double spacePerPersonSqm = 10.0;
+
+    /** Fração da capacidade estimada a partir da qual a faixa é MODERATE. */
+    private double moderateRatio = 0.25;
+
+    /** Fração da capacidade estimada a partir da qual a faixa é HIGH. */
+    private double highRatio = 0.50;
+
+    /** Fração da capacidade estimada a partir da qual a faixa é EXTREME. */
+    private double extremeRatio = 0.80;
+
+    /** A partir daqui a faixa é MODERATE quando não há área válida (fallback). */
     private int moderateThreshold = 10;
 
-    /** A partir daqui a faixa é HIGH. */
+    /** A partir daqui a faixa é HIGH quando não há área válida (fallback). */
     private int highThreshold = 25;
 
-    /** A partir daqui a faixa é EXTREME. */
+    /** A partir daqui a faixa é EXTREME quando não há área válida (fallback). */
     private int extremeThreshold = 50;
 
     /** Tempo máximo de retenção das amostras; o expurgo roda na escrita. */

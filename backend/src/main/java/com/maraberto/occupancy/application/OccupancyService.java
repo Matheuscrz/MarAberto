@@ -83,17 +83,18 @@ public class OccupancyService {
                 Instant.now().minus(properties.getWindow()).atOffset(ZoneOffset.UTC);
         int windowMinutes = (int) properties.getWindow().toMinutes();
         int samples = repository.countDistinctTokens(beachId, since);
+        double beachAreaSqm = repository.areaSquareMeters(beachId);
 
         List<OccupancySector> sectors = repository
                 .countDistinctTokensBySector(beachId, since).stream()
-                .map(sector -> band(sector.sectorId(), sector.samples()))
+                .map(sector -> band(sector.sectorId(), sector.samples(), sector.areaSqm()))
                 .toList();
 
         OccupancyStatus status = statusOf(samples);
         return new BeachOccupancy(
                 beachId,
                 status,
-                status == OccupancyStatus.ESTIMATE ? level(samples) : null,
+                status == OccupancyStatus.ESTIMATE ? level(samples, beachAreaSqm) : null,
                 windowMinutes,
                 sectors);
     }
@@ -108,7 +109,9 @@ public class OccupancyService {
         if (status == OccupancyStatus.INSUFFICIENT) {
             return new OccupancyEstimate(beachId, status, null, windowMinutes);
         }
-        return new OccupancyEstimate(beachId, status, level(samples), windowMinutes);
+        double beachAreaSqm = repository.areaSquareMeters(beachId);
+        return new OccupancyEstimate(
+                beachId, status, level(samples, beachAreaSqm), windowMinutes);
     }
 
     private OccupancyStatus statusOf(int samples) {
@@ -117,13 +120,26 @@ public class OccupancyService {
                 : OccupancyStatus.ESTIMATE;
     }
 
-    private OccupancySector band(UUID sectorId, int samples) {
+    private OccupancySector band(UUID sectorId, int samples, double areaSqm) {
         OccupancyStatus status = statusOf(samples);
         return new OccupancySector(
-                sectorId, status, status == OccupancyStatus.ESTIMATE ? level(samples) : null);
+                sectorId, status, status == OccupancyStatus.ESTIMATE ? level(samples, areaSqm) : null);
     }
 
-    private OccupancyLevel level(int samples) {
+    private OccupancyLevel level(int samples, double areaSqm) {
+        if (areaSqm > 0 && properties.getSpacePerPersonSqm() > 0) {
+            double occupancyRatio = (samples * properties.getSpacePerPersonSqm()) / areaSqm;
+            if (occupancyRatio < properties.getModerateRatio()) {
+                return OccupancyLevel.LOW;
+            }
+            if (occupancyRatio < properties.getHighRatio()) {
+                return OccupancyLevel.MODERATE;
+            }
+            if (occupancyRatio < properties.getExtremeRatio()) {
+                return OccupancyLevel.HIGH;
+            }
+            return OccupancyLevel.EXTREME;
+        }
         if (samples < properties.getModerateThreshold()) {
             return OccupancyLevel.LOW;
         }

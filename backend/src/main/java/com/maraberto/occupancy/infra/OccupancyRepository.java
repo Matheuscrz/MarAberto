@@ -62,8 +62,20 @@ public class OccupancyRepository {
         return count == null ? 0 : count;
     }
 
+    /** Área total da área de banho em metros quadrados (PostGIS geography). */
+    public double areaSquareMeters(UUID beachId) {
+        Double area = jdbc.queryForObject("""
+                        SELECT COALESCE(ST_Area(boundary::geography), 0)
+                          FROM beaches
+                         WHERE id = ?
+                        """,
+                Double.class, beachId);
+        return area == null ? 0.0 : area;
+    }
+
     /**
-     * Amostras distintas por setor ativo da área, na ordem do mapeamento.
+     * Amostras distintas e área disponível (m²) por setor ativo da área, na
+     * ordem do mapeamento.
      *
      * <p>O {@code LEFT JOIN} devolve também os setores sem nenhuma amostra
      * (contagem zero), para o cliente mostrar "dados insuficientes" no setor
@@ -74,7 +86,8 @@ public class OccupancyRepository {
     public List<SectorSample> countDistinctTokensBySector(UUID beachId, OffsetDateTime since) {
         return jdbc.query("""
                         SELECT s.id AS sector_id,
-                               count(DISTINCT o.anonymous_token) AS samples
+                               count(DISTINCT o.anonymous_token) AS samples,
+                               COALESCE(ST_Area(s.geometry::geography), 0) AS area_sqm
                           FROM beach_sectors s
                           LEFT JOIN occupancy_samples o
                                  ON o.sector_id = s.id
@@ -82,12 +95,13 @@ public class OccupancyRepository {
                                 AND o.created_at >= ?
                          WHERE s.beach_id = ?
                            AND s.active
-                         GROUP BY s.id, s.display_order
+                         GROUP BY s.id, s.display_order, s.geometry
                          ORDER BY s.display_order, s.id
                         """,
                 (rs, rowNum) -> new SectorSample(
                         rs.getObject("sector_id", UUID.class),
-                        rs.getInt("samples")),
+                        rs.getInt("samples"),
+                        rs.getDouble("area_sqm")),
                 beachId, since, beachId);
     }
 
@@ -98,7 +112,7 @@ public class OccupancyRepository {
     public record SectorLocation(UUID sectorId, UUID beachId) {
     }
 
-    /** Contagem distinta de aparelhos num setor; zero quando ninguém amostrou. */
-    public record SectorSample(UUID sectorId, int samples) {
+    /** Contagem distinta de aparelhos e área (m²) de um setor. */
+    public record SectorSample(UUID sectorId, int samples, double areaSqm) {
     }
 }

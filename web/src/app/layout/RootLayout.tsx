@@ -14,6 +14,7 @@ import {
   Info,
   LogIn,
   MapPin,
+  Navigation,
   Phone,
   Search,
   Shield,
@@ -32,6 +33,7 @@ import {
   sectorShapes,
   useBeachMap,
   useNearbyBeaches,
+  useOccupancyCollector,
   useRiskZones,
 } from "@/features/beaches";
 import type { Beach, BeachesOutletContext } from "@/features/beaches";
@@ -87,13 +89,20 @@ export function RootLayout() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [privacyNoticeDismissed, setPrivacyNoticeDismissed] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const beachParam = searchParams.get("praia");
   const sectorParam = searchParams.get("setor");
 
-  // As praias vêm da importação do mapa, restritas a 30 km da posição atual.
-  const nearby = useNearbyBeaches();
+  // As praias vêm da importação do mapa após consentimento explícito na UI
+  // (nunca por prompt automático no carregamento).
+  const nearby = useNearbyBeaches({ autoLocate: false });
+  useOccupancyCollector({
+    enabled: nearby.locationConsent,
+    coords: nearby.lastCoords,
+    sectorId: nearby.position?.sectorId ?? null,
+  });
   // Postos, bases e bandeiras são decididos pelo servidor: posto e base
   // inativos somem, bandeira vencida não chega nesta resposta. O alerta fora do
   // mapeamento também vem filtrado: pendente de triagem e dentro da validade.
@@ -216,6 +225,7 @@ export function RootLayout() {
       status: nearby.status,
       position: nearby.position,
       message: nearby.message,
+      locationConsent: nearby.locationConsent,
       onRetryLocation: nearby.retry,
       onSelectBeach: (beach) => {
         setSelectedMarkerId(null);
@@ -229,6 +239,7 @@ export function RootLayout() {
       nearby.status,
       nearby.position,
       nearby.message,
+      nearby.locationConsent,
       nearby.retry,
       setSearchParams,
     ],
@@ -270,6 +281,7 @@ export function RootLayout() {
             beachArea={beachArea}
             beachSectors={beachSectors}
             focus={focus}
+            onLocated={nearby.locateFromPosition}
           />
         </Suspense>
       </div>
@@ -388,6 +400,58 @@ export function RootLayout() {
         </div>
 
         <BackendUnavailableBanner />
+
+        {!nearby.locationConsent && !privacyNoticeDismissed && !isPanelExpanded ? (
+          <div className="pointer-events-auto rounded-2xl border border-ocean-200 bg-white/95 p-3 shadow-lg backdrop-blur">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                <Navigation
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-ocean-600"
+                />
+                <div>
+                  <p className="text-xs font-bold text-ocean-950">
+                    Localização anônima opcional
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-snug text-ocean-700">
+                    Sua posição não é salva nem rastreada: serve só para listar
+                    praias próximas e calcular uma previsão aproximada de
+                    ocupação por setor (não é um valor real; 1 amostra a cada
+                    15 min).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPrivacyNoticeDismissed(true)}
+                aria-label="Dispensar aviso de localização"
+                className="grid size-7 shrink-0 place-items-center rounded-lg text-ocean-500 hover:bg-ocean-50"
+              >
+                <X aria-hidden="true" className="size-3.5" />
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPrivacyNoticeDismissed(true);
+                  nearby.retry();
+                }}
+                className="inline-flex min-h-8 items-center gap-1.5 rounded-xl bg-ocean-950 px-3 text-[11px] font-bold text-white transition hover:bg-ocean-900"
+              >
+                <Navigation aria-hidden="true" className="size-3.5" />
+                Permitir localização
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrivacyNoticeDismissed(true)}
+                className="inline-flex min-h-8 items-center rounded-xl px-2.5 text-[11px] font-bold text-ocean-700 hover:bg-ocean-50"
+              >
+                Agora não
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {isPanelExpanded ? (
           <section

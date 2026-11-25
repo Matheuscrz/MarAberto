@@ -178,6 +178,10 @@ maraberto:
     # a API responde "dados insuficientes" em vez de expor a contagem.
     window: ${OCCUPANCY_WINDOW:PT15M}
     minimum-sample: ${OCCUPANCY_MINIMUM_SAMPLE:5}
+    space-per-person-sqm: ${OCCUPANCY_SPACE_PER_PERSON_SQM:10.0}
+    moderate-ratio: ${OCCUPANCY_MODERATE_RATIO:0.25}
+    high-ratio: ${OCCUPANCY_HIGH_RATIO:0.50}
+    extreme-ratio: ${OCCUPANCY_EXTREME_RATIO:0.80}
     moderate-threshold: ${OCCUPANCY_MODERATE_THRESHOLD:10}
     high-threshold: ${OCCUPANCY_HIGH_THRESHOLD:25}
     extreme-threshold: ${OCCUPANCY_EXTREME_THRESHOLD:50}
