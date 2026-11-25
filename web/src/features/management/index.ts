@@ -4,6 +4,7 @@ export { ManagementTeamPage } from "@/features/management/pages/ManagementTeamPa
 export { ManagementStationsPage } from "@/features/management/pages/ManagementStationsPage";
 export { ManagementOccurrencesPage } from "@/features/management/pages/ManagementOccurrencesPage";
 export { ManagementUnmappedSignalsPage } from "@/features/management/pages/ManagementUnmappedSignalsPage";
+export { ManagementLearnPage } from "@/features/management/pages/ManagementLearnPage";
 export {
   fetchBathingAreaOptions,
   importBathingAreas,

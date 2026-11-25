@@ -1,3 +1,8 @@
+export type {
+  ContentKind,
+  EducationalContentItem,
+} from "@/shared/types/content";
+
 export interface EducationalVideo {
   readonly id: string;
   readonly title: string;

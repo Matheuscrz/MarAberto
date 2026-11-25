@@ -1,6 +1,6 @@
 # AGENTS.md — Contexto Operacional do Projeto MarAberto
 
-> **Regra 0 (Higiene de Contexto):** Este arquivo deve permanecer **curto, direto e estritamente operacional**. **Não** registre histórico de entregas passadas, changelogs ou explicações longas aqui — todo histórico vai para `docs/history/`, especificações para `docs/Requirements.md` e `docs/Architecture.md`, e decisões para `docs/adr/`. **Use sempre o `ai-memory` já configurado no ambiente** para persistir e consultar contexto contínuo de trabalho em vez de inflar este arquivo. Se o código divergir deste documento, **confie no código** e atualize ambos no mesmo PR.
+> **Regra 0 (Higiene de Contexto):** Este arquivo deve permanecer **curto, direto e estritamente operacional**. **Não** registre histórico de entregas passadas, changelogs ou explicações longas aqui — todo histórico vai para `ai-memory`, especificações para `docs/Requirements.md` e `docs/Architecture.md`, e decisões para `docs/adr/`. **Use sempre o `ai-memory` já configurado no ambiente** para persistir e consultar contexto contínuo de trabalho em vez de inflar este arquivo. Se o código divergir deste documento, **confie no código** e atualize ambos no mesmo PR.
 
 ## Visão Geral e Escopo (v1)
 
@@ -61,10 +61,4 @@
 - `docs/Requirements.md` e `docs/Architecture.md` — requisitos e arquitetura detalhada.
 - `docs/adr/001`–`029` — decisões arquiteturais.
 - `docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md` — diagnóstico das fatias 10–13.
-- `docs/history/fatias-1-9-e-endurecimento.md` — histórico das Fatias 1 a 9 (migrações `V1`–`V20`).
-- `docs/history/fatias-10.md` — histórico da Fatia 10 (sem migration; `V21` e `V22` vieram depois).
-- `docs/history/fatias-11.md` — histórico da Fatia 11 (mapa de situação, equipe real e aba de postos; sem migration).
-- `docs/history/correcoes-pos-fatia-11.md` — correções pós-Fatia 11 (equipe, ficha no mapa, mídia, filtros/paginação e Google Maps; migration `V22`).
-- `docs/history/alertas-e-plantao-livre.md` — alerta de área não mapeada no mapa (público e gestão) e plantão sem estrutura/base móvel autônoma; migration `V23` (ADR-028/ADR-029).
-- `docs/history/administracao-de-identidade-e-auditoria.md` — administração real de usuários com senha temporária e trilha `audit_log` consultável; migrations `V24`/`V25` (ADR-027).
-- `docs/history/atualizacao-dinamica-do-mapa-publico.md` — eventos `FlagChanged`/`PostChanged`, cache público de 10 s e atualização do mapa já carregado sem F5 (sem migration).
+- Histórico das entregas anteriores (Fatias 1–12, correções pós-Fatia 11, alertas/plantão livre, identidade/auditoria e atualização dinâmica do mapa público) está persistido no `ai-memory` (`history/*`).

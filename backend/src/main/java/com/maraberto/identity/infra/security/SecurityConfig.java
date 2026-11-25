@@ -78,6 +78,7 @@ public class SecurityConfig {
                                 "/api/v1/media/**",
                                 "/api/v1/risk-zones/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/tides/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/content/**").permitAll()
                         // Ocupação é anônima por definição (RF10/RNF04): amostra e leitura
                         // públicas, sem sessão.
                         .requestMatchers("/api/v1/occupancy/**").permitAll()
