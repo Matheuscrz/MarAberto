@@ -1,5 +1,9 @@
 package com.maraberto.operations.application;
 
+import com.maraberto.audit.api.AuditActions;
+import com.maraberto.audit.api.AuditEntityTypes;
+import com.maraberto.audit.api.AuditEvent;
+import com.maraberto.audit.api.AuditTrail;
 import com.maraberto.media.api.MediaCatalog;
 import com.maraberto.operations.api.CreateStationRequest;
 import com.maraberto.operations.api.PublicStation;
@@ -17,6 +21,7 @@ import java.sql.Types;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -51,14 +56,17 @@ public class StationService {
     private final PublicOperationsRepository publicRepository;
     private final MediaCatalog mediaCatalog;
     private final NamedParameterJdbcTemplate jdbc;
+    private final AuditTrail auditTrail;
 
     public StationService(
             PublicOperationsRepository publicRepository,
             MediaCatalog mediaCatalog,
-            NamedParameterJdbcTemplate jdbc) {
+            NamedParameterJdbcTemplate jdbc,
+            AuditTrail auditTrail) {
         this.publicRepository = publicRepository;
         this.mediaCatalog = mediaCatalog;
         this.jdbc = jdbc;
+        this.auditTrail = auditTrail;
     }
 
     @Transactional(readOnly = true)
@@ -301,7 +309,7 @@ public class StationService {
         if (!privileged && !ownedByOpenShift(userId, kind, id)) {
             throw new StationOutsideShiftException();
         }
-        return setActive(kind, id, active, statusNote);
+        return setActive(userId, kind, id, active, statusNote);
     }
 
     /**
@@ -311,7 +319,7 @@ public class StationService {
      */
     @Transactional
     public StationAdminView setActive(
-            StationKind kind, UUID id, boolean active, String statusNote) {
+            UUID actorId, StationKind kind, UUID id, boolean active, String statusNote) {
         String table = tableOf(kind);
         int updated = jdbc.update("""
                         UPDATE %s
@@ -335,6 +343,12 @@ public class StationService {
         if (updated == 0) {
             throw new StationNotFoundException();
         }
+        auditTrail.record(AuditEvent.of(
+                actorId,
+                active ? AuditActions.STATION_ACTIVATED : AuditActions.STATION_DEACTIVATED,
+                AuditEntityTypes.STATION,
+                id,
+                Map.of("kind", kind.name(), "active", active)));
         return findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
     }
 

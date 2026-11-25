@@ -30,7 +30,9 @@ public class JwtAccessTokenVerifier implements AccessTokenVerifier {
             Claims claims = jwtService.validateAndExtractClaims(token);
             UUID userId = UUID.fromString(claims.getSubject());
             Role role = Role.valueOf(claims.get("role", String.class));
-            return Optional.of(new AccessTokenClaims(userId, role.name()));
+            boolean mustChangePassword = Boolean.TRUE.equals(
+                    claims.get("mustChangePassword", Boolean.class));
+            return Optional.of(new AccessTokenClaims(userId, role.name(), mustChangePassword));
         } catch (JwtException | IllegalArgumentException exception) {
             return Optional.empty();
         }

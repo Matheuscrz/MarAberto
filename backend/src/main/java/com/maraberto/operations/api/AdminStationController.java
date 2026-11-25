@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.UUID;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -89,8 +90,13 @@ public class AdminStationController {
             @Parameter(description = "Tipo da estrutura", example = "FIXED")
             @PathVariable StationKind kind,
             @PathVariable UUID stationId,
-            @Valid @RequestBody StationStatusRequest request) {
+            @Valid @RequestBody StationStatusRequest request,
+            Authentication authentication) {
         return stationService.setActive(
-                kind, stationId, Boolean.TRUE.equals(request.active()), request.statusNote());
+                UUID.fromString(authentication.getName()),
+                kind,
+                stationId,
+                Boolean.TRUE.equals(request.active()),
+                request.statusNote());
     }
 }

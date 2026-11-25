@@ -33,7 +33,7 @@ class StompAuthenticationInterceptorTests {
     private static final UUID USER_ID = UUID.randomUUID();
 
     private final AccessTokenVerifier verifier = token -> "token-valido".equals(token)
-            ? Optional.of(new AccessTokenClaims(USER_ID, "LIFEGUARD"))
+            ? Optional.of(new AccessTokenClaims(USER_ID, "LIFEGUARD", false))
             : Optional.empty();
 
     private final StompAuthenticationInterceptor interceptor =

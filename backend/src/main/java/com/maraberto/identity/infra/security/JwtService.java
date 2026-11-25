@@ -18,9 +18,10 @@ import org.springframework.stereotype.Service;
  * Emissão e validação do access token (JWT HS256).
  *
  * <p>O token carrega apenas o necessário para autorizar a requisição:
- * {@code sub} (id do operador), {@code role}, {@code iss} e {@code jti}. Nome,
- * e-mail e CPF nunca entram no token. A revogação de acesso é garantida pelo
- * TTL curto e pela recusa de refresh para conta inativa.
+ * {@code sub} (id do operador), {@code role}, {@code mustChangePassword},
+ * {@code iss} e {@code jti}. Nome, e-mail e CPF nunca entram no token. A
+ * revogação de acesso é garantida pelo TTL curto e pela recusa de refresh para
+ * conta inativa.
  */
 @Service
 public class JwtService {
@@ -61,6 +62,7 @@ public class JwtService {
                 .issuer(issuer)
                 .subject(user.getId().toString())
                 .claim("role", user.getRole().name())
+                .claim("mustChangePassword", user.isMustChangePassword())
                 .id(UUID.randomUUID().toString())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTokenTtl)))

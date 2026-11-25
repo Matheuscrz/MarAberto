@@ -67,6 +67,29 @@ public class OperationalUser {
     private boolean active;
 
     /**
+     * Senha temporária ainda não trocada. Enquanto for {@code true}, o access
+     * token leva a marca e o filtro de segurança só libera a troca de senha,
+     * o próprio perfil e o logout.
+     */
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword;
+
+    /** Fim da validade da senha temporária; nulo quando a senha é definitiva. */
+    @Column(name = "temporary_password_expires_at")
+    private Instant temporaryPasswordExpiresAt;
+
+    /** Última troca feita pelo próprio operador. */
+    @Column(name = "password_changed_at")
+    private Instant passwordChangedAt;
+
+    /**
+     * Sequência de criação, usada como chave estável da paginação da TI.
+     * Preenchida pelo banco; a aplicação nunca escreve nela.
+     */
+    @Column(name = "seq", insertable = false, updatable = false)
+    private Long seq;
+
+    /**
      * Tentativas de senha errada desde o último login bem-sucedido. Cresce até
      * virar bloqueio; um acerto zera. Nunca é exposto na API.
      */
@@ -109,6 +132,7 @@ public class OperationalUser {
         this.passwordHash = Objects.requireNonNull(passwordHash, "Hash de senha não pode ser nulo");
         this.role = Objects.requireNonNull(role, "Perfil não pode ser nulo");
         this.active = true;
+        this.mustChangePassword = false;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
     }
@@ -134,6 +158,45 @@ public class OperationalUser {
     public void changePasswordHash(String passwordHash) {
         this.passwordHash = Objects.requireNonNull(passwordHash, "Hash de senha não pode ser nulo");
         this.updatedAt = Instant.now();
+    }
+
+    public void changeRole(Role role) {
+        this.role = Objects.requireNonNull(role, "Perfil não pode ser nulo");
+        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Aplica uma senha temporária gerada pela TI.
+     *
+     * <p>A conta perde bloqueios anteriores (o reset existe justamente para quem
+     * esqueceu a senha) e precisa trocá-la no primeiro acesso.
+     */
+    public void assignTemporaryPassword(String passwordHash, Instant expiresAt, Instant now) {
+        this.passwordHash = Objects.requireNonNull(passwordHash, "Hash de senha não pode ser nulo");
+        this.mustChangePassword = true;
+        this.temporaryPasswordExpiresAt = Objects.requireNonNull(
+                expiresAt, "Expiração da senha temporária não pode ser nula");
+        this.updatedAt = now;
+        this.failedLoginAttempts = 0;
+        this.lockedUntil = null;
+    }
+
+    /** Define a senha definitiva e encerra a validade da temporária. */
+    public void definePassword(String passwordHash, Instant now) {
+        this.passwordHash = Objects.requireNonNull(passwordHash, "Hash de senha não pode ser nulo");
+        this.mustChangePassword = false;
+        this.temporaryPasswordExpiresAt = null;
+        this.passwordChangedAt = now;
+        this.updatedAt = now;
+        this.failedLoginAttempts = 0;
+        this.lockedUntil = null;
+    }
+
+    /** Temporária vencida: o login deve orientar a TI a gerar outra. */
+    public boolean isTemporaryPasswordExpired(Instant now) {
+        return mustChangePassword
+                && temporaryPasswordExpiresAt != null
+                && !temporaryPasswordExpiresAt.isAfter(now);
     }
 
     /** A conta só está bloqueada dentro da janela gravada; o passado libera. */

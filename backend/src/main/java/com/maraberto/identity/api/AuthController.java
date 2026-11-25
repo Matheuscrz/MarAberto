@@ -2,6 +2,7 @@ package com.maraberto.identity.api;
 
 import com.maraberto.identity.api.dto.AuthResponse;
 import com.maraberto.identity.api.dto.AuthenticatedUserResponse;
+import com.maraberto.identity.api.dto.ChangePasswordRequest;
 import com.maraberto.identity.api.dto.LoginCommand;
 import com.maraberto.identity.application.AuthenticationService;
 import com.maraberto.identity.application.OriginVerifier;
@@ -125,6 +126,38 @@ public class AuthController {
     })
     public AuthenticatedUserResponse me(Authentication authentication) {
         return authenticationService.currentUser(UUID.fromString(authentication.getName()));
+    }
+
+    @PostMapping("/password")
+    @SecurityRequirement(name = "bearerAuth")
+    @Operation(summary = "Trocar a senha",
+            description = "Valida a senha atual, aplica a política e revoga todas as sessões. "
+                    + "Define a senha definitiva quando a temporária está pendente.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Senha alterada; entre novamente"),
+            @ApiResponse(responseCode = "400", description = "Senha nova não atende à política (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class))),
+            @ApiResponse(responseCode = "401", description = "Senha atual incorreta (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class))),
+            @ApiResponse(responseCode = "403", description = "Senha temporária expirada (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class)))
+    })
+    public ResponseEntity<Void> changePassword(
+            @Valid @RequestBody ChangePasswordRequest command,
+            Authentication authentication,
+            HttpServletRequest request) {
+        authenticationService.changePassword(
+                UUID.fromString(authentication.getName()),
+                command.currentPassword(),
+                command.newPassword(),
+                metadata(request));
+        return ResponseEntity.noContent()
+                .header(HttpHeaders.SET_COOKIE,
+                        AuthCookie.clear(cookieProperties.isSecure()).toString())
+                .build();
     }
 
     private ResponseEntity<AuthResponse> withRefreshCookie(

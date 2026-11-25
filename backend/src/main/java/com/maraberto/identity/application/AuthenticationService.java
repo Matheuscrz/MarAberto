@@ -1,5 +1,8 @@
 package com.maraberto.identity.application;
 
+import com.maraberto.audit.api.AuditActions;
+import com.maraberto.audit.api.AuditEvent;
+import com.maraberto.audit.api.AuditTrail;
 import com.maraberto.identity.api.dto.AuthResponse;
 import com.maraberto.identity.api.dto.AuthenticatedUserResponse;
 import com.maraberto.identity.api.dto.LoginCommand;
@@ -9,12 +12,14 @@ import com.maraberto.identity.domain.DuplicateOperationalUserException;
 import com.maraberto.identity.domain.InvalidCredentialsException;
 import com.maraberto.identity.domain.InvalidRefreshTokenException;
 import com.maraberto.identity.domain.OperationalUser;
+import com.maraberto.identity.domain.TemporaryPasswordExpiredException;
 import com.maraberto.identity.infra.OperationalUserRepository;
 import com.maraberto.identity.infra.security.JwtService;
 import com.maraberto.identity.infra.security.LoginProtectionProperties;
 import com.maraberto.shared.security.CpfValidator;
 import com.maraberto.shared.security.crypto.BlindIndexer;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -39,6 +44,8 @@ public class AuthenticationService {
     private final RefreshTokenService refreshTokenService;
     private final LoginProtectionProperties loginProtection;
     private final LoginIpRateLimiter ipRateLimiter;
+    private final PasswordPolicy passwordPolicy;
+    private final AuditTrail auditTrail;
 
     /**
      * Hash descartável usado para gastar o mesmo tempo de Argon2 quando o
@@ -53,7 +60,9 @@ public class AuthenticationService {
             BlindIndexer blindIndexer,
             RefreshTokenService refreshTokenService,
             LoginProtectionProperties loginProtection,
-            LoginIpRateLimiter ipRateLimiter) {
+            LoginIpRateLimiter ipRateLimiter,
+            PasswordPolicy passwordPolicy,
+            AuditTrail auditTrail) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
@@ -61,6 +70,8 @@ public class AuthenticationService {
         this.refreshTokenService = refreshTokenService;
         this.loginProtection = loginProtection;
         this.ipRateLimiter = ipRateLimiter;
+        this.passwordPolicy = passwordPolicy;
+        this.auditTrail = auditTrail;
         this.dummyPasswordHash = passwordEncoder.encode(UUID.randomUUID().toString());
     }
 
@@ -145,6 +156,41 @@ public class AuthenticationService {
                 .orElseThrow(InvalidRefreshTokenException::new);
     }
 
+    /**
+     * Troca a senha do operador autenticado (inclusive a temporária).
+     *
+     * <p>Revoga todas as sessões: quem tinha o refresh antigo não continua
+     * dentro. O controller limpa o cookie e o cliente volta ao login — é mais
+     * seguro do que tentar preservar a sessão que acabou de mudar de segredo.
+     */
+    @Transactional
+    public void changePassword(
+            UUID userId,
+            String currentPassword,
+            String newPassword,
+            RequestMetadata metadata) {
+        OperationalUser user = userRepository.findById(userId)
+                .filter(OperationalUser::isActive)
+                .orElseThrow(InvalidRefreshTokenException::new);
+
+        if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new InvalidCredentialsException();
+        }
+        Instant now = Instant.now();
+        if (user.isTemporaryPasswordExpired(now)) {
+            throw new TemporaryPasswordExpiredException();
+        }
+        passwordPolicy.validate(newPassword, currentPassword);
+
+        user.definePassword(passwordEncoder.encode(newPassword), now);
+        userRepository.saveAndFlush(user);
+        refreshTokenService.revokeAllForUser(userId);
+
+        auditTrail.record(AuditEvent.of(
+                        userId, AuditActions.PASSWORD_CHANGED, "USER", userId, Map.of())
+                .withIpAddress(metadata == null ? null : metadata.ipAddress()));
+    }
+
     private OperationalUser authenticate(LoginCommand cmd) {
         Optional<OperationalUser> candidate = findByIdentifier(cmd.identifier());
 
@@ -176,6 +222,10 @@ public class AuthenticationService {
 
         if (!user.isActive()) {
             throw new AccountInactiveException();
+        }
+
+        if (user.isTemporaryPasswordExpired(now)) {
+            throw new TemporaryPasswordExpiredException();
         }
 
         if (user.getFailedLoginAttempts() != 0 || user.getLockedUntil() != null) {

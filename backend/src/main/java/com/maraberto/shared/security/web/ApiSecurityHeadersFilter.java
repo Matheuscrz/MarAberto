@@ -48,7 +48,10 @@ public class ApiSecurityHeadersFilter extends OncePerRequestFilter {
         }
 
         String path = request.getRequestURI();
-        if (path.startsWith("/api/v1/emergency-calls") || path.startsWith("/api/v1/auth")) {
+        if (path.startsWith("/api/v1/emergency-calls")
+                || path.startsWith("/api/v1/auth")
+                || path.startsWith("/api/v1/admin")
+                || path.startsWith("/api/v1/management")) {
             response.setHeader("Cache-Control", "no-store");
             response.setHeader("Pragma", "no-cache");
         }
