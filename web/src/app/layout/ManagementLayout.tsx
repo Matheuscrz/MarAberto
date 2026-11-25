@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   ClipboardList,
   Map as MapIcon,
   MapPin,
@@ -21,6 +22,7 @@ const NAV: readonly AreaNavItem[] = [
     label: "Áreas não identificadas",
     icon: MapPinOff,
   },
+  { to: "/gestao/aprender", label: "Aprender", icon: BookOpen },
 ];
 
 /** Área da coordenação (`COORDINATOR`). */

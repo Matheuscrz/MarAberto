@@ -87,6 +87,11 @@ const ManagementUnmappedSignalsPage = lazy(() =>
     default: m.ManagementUnmappedSignalsPage,
   })),
 );
+const ManagementLearnPage = lazy(() =>
+  import("@/features/management").then((m) => ({
+    default: m.ManagementLearnPage,
+  })),
+);
 const AdminHomePage = lazy(() =>
   import("@/features/admin").then((m) => ({ default: m.AdminHomePage })),
 );
@@ -172,6 +177,10 @@ export function AppRoutes() {
         <Route
           path="ocorrencias"
           element={withFallback(<ManagementOccurrencesPage />)}
+        />
+        <Route
+          path="aprender"
+          element={withFallback(<ManagementLearnPage />)}
         />
       </Route>
 
