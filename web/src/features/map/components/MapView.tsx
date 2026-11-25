@@ -28,6 +28,7 @@ import type { MapFocus, MapMarker } from "@/features/map/types";
 import {
   GeolocationError,
   getDevicePosition,
+  type DevicePosition,
 } from "@/shared/lib/geolocation";
 
 export interface MapViewProps {
@@ -45,6 +46,8 @@ export interface MapViewProps {
   readonly beachSectors: FeatureCollection<Polygon | MultiPolygon> | null;
   /** Pedido de enquadramento; nova identidade = novo pedido. */
   readonly focus: MapFocus | null;
+  /** Notifica quando o usuário aciona a localização pelo botão do mapa. */
+  readonly onLocated?: (position: DevicePosition) => void;
 }
 
 interface Located {
@@ -91,6 +94,7 @@ export function MapView({
   beachArea,
   beachSectors,
   focus,
+  onLocated,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -488,6 +492,7 @@ export function MapView({
             ? position.accuracyMeters
             : undefined,
       });
+      onLocated?.(position);
     } catch (error) {
       setLocateError(
         error instanceof GeolocationError

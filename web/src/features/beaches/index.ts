@@ -2,6 +2,7 @@ export { BeachesPage } from "@/features/beaches/pages/BeachesPage";
 export { BeachDetailPage } from "@/features/beaches/pages/BeachDetailPage";
 export { BeachSheet } from "@/features/beaches/components/BeachSheet";
 export { useNearbyBeaches } from "@/features/beaches/hooks/use-nearby-beaches";
+export { useOccupancyCollector } from "@/features/beaches/hooks/use-occupancy-collector";
 export type {
   BeachesOutletContext,
   NearbyBeachesState,

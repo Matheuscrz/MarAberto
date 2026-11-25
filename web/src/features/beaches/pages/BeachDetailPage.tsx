@@ -11,12 +11,10 @@ import {
 } from "lucide-react";
 import { Card, PageHeader } from "@/shared/components/Card";
 import { ApiError } from "@/shared/lib/api-client";
-import { getDevicePosition } from "@/shared/lib/geolocation";
 import { DEMO_DATA_NOTICE } from "@/shared/lib/notices";
 import { beachErrorMessage, fetchBeachDetail } from "@/features/beaches/api/beaches";
 import {
   fetchOccupancy,
-  recordOccupancySample,
   type BeachOccupancy,
   type OccupancyLevel,
   type OccupancyStatus,
@@ -41,7 +39,8 @@ import { BeachFlagCard } from "@/features/signals";
  */
 export function BeachDetailPage() {
   const { beachId } = useParams<{ beachId: string }>();
-  const { position } = useOutletContext<BeachesOutletContext>();
+  const { position, locationConsent, onRetryLocation } =
+    useOutletContext<BeachesOutletContext>();
   const [detail, setDetail] = useState<BeachDetail | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
@@ -60,17 +59,8 @@ export function BeachDetailPage() {
         if (cancelled) return;
         setDetail(loaded);
 
-        // Ocupação: a posição só serve para registrar a presença no setor e é
-        // descartada pelo servidor. Sem permissão, a faixa atual ainda é lida.
-        const devicePosition = await getDevicePosition({
-          enableHighAccuracy: false,
-          timeout: 6_000,
-          maximumAge: 300_000,
-        }).catch(() => null);
-        if (devicePosition) {
-          await recordOccupancySample(devicePosition).catch(() => undefined);
-        }
-
+        // Nunca dispara prompt automático de GPS ao abrir a ficha: a coleta
+        // anônima só ocorre após consentimento explícito na UI.
         const current = await fetchOccupancy(beachId).catch(() => null);
         if (!cancelled) setOccupancy({ beachId, current });
       } catch (caught) {
@@ -81,7 +71,7 @@ export function BeachDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [beachId, attempt]);
+  }, [beachId, attempt, locationConsent]);
 
   if (!beachId) {
     return <NotFoundCard />;
@@ -183,7 +173,7 @@ export function BeachDetailPage() {
         <dl className="mt-3 grid grid-cols-2 gap-2 rounded-xl border border-ocean-200 bg-ocean-50 p-2.5 text-center">
           <div>
             <dt className="text-[10px] font-bold uppercase text-ocean-500">
-              Ocupação estimada
+              Previsão de ocupação
             </dt>
             <dd className="text-sm font-black text-ocean-950">
               {occupancyLabel(currentOccupancy?.status, currentOccupancy?.level)}
@@ -199,11 +189,28 @@ export function BeachDetailPage() {
           </div>
         </dl>
         <p className="mt-1.5 text-[11px] leading-snug text-ocean-600">
-          Estimativa anônima de aparelhos com o app aberto na área, nunca a soma
-          dos setores: quem está na divisa de dois setores conta uma vez só.
-          Abaixo da amostra mínima mostramos "dados insuficientes" para proteger
-          quem está na praia.
+          Previsão aproximada (não é um valor real de pessoas na praia):
+          calculada a partir de amostras anônimas de aparelhos com o app aberto
+          em relação à área disponível, nunca pela soma dos setores. Abaixo da
+          amostra mínima mostramos "dados insuficientes" para proteger quem está
+          na praia.
         </p>
+
+        {!locationConsent ? (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-ocean-200 bg-ocean-50/70 px-3 py-2">
+            <p className="text-[11px] leading-snug text-ocean-800">
+              Ative a localização para contribuir com 1 amostra anônima a cada
+              15 min (sem salvar sua posição).
+            </p>
+            <button
+              type="button"
+              onClick={onRetryLocation}
+              className="inline-flex min-h-8 shrink-0 items-center rounded-lg bg-ocean-950 px-2.5 text-[11px] font-bold text-white transition hover:bg-ocean-900"
+            >
+              Permitir localização
+            </button>
+          </div>
+        ) : null}
 
         <Link
           to={`/?praia=${detail.id}`}

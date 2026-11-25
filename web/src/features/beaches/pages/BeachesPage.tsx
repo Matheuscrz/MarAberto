@@ -76,6 +76,27 @@ export function BeachesPage() {
         </label>
       </div>
 
+      {status === "idle" ? (
+        <Card className="border-ocean-200 bg-ocean-50/50">
+          <p className="text-sm font-bold text-ocean-950">
+            Ative a localização para listar praias próximas
+          </p>
+          <p className="mt-1 text-xs leading-snug text-ocean-700">
+            Sua posição não é salva nem rastreada: serve só para encontrar áreas
+            de banho num raio de 30 km e gerar uma previsão aproximada de
+            ocupação por setor (não é um valor real).
+          </p>
+          <button
+            type="button"
+            onClick={onRetryLocation}
+            className="mt-2.5 inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-ocean-950 px-3 text-xs font-bold text-white transition hover:bg-ocean-900"
+          >
+            <Navigation aria-hidden="true" className="size-3.5" />
+            Permitir localização
+          </button>
+        </Card>
+      ) : null}
+
       {status === "locating" ? (
         <Card className="border-dashed bg-ocean-50/40">
           <p className="flex items-center gap-2 text-sm font-semibold text-ocean-800">

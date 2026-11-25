@@ -1,5 +1,9 @@
 import { apiRequest, apiRequestVoid } from "@/shared/lib/api-client";
 import type { DevicePosition } from "@/shared/lib/geolocation";
+import {
+  createOccupancySampler,
+  type OccupancySampleResult,
+} from "@/features/beaches/lib/occupancy-sampler";
 
 export type OccupancyLevel = "LOW" | "MODERATE" | "HIGH" | "EXTREME";
 export type OccupancyStatus = "INSUFFICIENT" | "ESTIMATE";
@@ -34,18 +38,38 @@ export interface BeachOccupancy {
  */
 const ephemeralToken = newToken();
 
-export async function recordOccupancySample(
-  position: DevicePosition,
+async function postOccupancySample(
+  position: Pick<DevicePosition, "latitude" | "longitude">,
+  token: string,
 ): Promise<void> {
+  // `apiRequestVoid` aceita tanto 200 (setor ativo) quanto 204 (fora de área
+  // mapeada), tratando 204 silenciosamente sem lançar erro.
   await apiRequestVoid("/api/v1/occupancy/samples", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       latitude: position.latitude,
       longitude: position.longitude,
-      token: ephemeralToken,
+      token,
     }),
   });
+}
+
+const occupancySampler = createOccupancySampler({
+  sendSample: postOccupancySample,
+  token: ephemeralToken,
+});
+
+/**
+ * Envia no máximo 1 amostra por janela de 15 min por setor em memória
+ * (`{sectorId, bucketStart}`), pausando quando a aba está escondida e
+ * tratando 204 (fora de área mapeada) silenciosamente.
+ */
+export async function recordOccupancySample(
+  position: Pick<DevicePosition, "latitude" | "longitude">,
+  sectorId: string | null = null,
+): Promise<OccupancySampleResult> {
+  return occupancySampler.record(position, sectorId);
 }
 
 export async function fetchOccupancy(

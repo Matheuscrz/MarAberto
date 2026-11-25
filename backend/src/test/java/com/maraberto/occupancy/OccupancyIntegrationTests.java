@@ -159,6 +159,36 @@ class OccupancyIntegrationTests extends PostgisIntegrationTest {
         assertThat(occupancy.sectors().get(1).level()).isNull();
     }
 
+    @Test
+    void normalizesOccupancyBandByAvailableArea() {
+        UUID beachId = importBeach();
+        UUID sectorId = jdbcTemplate.queryForObject(
+                "SELECT id FROM beach_sectors WHERE beach_id = ?", UUID.class, beachId);
+
+        // Reduz o polígono do setor para ~100 m² (10m x 10m aprox):
+        // 5 pessoas * 10 m² / 100 m² ~= 0.50 -> HIGH (em vez de LOW).
+        jdbcTemplate.update("""
+                        UPDATE beach_sectors
+                           SET geometry = ST_Multi(ST_GeomFromText(
+                               'POLYGON((-35.01000 -10.01000, -35.00991 -10.01000, -35.00991 -10.00991, -35.01000 -10.00991, -35.01000 -10.01000))',
+                               4326))
+                         WHERE id = ?
+                        """,
+                sectorId);
+
+        for (int index = 0; index < 5; index++) {
+            record(-10.00995, -35.00995, "token-compacto-" + index);
+        }
+
+        BeachOccupancy occupancy = occupancyService.occupancy(beachId);
+        assertThat(occupancy.sectors()).hasSize(1);
+        assertThat(occupancy.sectors().getFirst().status()).isEqualTo(OccupancyStatus.ESTIMATE);
+        assertThat(occupancy.sectors().getFirst().level())
+                .isIn(OccupancyLevel.HIGH, OccupancyLevel.EXTREME);
+        // A praia inteira (polígono maior) continua LOW com as mesmas 5 amostras.
+        assertThat(occupancy.level()).isEqualTo(OccupancyLevel.LOW);
+    }
+
     private OccupancyEstimate record(String token) {
         return record(LATITUDE, LONGITUDE, token);
     }
