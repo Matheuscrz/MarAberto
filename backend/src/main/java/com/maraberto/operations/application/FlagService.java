@@ -1,6 +1,7 @@
 package com.maraberto.operations.application;
 
 import com.maraberto.media.api.MediaCatalog;
+import com.maraberto.operations.api.FlagChanged;
 import com.maraberto.operations.api.FlagLaunchResponse;
 import com.maraberto.operations.api.FlagResponse;
 import com.maraberto.operations.api.LaunchFlagRequest;
@@ -16,6 +17,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -44,6 +46,7 @@ public class FlagService {
     private final MediaCatalog mediaCatalog;
     private final UnmappedSignalService unmappedSignals;
     private final NamedParameterJdbcTemplate jdbc;
+    private final ApplicationEventPublisher events;
     private final Duration defaultValidity;
     private final Duration idleTimeout;
 
@@ -53,6 +56,7 @@ public class FlagService {
             MediaCatalog mediaCatalog,
             UnmappedSignalService unmappedSignals,
             NamedParameterJdbcTemplate jdbc,
+            ApplicationEventPublisher events,
             @Value("${maraberto.flags.validity:PT12H}") Duration defaultValidity,
             @Value("${maraberto.dispatch.shift-idle-timeout:PT15M}") Duration idleTimeout) {
         this.flags = flags;
@@ -60,6 +64,7 @@ public class FlagService {
         this.mediaCatalog = mediaCatalog;
         this.unmappedSignals = unmappedSignals;
         this.jdbc = jdbc;
+        this.events = events;
         this.defaultValidity = defaultValidity;
         this.idleTimeout = idleTimeout;
     }
@@ -110,6 +115,10 @@ public class FlagService {
                 scope.accuracyMeters(),
                 scope.positionSource());
         flags.attachMedia(launched.id(), mediaIds);
+        // Avisa o cache público depois do commit: a próxima leitura do mapa já
+        // traz a bandeira nova (e a anterior encerrada) sem esperar o TTL.
+        events.publishEvent(new FlagChanged(
+                launched.id(), scope.beachId(), scope.sectorId()));
 
         return FlagLaunchResponse.placed(new FlagResponse(
                 launched.id(),
@@ -130,6 +139,8 @@ public class FlagService {
                 .orElseThrow(FlagNotFoundException::new);
         Instant now = Instant.now();
         flags.close(flagId, userId, now);
+        events.publishEvent(new FlagChanged(
+                current.id(), current.beachId(), current.sectorId()));
         return new FlagResponse(
                 current.id(),
                 current.beachId(),

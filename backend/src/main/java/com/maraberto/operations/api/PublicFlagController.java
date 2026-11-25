@@ -1,6 +1,7 @@
 package com.maraberto.operations.api;
 
 import com.maraberto.operations.application.FlagService;
+import com.maraberto.operations.application.PublicMapCache;
 import com.maraberto.shared.api.ApiProblem;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -10,7 +11,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.CacheControl;
@@ -33,13 +33,23 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Sinalização", description = "Bandeiras por área de banho e setor")
 public class PublicFlagController {
 
+    /**
+     * O navegador pode guardar a resposta, mas precisa revalidar a cada uso.
+     *
+     * <p>Não há como empurrar a invalidação de um cache HTTP sem abrir um canal
+     * com o banhista (ADR-022). Então o mapa consulta o servidor no ciclo de
+     * 30 s e recebe o estado atual; o cache de memória do servidor absorve a
+     * repetição entre visitantes.
+     */
     private static final CacheControl CACHE =
-            CacheControl.maxAge(Duration.ofSeconds(30)).cachePublic();
+            CacheControl.noCache().cachePublic();
 
     private final FlagService flagService;
+    private final PublicMapCache cache;
 
-    public PublicFlagController(FlagService flagService) {
+    public PublicFlagController(FlagService flagService, PublicMapCache cache) {
         this.flagService = flagService;
+        this.cache = cache;
     }
 
     @GetMapping
@@ -65,8 +75,11 @@ public class PublicFlagController {
             @Parameter(description = "Inclui o último lançamento de cada escopo mesmo vencido "
                     + "ou encerrado; exige beachId", example = "false")
             @RequestParam(required = false, defaultValue = "false") boolean includeExpired) {
+        List<PublicFlag> flags = cache.get(
+                "flags:" + beachId + ":" + includeExpired,
+                () -> flagService.publicFlags(beachId, includeExpired));
         return ResponseEntity.ok()
                 .cacheControl(CACHE)
-                .body(flagService.publicFlags(beachId, includeExpired));
+                .body(flags);
     }
 }

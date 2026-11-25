@@ -6,6 +6,7 @@ import com.maraberto.audit.api.AuditEvent;
 import com.maraberto.audit.api.AuditTrail;
 import com.maraberto.media.api.MediaCatalog;
 import com.maraberto.operations.api.CreateStationRequest;
+import com.maraberto.operations.api.PostChanged;
 import com.maraberto.operations.api.PublicStation;
 import com.maraberto.operations.api.StationAdminView;
 import com.maraberto.operations.api.StationCursor;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -57,16 +59,19 @@ public class StationService {
     private final MediaCatalog mediaCatalog;
     private final NamedParameterJdbcTemplate jdbc;
     private final AuditTrail auditTrail;
+    private final ApplicationEventPublisher events;
 
     public StationService(
             PublicOperationsRepository publicRepository,
             MediaCatalog mediaCatalog,
             NamedParameterJdbcTemplate jdbc,
-            AuditTrail auditTrail) {
+            AuditTrail auditTrail,
+            ApplicationEventPublisher events) {
         this.publicRepository = publicRepository;
         this.mediaCatalog = mediaCatalog;
         this.jdbc = jdbc;
         this.auditTrail = auditTrail;
+        this.events = events;
     }
 
     @Transactional(readOnly = true)
@@ -239,8 +244,11 @@ public class StationService {
                             .addValue("accuracy", request.accuracyMeters()),
                     UUID.class);
             attachMedia(StationKind.FIXED, createdId, mediaIds);
-            return findAdmin(StationKind.FIXED, createdId)
+            StationAdminView created = findAdmin(StationKind.FIXED, createdId)
                     .orElseThrow(StationNotFoundException::new);
+            events.publishEvent(new PostChanged(
+                    createdId, StationKind.FIXED.name(), created.active()));
+            return created;
         }
 
         UUID createdId = jdbc.queryForObject("""
@@ -261,8 +269,11 @@ public class StationService {
                         .addValue("accuracy", request.accuracyMeters()),
                 UUID.class);
         attachMedia(StationKind.MOBILE, createdId, mediaIds);
-        return findAdmin(StationKind.MOBILE, createdId)
+        StationAdminView created = findAdmin(StationKind.MOBILE, createdId)
                 .orElseThrow(StationNotFoundException::new);
+        events.publishEvent(new PostChanged(
+                createdId, StationKind.MOBILE.name(), created.active()));
+        return created;
     }
 
     /** Reposiciona a estrutura com a leitura atual do aparelho (RF11). */
@@ -287,7 +298,10 @@ public class StationService {
         if (updated == 0) {
             throw new StationNotFoundException();
         }
-        return findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
+        StationAdminView moved = findAdmin(kind, id)
+                .orElseThrow(StationNotFoundException::new);
+        events.publishEvent(new PostChanged(id, kind.name(), moved.active()));
+        return moved;
     }
 
     /**
@@ -349,6 +363,7 @@ public class StationService {
                 AuditEntityTypes.STATION,
                 id,
                 Map.of("kind", kind.name(), "active", active)));
+        events.publishEvent(new PostChanged(id, kind.name(), active));
         return findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
     }
 

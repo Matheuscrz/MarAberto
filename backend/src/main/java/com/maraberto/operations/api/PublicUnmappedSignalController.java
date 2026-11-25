@@ -7,7 +7,6 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.time.Duration;
 import java.util.List;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
@@ -30,8 +29,9 @@ import org.springframework.web.bind.annotation.RestController;
         description = "Alertas de sinalização lançada fora do mapeamento")
 public class PublicUnmappedSignalController {
 
+    /** O alerta entra e sai sozinho; o navegador revalida a cada leitura do mapa. */
     private static final CacheControl CACHE =
-            CacheControl.maxAge(Duration.ofSeconds(30)).cachePublic();
+            CacheControl.noCache().cachePublic();
 
     private final UnmappedSignalService service;
 
