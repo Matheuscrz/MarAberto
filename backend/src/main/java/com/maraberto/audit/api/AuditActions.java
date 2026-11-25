@@ -23,6 +23,12 @@ public final class AuditActions {
     public static final String OCCURRENCE_CLOSED = "OCCURRENCE_CLOSED";
     public static final String OCCURRENCE_EDITED = "OCCURRENCE_EDITED";
     public static final String PERSON_REVEALED = "PERSON_REVEALED";
+    public static final String CONTENT_CREATED = "CONTENT_CREATED";
+    public static final String CONTENT_UPDATED = "CONTENT_UPDATED";
+    public static final String CONTENT_PUBLISHED = "CONTENT_PUBLISHED";
+    public static final String CONTENT_UNPUBLISHED = "CONTENT_UNPUBLISHED";
+    public static final String CONTENT_REORDERED = "CONTENT_REORDERED";
+    public static final String CONTENT_DELETED = "CONTENT_DELETED";
 
     private AuditActions() {
     }
