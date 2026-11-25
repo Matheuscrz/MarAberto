@@ -58,3 +58,12 @@ A [ADR-023](023-sinalizacao-por-localizacao-e-midia.md) fecha as duas dívidas r
 - A **foto da sinalização** chegou: `media_assets` + `flag_media` (até 3), upload pelo backend com re-codificação (EXIF/GPS descartados) e leitura pública com `ETag`.
 - O **cadastro/reposição de posto e base** pela posição atual está implementado em `/api/v1/operations/stations`.
 
+## Emenda (2026-11-25)
+
+A atualização do mapa já carregado passou a ter um caminho explícito no backend, **sem abrir WebSocket para o banhista** (o banhista segue em polling; a decisão de transporte está nesta ADR e na ADR-026):
+
+- `operations` publica `FlagChanged` no lançamento e no encerramento da bandeira e `PostChanged` no cadastro, reposição, ativação e desativação de estrutura. O evento é publicado dentro da transação e consumido em `AFTER_COMMIT` — rollback não invalida nada.
+- `PublicMapCache` guarda a leitura pública por 10 s (configurável em `maraberto.public-map.cache-ttl`) e é limpo pelos dois eventos. Em várias instâncias, uma escrita numa delas pode deixar a cópia antiga na outra até o TTL, que continua dentro da janela de 30 s do mapa.
+- As rotas públicas (`/api/v1/flags`, `/api/v1/stations` e `/api/v1/unmapped-signals`) respondem `Cache-Control: no-cache` em vez de `max-age=30`: o navegador revalida a cada ciclo, porque não há como invalidar o cache HTTP do banhista sem um canal aberto.
+- O polling de 30 s continua sendo o mecanismo de atualização; `visibilitychange` e `online` disparam uma leitura imediata. O `MapView` reconcilia os pinos por `id` — adiciona, remove e atualiza no lugar, sem recriar o mapa nem resetar a câmera.
+

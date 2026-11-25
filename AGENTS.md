@@ -51,7 +51,7 @@
 
 | Fatia  | Escopo                                                                                                                                               | Migrations               |
 | :----- | :--------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------- |
-| **12** | Módulo `content` (CMS Aprender na gestão + tela `/aprender`) + atualização dinâmica de bandeiras/postos no mapa público                              | `V27`                    |
+| **12** | ✅ Atualização dinâmica de bandeiras/postos no mapa público (entregue em 2026-11-25, sem migration). Pendente: módulo `content` (CMS Aprender na gestão + tela `/aprender`) | `V27` |
 | **13** | ✅ Usuários reais (senha temporária obrigatória) e trilha de auditoria consultável (ADR-027) — entregues em 2026-11-24 (`V24`, `V25`). Pendente: blacklist JWT Redis e MFA (TOTP) | `V26`                    |
 | **14** | Coleta anônima de amostras de ocupação no mapa público                                                                                               | —                        |
 | **15** | Revisão de dual write/idempotência, otimizações SQL, virtual threads, testes k6, SonarQube e docs (`backend/ARCHITECTURE.md`, `web/ARCHITECTURE.md`) | —                        |
@@ -67,3 +67,4 @@
 - `docs/history/correcoes-pos-fatia-11.md` — correções pós-Fatia 11 (equipe, ficha no mapa, mídia, filtros/paginação e Google Maps; migration `V22`).
 - `docs/history/alertas-e-plantao-livre.md` — alerta de área não mapeada no mapa (público e gestão) e plantão sem estrutura/base móvel autônoma; migration `V23` (ADR-028/ADR-029).
 - `docs/history/administracao-de-identidade-e-auditoria.md` — administração real de usuários com senha temporária e trilha `audit_log` consultável; migrations `V24`/`V25` (ADR-027).
+- `docs/history/atualizacao-dinamica-do-mapa-publico.md` — eventos `FlagChanged`/`PostChanged`, cache público de 10 s e atualização do mapa já carregado sem F5 (sem migration).
