@@ -157,7 +157,7 @@ Implementados com **Spring Modulith**: cada módulo é um pacote de topo; só a 
 
 | Módulo        | Responsabilidade                                                                                                                    | Publica eventos                                                                | Consome                                              |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| `identity`    | Cadastro, OTP, CPF (cifrado), login, tokens, MFA (TOTP), papéis, convite de operacionais.                                           | `UserRegistered`, `OperatorInvited`                                            | —                                                    |
+| `identity`    | Cadastro, OTP, CPF (cifrado), login, tokens, MFA (TOTP), papéis e administração de usuários pela TI (senha temporária, ativação/desativação, reset — ADR-027). | —                                                                              | —                                                    |
 | `region`      | Configuração da instalação, importação de _Region Pack_.                                                                            | `RegionConfigChanged`                                                          | —                                                    |
 | `beaches`     | Áreas de banho (praia, rio, barragem), setores, zonas de risco permanentes e semipermanentes, fichas, GeoJSON público.              | `BeachChanged`, `SectorChanged`, `RiskZoneChanged`                             | `RegionConfigChanged`                                |
 | `operations`  | Postos, plantões, bandeiramento, demarcação de correntes.                                                                           | `ShiftStarted`, `ShiftEnded`, `FlagChanged`, `RipCurrentMarked`, `PostChanged` | —                                                    |
@@ -170,11 +170,11 @@ Implementados com **Spring Modulith**: cada módulo é um pacote de topo; só a 
 | `occupancy`   | Contagem anônima e níveis por praia.                                                                                                | `OccupancyLevelChanged`                                                        | `BeachChanged`                                       |
 | `media`       | URLs pré-assinadas, saneamento (EXIF), miniaturas.                                                                                  | `MediaReady`, `MediaRejected`                                                  | —                                                    |
 | `realtime`    | WebSocket, Web Push, fan-out via Redis.                                                                                             | —                                                                              | eventos de `emergency`, `operations`, `safety`       |
-| `audit`       | Trilha imutável (API **síncrona**, na mesma transação).                                                                             | —                                                                              | —                                                    |
+| `audit`       | Trilha imutável (API **síncrona**, na mesma transação), consulta paginada e conferência de integridade só para `ADMIN` (ADR-027).   | —                                                                              | —                                                    |
 | `analytics`   | Visões agregadas, mapa de calor, dados abertos.                                                                                     | —                                                                              | `EmergencyCallResolved`, `AlertActivated`            |
 | `shared`      | Kernel mínimo (tipos, erros, geoutils).                                                                                             | —                                                                              | —                                                    |
 
-**Dependências permitidas (resumo):** `emergency → operations(api)`, `emergency → audit(api)`, `emergency → realtime(api)` (portas de publicação — hoje `RealtimePublisherPort`, no despacho do SOS `SosNotifierPort`), `occurrences → operations(api)`, `occurrences → beaches(api)`, `occurrences → audit(api)` (o `emergency` **não** depende de `occurrences`: a ligação é por evento), `safety → beaches(api)`, `safety → audit(api)`, `operations → beaches(api)`, `occupancy → beaches(api)`, `realtime →` **nenhum módulo de domínio** (consome eventos e entrega; nunca decide destinatário — §7.13). Qualquer outro acoplamento direto é violação.
+**Dependências permitidas (resumo):** `emergency → operations(api)`, `emergency → audit(api)`, `emergency → realtime(api)` (portas de publicação — hoje `RealtimePublisherPort`, no despacho do SOS `SosNotifierPort`), `occurrences → operations(api)`, `occurrences → beaches(api)`, `occurrences → audit(api)` (o `emergency` **não** depende de `occurrences`: a ligação é por evento), `identity → audit(api)` (administração de usuários), `beaches → audit(api)` (importação aplicada), `operations → audit(api)` (estruturas, triagem e plantão ocioso), `safety → beaches(api)`, `safety → audit(api)`, `operations → beaches(api)`, `occupancy → beaches(api)`, `realtime →` **nenhum módulo de domínio** (consome eventos e entrega; nunca decide destinatário — §7.13). Qualquer outro acoplamento direto é violação.
 
 > **Auditoria é chamada direta, não evento.** Um evento assíncrono pode se perder entre o commit e a escrita; a trilha de auditoria precisa estar **na mesma transação** do ato auditado.
 
@@ -483,20 +483,28 @@ CREATE TABLE emergency_call_events (
     at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Auditoria append-only com encadeamento de hash
+-- Auditoria append-only com encadeamento de hash (V25, ADR-027)
 CREATE TABLE audit_log (
-    id            BIGSERIAL PRIMARY KEY,
-    occurred_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),   -- UTC
-    actor_user_id UUID,
-    action        VARCHAR(60) NOT NULL,
-    entity_type   VARCHAR(40) NOT NULL,
-    entity_id     VARCHAR(64),
-    device_geo    GEOGRAPHY(Point, 4326),
-    payload       JSONB,
-    prev_hash     BYTEA,
-    hash          BYTEA NOT NULL
+    id           BIGSERIAL PRIMARY KEY,               -- cursor: (occurred_at, id)
+    occurred_at  TIMESTAMPTZ NOT NULL,                -- UTC
+    actor_id     UUID,
+    actor_role   VARCHAR(32),
+    action       VARCHAR(60) NOT NULL,
+    entity_type  VARCHAR(40) NOT NULL,
+    entity_id    VARCHAR(64),
+    trace_id     VARCHAR(64),                         -- MDC/X-Request-Id
+    ip_bidx      VARCHAR(64),                         -- índice cego, nunca o IP
+    detail       JSONB NOT NULL DEFAULT '{}'::jsonb,  -- sem PII
+    prev_hash    CHAR(64) NOT NULL,                   -- 64 zeros na primeira linha
+    hash         CHAR(64) NOT NULL
 );
+CREATE UNIQUE INDEX uq_audit_log_prev_hash ON audit_log (prev_hash);  -- cadeia linear
+CREATE UNIQUE INDEX uq_audit_log_hash      ON audit_log (hash);
+CREATE INDEX idx_audit_log_occurred ON audit_log (occurred_at DESC, id DESC);
+CREATE INDEX idx_audit_log_actor    ON audit_log (actor_id, occurred_at DESC);
+CREATE INDEX idx_audit_log_entity   ON audit_log (entity_type, entity_id);
 REVOKE UPDATE, DELETE ON audit_log FROM PUBLIC;          -- e do papel da aplicação
+-- Trigger `trg_audit_log_append_only` recusa UPDATE/DELETE até do dono da tabela.
 -- Em produção: particionar por mês e restringir o papel da aplicação a INSERT.
 
 -- Maré
