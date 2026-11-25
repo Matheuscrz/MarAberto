@@ -20,6 +20,7 @@ public final class AuditActions {
     public static final String SHIFT_CLOSED_IDLE = "SHIFT_CLOSED_IDLE";
     public static final String IMPORT_APPLIED = "IMPORT_APPLIED";
     public static final String UNMAPPED_SIGNAL_DECIDED = "UNMAPPED_SIGNAL_DECIDED";
+    public static final String OCCURRENCE_CREATED = "OCCURRENCE_CREATED";
     public static final String OCCURRENCE_CLOSED = "OCCURRENCE_CLOSED";
     public static final String OCCURRENCE_EDITED = "OCCURRENCE_EDITED";
     public static final String PERSON_REVEALED = "PERSON_REVEALED";
