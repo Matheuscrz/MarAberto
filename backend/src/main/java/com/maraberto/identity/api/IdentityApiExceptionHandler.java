@@ -5,7 +5,11 @@ import com.maraberto.identity.domain.DuplicateOperationalUserException;
 import com.maraberto.identity.domain.InvalidCredentialsException;
 import com.maraberto.identity.domain.InvalidRefreshTokenException;
 import com.maraberto.identity.domain.OriginNotAllowedException;
+import com.maraberto.identity.domain.SelfAdminProtectionException;
+import com.maraberto.identity.domain.TemporaryPasswordExpiredException;
 import com.maraberto.identity.domain.TooManyLoginAttemptsException;
+import com.maraberto.identity.domain.UserNotFoundException;
+import com.maraberto.identity.domain.WeakPasswordException;
 import com.maraberto.shared.api.FieldValidationError;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -40,6 +44,14 @@ public class IdentityApiExceptionHandler extends ResponseEntityExceptionHandler 
     public static final String DUPLICATE_USER = "https://maraberto.org/problems/duplicate-user";
     public static final String ORIGIN_NOT_ALLOWED = "https://maraberto.org/problems/origin-not-allowed";
     public static final String TOO_MANY_ATTEMPTS = "https://maraberto.org/problems/too-many-login-attempts";
+    public static final String PASSWORD_CHANGE_REQUIRED =
+            "https://maraberto.org/problems/password-change-required";
+    public static final String TEMPORARY_PASSWORD_EXPIRED =
+            "https://maraberto.org/problems/temporary-password-expired";
+    public static final String WEAK_PASSWORD = "https://maraberto.org/problems/weak-password";
+    public static final String USER_NOT_FOUND = "https://maraberto.org/problems/user-not-found";
+    public static final String SELF_ADMIN_PROTECTION =
+            "https://maraberto.org/problems/self-admin-protection";
 
     private static final MediaType PROBLEM_JSON_UTF8 =
             new MediaType(MediaType.APPLICATION_PROBLEM_JSON, StandardCharsets.UTF_8);
@@ -144,6 +156,61 @@ public class IdentityApiExceptionHandler extends ResponseEntityExceptionHandler 
                 "Aguarde " + exception.retryAfterSeconds()
                         + " segundo(s) antes de tentar entrar novamente.",
                 requestUri(request)), headers);
+    }
+
+    @ExceptionHandler(TemporaryPasswordExpiredException.class)
+    ResponseEntity<Object> handleTemporaryPasswordExpired(
+            TemporaryPasswordExpiredException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.FORBIDDEN,
+                TEMPORARY_PASSWORD_EXPIRED,
+                "Senha temporária expirada",
+                exception.getMessage(),
+                requestUri(request)), new HttpHeaders());
+    }
+
+    @ExceptionHandler(WeakPasswordException.class)
+    ResponseEntity<Object> handleWeakPassword(
+            WeakPasswordException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.BAD_REQUEST,
+                WEAK_PASSWORD,
+                "Senha não atende à política",
+                exception.getMessage(),
+                requestUri(request)), new HttpHeaders());
+    }
+
+    @ExceptionHandler(UserNotFoundException.class)
+    ResponseEntity<Object> handleUserNotFound(
+            UserNotFoundException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.NOT_FOUND,
+                USER_NOT_FOUND,
+                "Operador não encontrado",
+                "O operador informado não existe.",
+                requestUri(request)), new HttpHeaders());
+    }
+
+    @ExceptionHandler(SelfAdminProtectionException.class)
+    ResponseEntity<Object> handleSelfAdminProtection(
+            SelfAdminProtectionException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.CONFLICT,
+                SELF_ADMIN_PROTECTION,
+                "Acesso de TI preservado",
+                exception.getMessage(),
+                requestUri(request)), new HttpHeaders());
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    ResponseEntity<Object> handleIllegalArgument(
+            IllegalArgumentException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.BAD_REQUEST,
+                INVALID_REQUEST,
+                "Requisição inválida",
+                exception.getMessage(),
+                requestUri(request)), new HttpHeaders());
     }
 
     private ResponseEntity<Object> response(ProblemDetail problem, HttpHeaders headers) {

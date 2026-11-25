@@ -158,6 +158,11 @@ maraberto:
       # Janela de tolerância para duas abas renovando ao mesmo tempo.
       refresh-reuse-tolerance: ${JWT_REFRESH_REUSE_TOLERANCE:PT10S}
   identity:
+    # Senha temporária entregue pela TI: curta o bastante para não virar senha
+    # permanente, longa o bastante para o operador entrar no primeiro turno.
+    temporary-password-ttl: ${IDENTITY_TEMPORARY_PASSWORD_TTL:PT24H}
+    # Política da senha definitiva (o cadastro antigo continua com o mínimo 8).
+    password-min-length: ${IDENTITY_PASSWORD_MIN_LENGTH:12}
     dev-seed:
       # Contas de desenvolvimento para o login real das três áreas. Desligado
       # por padrão e recusado no perfil `prod`.

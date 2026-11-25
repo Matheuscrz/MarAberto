@@ -1,5 +1,9 @@
 package com.maraberto.operations.application;
 
+import com.maraberto.audit.api.AuditActions;
+import com.maraberto.audit.api.AuditEntityTypes;
+import com.maraberto.audit.api.AuditEvent;
+import com.maraberto.audit.api.AuditTrail;
 import com.maraberto.operations.api.ShiftTarget;
 import com.maraberto.operations.api.ShiftTargetKind;
 import com.maraberto.operations.domain.ShiftAlreadyOpenException;
@@ -75,14 +79,17 @@ public class ShiftService {
     private final ShiftSessionRepository shiftSessions;
     private final NamedParameterJdbcTemplate jdbc;
     private final Duration idleTimeout;
+    private final AuditTrail auditTrail;
 
     public ShiftService(
             ShiftSessionRepository shiftSessions,
             NamedParameterJdbcTemplate jdbc,
-            @Value("${maraberto.dispatch.shift-idle-timeout:PT15M}") Duration idleTimeout) {
+            @Value("${maraberto.dispatch.shift-idle-timeout:PT15M}") Duration idleTimeout,
+            AuditTrail auditTrail) {
         this.shiftSessions = shiftSessions;
         this.jdbc = jdbc;
         this.idleTimeout = idleTimeout;
+        this.auditTrail = auditTrail;
     }
 
     @Transactional
@@ -231,6 +238,11 @@ public class ShiftService {
                 .addValue("seconds", idleTimeout.toSeconds()));
         if (closed > 0) {
             log.info("Plantões encerrados por inatividade: {}", closed);
+            auditTrail.record(AuditEvent.system(
+                    AuditActions.SHIFT_CLOSED_IDLE,
+                    AuditEntityTypes.SHIFT,
+                    null,
+                    java.util.Map.of("closed", closed)));
         }
         return closed;
     }

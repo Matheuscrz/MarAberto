@@ -1,6 +1,8 @@
 # Fatias 10 a 13 — console de campo, situação da coordenação, administração da TI e ocupação pública
 
-**Status:** backlog detalhado; **nenhum item desta lista está implementado**.
+**Status:** diagnóstico histórico de 2026-11-13. As fatias 10 e 11 e a administração de
+identidade/auditoria já foram entregues — ver `docs/history/`. A ocupação anônima segue
+pendente.
 **Data:** 2026-11-13, sobre o commit `80856c6`.
 **Relacionado:** ADR-009 (identidade), ADR-012 (dados sensíveis), ADR-013 (ocorrências),
 ADR-020 (escala e persistência do caminho crítico), ADR-022/ADR-024 (estruturas e

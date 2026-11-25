@@ -27,6 +27,7 @@ export const DEMO_ACCOUNTS: readonly DemoAccount[] = [
       name: "Sgt. Silva",
       role: "LIFEGUARD",
       badgeNumber: "BM-10492",
+      mustChangePassword: false,
     },
   },
   {
@@ -37,6 +38,7 @@ export const DEMO_ACCOUNTS: readonly DemoAccount[] = [
       name: "Ten. Rocha",
       role: "COORDINATOR",
       badgeNumber: "CBM-2041",
+      mustChangePassword: false,
     },
   },
   {
@@ -47,6 +49,7 @@ export const DEMO_ACCOUNTS: readonly DemoAccount[] = [
       name: "Ana (TI)",
       role: "ADMIN",
       email: "ti@maraberto.dev",
+      mustChangePassword: false,
     },
   },
 ];

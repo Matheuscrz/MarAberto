@@ -2,6 +2,10 @@ package com.maraberto.beaches.application;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.maraberto.audit.api.AuditActions;
+import com.maraberto.audit.api.AuditEntityTypes;
+import com.maraberto.audit.api.AuditEvent;
+import com.maraberto.audit.api.AuditTrail;
 import com.maraberto.beaches.api.BathingAreaMapChanged;
 import com.maraberto.beaches.api.BeachChanged;
 import com.maraberto.beaches.api.SectorChanged;
@@ -54,18 +58,21 @@ public class BathingAreaImportService {
     private final KmlArchive archive;
     private final ApplicationEventPublisher events;
     private final ObjectMapper objectMapper;
+    private final AuditTrail auditTrail;
 
     public BathingAreaImportService(
             KmlFeatureReader reader,
             BathingAreaRepository repository,
             KmlArchive archive,
             ApplicationEventPublisher events,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            AuditTrail auditTrail) {
         this.reader = reader;
         this.repository = repository;
         this.archive = archive;
         this.events = events;
         this.objectMapper = objectMapper;
+        this.auditTrail = auditTrail;
     }
 
     @Transactional
@@ -257,6 +264,20 @@ public class BathingAreaImportService {
                     report.rejected(),
                     command.importedBy(),
                     toJson(report)));
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("state", state);
+            detail.put("sourceFile", command.sourceFile());
+            detail.put("mode", command.mode().name());
+            detail.put("created", report.created());
+            detail.put("updated", report.updated());
+            detail.put("missing", report.missing());
+            detail.put("rejected", report.rejected());
+            auditTrail.record(AuditEvent.of(
+                    command.importedBy(),
+                    AuditActions.IMPORT_APPLIED,
+                    AuditEntityTypes.BATHING_AREA_IMPORT,
+                    state,
+                    detail));
             for (UUID beachId : affectedAreas) {
                 events.publishEvent(new BeachChanged(beachId));
             }

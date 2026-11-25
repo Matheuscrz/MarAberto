@@ -21,6 +21,9 @@ public record AuthenticatedUserResponse(
         Role role,
         @Schema(description = "Matrícula funcional, quando houver", example = "BM-10492")
         String badgeNumber,
+        @Schema(description = "Senha temporária pendente de troca; as demais rotas respondem 403",
+                example = "false")
+        boolean mustChangePassword,
         @Schema(description = "E-mail do próprio operador", example = "operador@maraberto.dev")
         String email) {
 
@@ -30,6 +33,7 @@ public record AuthenticatedUserResponse(
                 user.getName(),
                 user.getRole(),
                 user.getBadgeNumber(),
+                user.isMustChangePassword(),
                 user.getEmail());
     }
 }

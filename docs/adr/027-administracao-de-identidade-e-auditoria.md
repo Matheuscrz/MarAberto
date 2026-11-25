@@ -1,7 +1,7 @@
 # ADR-027: Administração de identidade e trilha de auditoria
 
-- Status: **Proposto (2026-11-13)** — decisão a confirmar ao abrir a branch
-  `32-feature-administracao-de-identidade-e-auditoria`.
+- Status: **Aceito (2026-11-24)** — implementado na branch
+  `32-feature-administracao-de-identidade-e-auditoria` (migrações `V24` e `V25`).
 - Relacionadas: ADR-009 (autenticação embutida), ADR-012 (dados sensíveis), ADR-024
   (ciclo de vida da estrutura), ADR-026 (painel da coordenação).
 - Requisitos: RF20, RF36, RNF06, RNF18; `operational_users`, `auth_sessions`, módulo
@@ -62,22 +62,36 @@ disponível.
 - **Criação sem senha** (para o próprio usuário definir no primeiro acesso) não é oferecida
   nesta fatia: exigiria canal de entrega de token que o perfil mínimo não tem.
 
-### 1.3 Migração `V23`
+### 1.3 Migração `V24`
 
 `operational_users` ganha `must_change_password boolean not null default false`,
-`temporary_password_expires_at timestamptz`, `password_changed_at timestamptz`.
-Nenhum backfill além do default: contas existentes continuam válidas.
+`temporary_password_expires_at timestamptz`, `password_changed_at timestamptz` e
+`seq bigserial unique` (chave estável da paginação da lista; `created_at` continua sendo a
+data exibida). Nenhum backfill além do default: contas existentes continuam válidas. A
+migração também cria `idx_auth_sessions_user_last_used (user_id, last_used_at DESC)` para a
+revogação por usuário.
 
 ## Decisão — parte 2: trilha de auditoria
 
-### 2.1 Tabela `audit_log` (`V24`)
+### 2.1 Tabela `audit_log` (`V25`)
 
 ```
-id uuid pk · occurred_at timestamptz not null · actor_id uuid null
+id bigserial pk · occurred_at timestamptz not null · actor_id uuid null
 actor_role text null · action text not null · entity_type text not null
-entity_id text null · ip_bidx text null · detail jsonb not null default '{}'
+entity_id text null · trace_id text null · ip_bidx text null
+detail jsonb not null default '{}'
 prev_hash text not null · hash text not null
 ```
+
+- **`trace_id`** vem do `TraceIdFilter` (MDC `traceId` + cabeçalho `X-Request-Id`), o que
+  liga a linha da trilha ao log estruturado e à resposta HTTP da requisição.
+- **`prev_hash`/`hash`** são únicos (`UNIQUE`): a cadeia é linear e dois atos concorrentes
+  não podem apontar para o mesmo predecessor. A escrita toma um `pg_advisory_xact_lock`
+  fixo antes de ler o último hash.
+- **`detail` canônico:** o hash é calculado sobre o texto que o PostgreSQL devolve em
+  `detail::text` (`CAST(CAST(:detail AS jsonb) AS text)`), não sobre o JSON do Jackson —
+  `jsonb` reordena chaves e usa espaçamento próprio. Sem isso, a conferência acusaria
+  divergência em toda linha.
 
 - **Append-only de verdade:** sem `UPDATE`/`DELETE` pela aplicação; o encadeamento
   `hash = sha256(prev_hash || campos canônicos)` permite detectar adulteração. A verificação
@@ -94,24 +108,30 @@ prev_hash text not null · hash text not null
 - Porta pública `audit/api/AuditTrail` (`@NamedInterface("api")`) com
   `record(AuditEvent)`; implementação JDBC na mesma transação do ato auditado. Falha ao
   auditar **derruba a transação** (não existe ato sem trilha).
-- Ações mínimas: `USER_CREATED`, `USER_ACTIVATED`, `USER_DEACTIVATED`, `USER_ROLE_CHANGED`,
-  `USER_PASSWORD_RESET`, `PASSWORD_CHANGED`, `LOGIN_FAILED` (agregado, sem senha),
-  `STATION_ACTIVATED`, `STATION_DEACTIVATED`, `SHIFT_CLOSED_IDLE`, `IMPORT_APPLIED`,
-  `UNMAPPED_SIGNAL_DECIDED`, `OCCURRENCE_CLOSED`, `OCCURRENCE_EDITED`, `PERSON_REVEALED`.
+- Ações registradas nesta fatia: `USER_CREATED`, `USER_ACTIVATED`, `USER_DEACTIVATED`,
+  `USER_ROLE_CHANGED`, `USER_PASSWORD_RESET`, `PASSWORD_CHANGED`, `STATION_ACTIVATED`,
+  `STATION_DEACTIVATED`, `SHIFT_CLOSED_IDLE`, `IMPORT_APPLIED`, `UNMAPPED_SIGNAL_DECIDED`,
+  `OCCURRENCE_CLOSED`, `OCCURRENCE_EDITED`, `PERSON_REVEALED`. São strings estáveis em
+  `audit/api/AuditActions` (não enum): um módulo novo registra a sua sem alterar o contrato.
+  `LOGIN_FAILED` fica para a fatia de MFA/blacklist (`V26`), onde o agregado por IP/janela
+  já existe.
 - `occurrence_events` continua existindo (histórico da ficha para o operador); a trilha é a
   visão da TI, que atravessa módulos. Não se duplica PII: `PERSON_REVEALED` na trilha leva
   ocorrência + motivo, e o valor revelado fica só no evento da ocorrência.
 
 ### 2.3 Consulta
 
-`GET /api/v1/admin/audit?actorId=&action=&entityType=&entityId=&from=&to=&cursor=&limit=`
+`GET /api/v1/admin/audit?actorId=&action=&entityType=&entityId=&traceId=&from=&to=&cursor=&limit=`
 (`ADMIN`), paginação por cursor (`occurred_at` + `id`), ordenação `DESC`,
-`Cache-Control: no-store`. A tela `/admin/auditoria` mostra data, ator, ação, entidade e
-detalhe, com filtros e "carregar mais". Exportação fica para depois (RNF06/LGPD: exportação
-é decisão de retenção, não de tela).
+`Cache-Control: no-store`. `GET /api/v1/admin/audit/integrity` recalcula a cadeia e devolve
+`checked`, `valid` e `firstInvalidId`. A tela `/admin/auditoria` mostra data, ator, ação,
+entidade, `traceId` e detalhe, com filtros, "carregar mais" e o botão de conferência de
+integridade. Exportação fica para depois (RNF06/LGPD: exportação é decisão de retenção, não
+de tela).
 
-**Retenção:** `maraberto.audit.retention` (padrão 5 anos, RNF06); o job de expurgo grava a
-própria execução na trilha. Nada de apagar por `ON DELETE CASCADE`.
+**Retenção (pendente):** `maraberto.audit.retention` (padrão 5 anos, RNF06); quando o job
+de expurgo entrar, ele grava a própria execução na trilha. Nada de apagar por
+`ON DELETE CASCADE`.
 
 ## Alternativas avaliadas
 

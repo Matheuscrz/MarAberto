@@ -1,5 +1,9 @@
 package com.maraberto.occurrences.application;
 
+import com.maraberto.audit.api.AuditActions;
+import com.maraberto.audit.api.AuditEntityTypes;
+import com.maraberto.audit.api.AuditEvent;
+import com.maraberto.audit.api.AuditTrail;
 import com.maraberto.emergency.api.SosCallCloser;
 import com.maraberto.occurrences.api.CloseOccurrenceRequest;
 import com.maraberto.occurrences.api.OccurrenceDetailView;
@@ -36,14 +40,17 @@ public class OccurrenceCommandService {
     private final OccurrenceRepository occurrenceRepository;
     private final SensitiveDataProtector protector;
     private final SosCallCloser sosCallCloser;
+    private final AuditTrail auditTrail;
 
     public OccurrenceCommandService(
             OccurrenceRepository occurrenceRepository,
             SensitiveDataProtector protector,
-            SosCallCloser sosCallCloser) {
+            SosCallCloser sosCallCloser,
+            AuditTrail auditTrail) {
         this.occurrenceRepository = occurrenceRepository;
         this.protector = protector;
         this.sosCallCloser = sosCallCloser;
+        this.auditTrail = auditTrail;
     }
 
     @Transactional
@@ -98,6 +105,16 @@ public class OccurrenceCommandService {
                     userId);
         }
 
+        auditTrail.record(AuditEvent.of(
+                userId,
+                AuditActions.OCCURRENCE_CLOSED,
+                AuditEntityTypes.OCCURRENCE,
+                occurrenceId,
+                Map.of(
+                        "from", current.view().status().name(),
+                        "to", write.status().name(),
+                        "outcome", request.outcome().name())));
+
         return detail(occurrenceId, userId, allScopes);
     }
 
@@ -140,6 +157,15 @@ public class OccurrenceCommandService {
                     Map.of("status", CiospStatus.REGISTERED.name()));
         }
 
+        if (!fields.isEmpty()) {
+            auditTrail.record(AuditEvent.of(
+                    userId,
+                    AuditActions.OCCURRENCE_EDITED,
+                    AuditEntityTypes.OCCURRENCE,
+                    occurrenceId,
+                    Map.of("fields", fields)));
+        }
+
         return detail(occurrenceId, userId, allScopes);
     }
 
@@ -158,6 +184,13 @@ public class OccurrenceCommandService {
         occurrenceRepository.appendEvent(
                 occurrenceId, "PERSON_REVEALED", userId,
                 Map.of("reason", request.reason()));
+
+        auditTrail.record(AuditEvent.of(
+                userId,
+                AuditActions.PERSON_REVEALED,
+                AuditEntityTypes.OCCURRENCE,
+                occurrenceId,
+                Map.of()));
 
         return VictimView.revealed(
                 decrypt(victim.name()),

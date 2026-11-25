@@ -11,7 +11,7 @@
 
 ## Stack e Arquitetura
 
-- **Backend (`backend/`)**: Java 21, Spring Boot 3.3.4, **Spring Modulith 1.2.13** (ADR-011), Virtual Threads, Gradle, PostgreSQL 16 + PostGIS, Flyway (`ddl-auto: validate`, **próxima migration: `V24`**), Redis (opcional no boot, nunca fonte da verdade), RabbitMQ (opcional), S3 (Garage).
+- **Backend (`backend/`)**: Java 21, Spring Boot 3.3.4, **Spring Modulith 1.2.13** (ADR-011), Virtual Threads, Gradle, PostgreSQL 16 + PostGIS, Flyway (`ddl-auto: validate`, **próxima migration: `V26`**), Redis (opcional no boot, nunca fonte da verdade), RabbitMQ (opcional), S3 (Garage).
   - **Módulos (`com.maraberto.*`)**: `identity`, `region`, `beaches`, `operations`, `emergency`, `occurrences`, `safety`, `tides` (inativo), `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`.
   - **Fronteira estrita**: Módulos importam apenas pacotes `api/` públicos de outros módulos (`ModularityTests`).
 - **Frontend (`web/`)**: Vite 8, React 19, TypeScript 6, Tailwind 4, MapLibre GL + PMTiles, STOMP/WebSocket.
@@ -51,10 +51,10 @@
 
 | Fatia  | Escopo                                                                                                                                               | Migrations               |
 | :----- | :--------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------- |
-| **12** | Módulo `content` (CMS Aprender na gestão + tela `/aprender`) + atualização dinâmica de bandeiras/postos no mapa público                              | `V24`                    |
-| **13** | Gestão real de usuários (senha temporária obrigatória), blacklist JWT Redis, MFA (TOTP) e consulta de `audit_log` (ADR-027)                          | `V25`, `V26`             |
+| **12** | Módulo `content` (CMS Aprender na gestão + tela `/aprender`) + atualização dinâmica de bandeiras/postos no mapa público                              | `V27`                    |
+| **13** | ✅ Usuários reais (senha temporária obrigatória) e trilha de auditoria consultável (ADR-027) — entregues em 2026-11-24 (`V24`, `V25`). Pendente: blacklist JWT Redis e MFA (TOTP) | `V26`                    |
 | **14** | Coleta anônima de amostras de ocupação no mapa público                                                                                               | —                        |
-| **15** | Revisão de dual write/idempotência, otimizações SQL, virtual threads, testes k6, SonarQube e docs (`backend/ARCHITECTURE.md`, `web/ARCHITECTURE.md`) | `V27`                    |
+| **15** | Revisão de dual write/idempotência, otimizações SQL, virtual threads, testes k6, SonarQube e docs (`backend/ARCHITECTURE.md`, `web/ARCHITECTURE.md`) | —                        |
 
 ## Onde Consultar Detalhes
 
@@ -66,3 +66,4 @@
 - `docs/history/fatias-11.md` — histórico da Fatia 11 (mapa de situação, equipe real e aba de postos; sem migration).
 - `docs/history/correcoes-pos-fatia-11.md` — correções pós-Fatia 11 (equipe, ficha no mapa, mídia, filtros/paginação e Google Maps; migration `V22`).
 - `docs/history/alertas-e-plantao-livre.md` — alerta de área não mapeada no mapa (público e gestão) e plantão sem estrutura/base móvel autônoma; migration `V23` (ADR-028/ADR-029).
+- `docs/history/administracao-de-identidade-e-auditoria.md` — administração real de usuários com senha temporária e trilha `audit_log` consultável; migrations `V24`/`V25` (ADR-027).

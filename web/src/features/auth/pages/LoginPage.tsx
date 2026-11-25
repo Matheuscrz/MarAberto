@@ -48,12 +48,19 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const next = searchParams.get("next");
+  const passwordChanged = searchParams.get("senha") === "alterada";
 
   // Já autenticado: não faz sentido mostrar o formulário de novo.
   if (status === "authenticated" && user) {
     return (
       <Navigate
-        to={isInternalPath(next) ? next : homePathForRole(user.role)}
+        to={
+          user.mustChangePassword
+            ? "/trocar-senha"
+            : isInternalPath(next)
+              ? next
+              : homePathForRole(user.role)
+        }
         replace
       />
     );
@@ -61,9 +68,11 @@ export function LoginPage() {
 
   const finishLogin = (session: AuthSession) => {
     setSession(session);
-    const target = isInternalPath(next)
-      ? next
-      : homePathForRole(session.user.role);
+    const target = session.user.mustChangePassword
+      ? "/trocar-senha"
+      : isInternalPath(next)
+        ? next
+        : homePathForRole(session.user.role);
     navigate(target, { replace: true });
   };
 
@@ -131,6 +140,12 @@ export function LoginPage() {
                 >
                   {error}
                 </p>
+              ) : null}
+
+              {passwordChanged ? (
+                <output className="block rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-semibold text-emerald-900">
+                  Senha alterada. Entre novamente com a senha definitiva.
+                </output>
               ) : null}
 
               <div>
@@ -263,6 +278,12 @@ function loginErrorMessage(cause: unknown): string {
       return "Credenciais inválidas. Confira o identificador e a senha.";
     }
     if (cause.status === 403) {
+      if (cause.problem?.type.includes("temporary-password-expired")) {
+        return (
+          cause.problem.detail ??
+          "A senha temporária expirou. Peça um novo reset à TI."
+        );
+      }
       return (
         cause.problem?.detail ??
         "Esta conta está inativa. Procure a coordenação ou a TI."

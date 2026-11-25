@@ -1,5 +1,9 @@
 package com.maraberto.operations.application;
 
+import com.maraberto.audit.api.AuditActions;
+import com.maraberto.audit.api.AuditEntityTypes;
+import com.maraberto.audit.api.AuditEvent;
+import com.maraberto.audit.api.AuditTrail;
 import com.maraberto.operations.api.LaunchFlagRequest;
 import com.maraberto.operations.api.PublicUnmappedSignal;
 import com.maraberto.operations.api.UnmappedSignalDecisionRequest;
@@ -9,7 +13,9 @@ import com.maraberto.operations.domain.UnmappedSignalStatus;
 import com.maraberto.operations.infra.JdbcUnmappedSignalRepository;
 import com.maraberto.operations.infra.PublicOperationsRepository;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -39,14 +45,17 @@ public class UnmappedSignalService {
     private final JdbcUnmappedSignalRepository repository;
     private final PublicOperationsRepository publicRepository;
     private final NamedParameterJdbcTemplate jdbc;
+    private final AuditTrail auditTrail;
 
     public UnmappedSignalService(
             JdbcUnmappedSignalRepository repository,
             PublicOperationsRepository publicRepository,
-            NamedParameterJdbcTemplate jdbc) {
+            NamedParameterJdbcTemplate jdbc,
+            AuditTrail auditTrail) {
         this.repository = repository;
         this.publicRepository = publicRepository;
         this.jdbc = jdbc;
+        this.auditTrail = auditTrail;
     }
 
     /**
@@ -124,8 +133,26 @@ public class UnmappedSignalService {
                 blankToNull(request.notes()),
                 coordinatorId,
                 Instant.now());
+        auditTrail.record(AuditEvent.of(
+                coordinatorId,
+                AuditActions.UNMAPPED_SIGNAL_DECIDED,
+                AuditEntityTypes.UNMAPPED_SIGNAL,
+                signalId,
+                decisionDetail(request)));
         return repository.findById(signalId)
                 .orElseThrow(UnmappedSignalNotFoundException::new);
+    }
+
+    private static Map<String, Object> decisionDetail(UnmappedSignalDecisionRequest request) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("decision", request.decision().name());
+        if (request.beachId() != null) {
+            detail.put("beachId", request.beachId().toString());
+        }
+        if (request.sectorId() != null) {
+            detail.put("sectorId", request.sectorId().toString());
+        }
+        return detail;
     }
 
     private void validate(UnmappedSignalDecisionRequest request) {

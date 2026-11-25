@@ -36,6 +36,12 @@ export function RequireRole({ roles, children }: RequireRoleProps) {
     );
   }
 
+  // Senha temporária: qualquer área de negócio leva à troca obrigatória.
+  // A tela de troca usa esta mesma guarda, então o próprio caminho é liberado.
+  if (user.mustChangePassword && location.pathname !== "/trocar-senha") {
+    return <Navigate to="/trocar-senha" replace />;
+  }
+
   if (!roles.includes(user.role)) {
     return <Navigate to={homePathForRole(user.role)} replace />;
   }
