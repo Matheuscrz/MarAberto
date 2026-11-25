@@ -19,6 +19,12 @@ export interface OperatorUser {
   readonly role: Role;
   readonly badgeNumber?: string;
   readonly email?: string;
+  /**
+   * Senha temporária ainda não trocada. O servidor bloqueia as rotas de
+   * negócio com `403 password-change-required`; a interface leva o operador
+   * direto para `/trocar-senha`.
+   */
+  readonly mustChangePassword: boolean;
 }
 
 /**

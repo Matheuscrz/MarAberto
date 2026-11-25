@@ -88,3 +88,22 @@ export async function logoutRequest(): Promise<void> {
 export async function meRequest(): Promise<OperatorUser> {
   return apiRequest<OperatorUser>("/api/v1/auth/me", { method: "GET" });
 }
+
+/**
+ * Troca a senha (inclusive a temporária). O servidor revoga todas as sessões e
+ * limpa o cookie de refresh; a tela volta ao login em seguida.
+ */
+export async function changePasswordRequest(input: {
+  readonly currentPassword: string;
+  readonly newPassword: string;
+}): Promise<void> {
+  await apiRequestVoid(
+    "/api/v1/auth/password",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+    10000,
+  );
+}

@@ -3,12 +3,13 @@ import {
   ArrowRight,
   Fingerprint,
   MapPinned,
+  ScrollText,
   ShieldCheck,
   UserCog,
   Users,
 } from "lucide-react";
 import { PageHeader } from "@/shared/components/Card";
-import { adminUsers } from "@/features/admin/api/demo-users";
+import { useAdminUsers } from "@/features/admin/hooks/use-admin-users";
 import { useAdminStations } from "@/features/stations";
 
 /**
@@ -17,9 +18,7 @@ import { useAdminStations } from "@/features/stations";
  * `docs/`/issue, não na tela do órgão (D-11).
  */
 export function AdminHomePage() {
-  const activeUsers = adminUsers.filter(
-    (user) => user.status === "ACTIVE",
-  ).length;
+  const { total: usersTotal, status: usersStatus } = useAdminUsers();
   const { total, status } = useAdminStations({ active: true, limit: 1 });
 
   return (
@@ -32,9 +31,13 @@ export function AdminHomePage() {
       <dl className="mb-4 grid gap-2 sm:grid-cols-3">
         <StatCard
           icon={Users}
-          label="Usuários ativos"
-          value={activeUsers}
-          hint={`${adminUsers.length} cadastrados`}
+          label="Usuários cadastrados"
+          value={usersStatus === "ready" ? usersTotal : "—"}
+          hint={
+            usersStatus === "ready"
+              ? "ativos e desativados"
+              : "Carregando os usuários"
+          }
         />
         <StatCard
           icon={ShieldCheck}
@@ -88,6 +91,13 @@ export function AdminHomePage() {
             >
               <MapPinned aria-hidden="true" className="size-3.5" />
               Postos e bases
+            </Link>
+            <Link
+              to="/admin/auditoria"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-ocean-900/15 bg-white px-3 py-1.5 text-xs font-bold text-ocean-800 transition hover:bg-ocean-50"
+            >
+              <ScrollText aria-hidden="true" className="size-3.5" />
+              Auditoria
             </Link>
           </div>
         </section>

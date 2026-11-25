@@ -20,6 +20,11 @@ const LoginPage = lazy(() =>
     default: m.LoginPage,
   })),
 );
+const ChangePasswordPage = lazy(() =>
+  import("@/features/auth/pages/ChangePasswordPage").then((m) => ({
+    default: m.ChangePasswordPage,
+  })),
+);
 const BeachesPage = lazy(() =>
   import("@/features/beaches").then((m) => ({ default: m.BeachesPage })),
 );
@@ -91,6 +96,9 @@ const AdminUsersPage = lazy(() =>
 const AdminStationsPage = lazy(() =>
   import("@/features/admin").then((m) => ({ default: m.AdminStationsPage })),
 );
+const AdminAuditPage = lazy(() =>
+  import("@/features/admin").then((m) => ({ default: m.AdminAuditPage })),
+);
 
 function PageFallback() {
   return (
@@ -109,6 +117,16 @@ export function AppRoutes() {
     <Routes>
       {/* Login único: o papel decide a área de destino (ADR-009). */}
       <Route path="login" element={withFallback(<LoginPage />)} />
+
+      {/* Troca obrigatória da senha temporária (ADR-027). */}
+      <Route
+        path="trocar-senha"
+        element={
+          <RequireRole roles={["LIFEGUARD", "COORDINATOR", "ADMIN"]}>
+            {withFallback(<ChangePasswordPage />)}
+          </RequireRole>
+        }
+      />
 
       {/*
        * Áreas por perfil. A guarda é só UX: o servidor revalida papel e
@@ -168,6 +186,7 @@ export function AppRoutes() {
         <Route index element={withFallback(<AdminHomePage />)} />
         <Route path="usuarios" element={withFallback(<AdminUsersPage />)} />
         <Route path="postos" element={withFallback(<AdminStationsPage />)} />
+        <Route path="auditoria" element={withFallback(<AdminAuditPage />)} />
       </Route>
 
       {/* Rotas públicas com o mapa em tela cheia e painel flutuante. */}
