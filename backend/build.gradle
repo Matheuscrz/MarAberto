@@ -54,6 +54,14 @@ dependencies {
 
     // Geoespacial (PostGIS) e migrações de esquema
     implementation 'org.hibernate.orm:hibernate-spatial'
+    constraints {
+        implementation('org.locationtech.jts:jts-core') {
+            version {
+                strictly '1.18.2'
+            }
+            because 'Evita resolução dinâmica de range [1.18.0, 1.19.0) via maven-metadata.xml no CI'
+        }
+    }
     implementation 'org.flywaydb:flyway-core'
     runtimeOnly 'org.flywaydb:flyway-database-postgresql'
     runtimeOnly 'org.postgresql:postgresql'
