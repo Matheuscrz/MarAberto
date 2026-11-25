@@ -4,6 +4,7 @@ export { useOccurrences } from "@/features/occurrences/hooks/use-occurrences";
 export type { OccurrencesState } from "@/features/occurrences/hooks/use-occurrences";
 export {
   closeOccurrence,
+  createOccurrence,
   fetchOccurrence,
   fetchOccurrenceByEmergencyCall,
   fetchOccurrences,
@@ -21,6 +22,10 @@ export {
   isActiveOccurrence,
   type CiospStatus,
   type CloseOccurrenceInput,
+  type CreateOccurrenceInput,
+  type CreateOccurrenceResponse,
+  type DuplicateCandidate,
+  type ManualOccurrenceOrigin,
   type Occurrence,
   type OccurrenceCursor,
   type OccurrenceDetail,

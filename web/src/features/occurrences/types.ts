@@ -114,6 +114,42 @@ export interface VictimView {
   readonly condition: string | null;
 }
 
+export type ManualOccurrenceOrigin = Exclude<OccurrenceOrigin, "SOS_CITIZEN">;
+
+export interface CreateOccurrenceInput {
+  readonly clientRequestId: string;
+  readonly origin: ManualOccurrenceOrigin;
+  readonly nature: OccurrenceNature;
+  readonly occurredAt: string;
+  readonly latitude?: number;
+  readonly longitude?: number;
+  readonly accuracyMeters?: number;
+  readonly beachId?: string;
+  readonly sectorId?: string;
+  readonly postId?: string;
+  readonly referenceText?: string;
+  readonly summary: string;
+  readonly outcome?: OccurrenceOutcome;
+  readonly outcomeNotes?: string;
+  readonly externalProtocol?: string;
+  readonly ciospProtocol?: string;
+}
+
+export interface DuplicateCandidate {
+  readonly kind: "OCCURRENCE" | "EMERGENCY_CALL";
+  readonly id: string;
+  readonly number: number | null;
+  readonly origin: string;
+  readonly status: string;
+  readonly occurredAt: string;
+  readonly distanceMeters: number;
+}
+
+export interface CreateOccurrenceResponse {
+  readonly detail: OccurrenceDetail;
+  readonly possibleDuplicates: readonly DuplicateCandidate[];
+}
+
 export interface CloseOccurrenceInput {
   readonly outcome: OccurrenceOutcome;
   readonly nature?: OccurrenceNature;

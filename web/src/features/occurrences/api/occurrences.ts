@@ -1,6 +1,8 @@
 import { ApiError, apiRequest } from "@/shared/lib/api-client";
 import type {
   CloseOccurrenceInput,
+  CreateOccurrenceInput,
+  CreateOccurrenceResponse,
   Occurrence,
   OccurrenceDetail,
   OccurrencePage,
@@ -85,6 +87,15 @@ export async function fetchOccurrence(
   return apiRequest<OccurrenceDetail>(
     `/api/v1/occurrences/${encodeURIComponent(occurrenceId)}`,
     {},
+  );
+}
+
+export async function createOccurrence(
+  input: CreateOccurrenceInput,
+): Promise<CreateOccurrenceResponse> {
+  return apiRequest<CreateOccurrenceResponse>(
+    "/api/v1/occurrences",
+    jsonPost(input),
   );
 }
 
