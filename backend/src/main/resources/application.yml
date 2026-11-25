@@ -188,6 +188,11 @@ maraberto:
     # a 24 h; sem pedido explícito, vale este prazo. Depois dele a bandeira
     # continua no histórico, mas some do mapa público.
     validity: ${FLAGS_VALIDITY:PT12H}
+  public-map:
+    # Cache de leitura das rotas públicas do mapa (bandeiras e estruturas).
+    # FlagChanged/PostChanged limpam o cache após o commit; o TTL cobre o
+    # vencimento por relógio e a defasagem entre instâncias.
+    cache-ttl: ${PUBLIC_MAP_CACHE_TTL:PT10S}
   occurrences:
     reconciliation:
       # Rede de segurança do evento de ack: abre a ocorrência que o listener

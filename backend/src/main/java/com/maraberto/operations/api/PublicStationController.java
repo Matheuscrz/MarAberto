@@ -1,5 +1,6 @@
 package com.maraberto.operations.api;
 
+import com.maraberto.operations.application.PublicMapCache;
 import com.maraberto.operations.application.StationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -8,7 +9,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.time.Duration;
 import java.util.List;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
@@ -29,13 +29,16 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Estruturas", description = "Postos fixos e bases móveis visíveis no mapa público")
 public class PublicStationController {
 
+    /** Resposta pública que o navegador revalida a cada uso (ver PublicFlagController). */
     private static final CacheControl CACHE =
-            CacheControl.maxAge(Duration.ofSeconds(30)).cachePublic();
+            CacheControl.noCache().cachePublic();
 
     private final StationService stationService;
+    private final PublicMapCache cache;
 
-    public PublicStationController(StationService stationService) {
+    public PublicStationController(StationService stationService, PublicMapCache cache) {
         this.stationService = stationService;
+        this.cache = cache;
     }
 
     @GetMapping
@@ -50,8 +53,10 @@ public class PublicStationController {
                             schema = @Schema(implementation = PublicStation.class))))
     })
     public ResponseEntity<List<PublicStation>> list() {
+        List<PublicStation> stations =
+                cache.get("stations", stationService::publicStations);
         return ResponseEntity.ok()
                 .cacheControl(CACHE)
-                .body(stationService.publicStations());
+                .body(stations);
     }
 }

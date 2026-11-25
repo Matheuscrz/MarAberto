@@ -10,6 +10,9 @@ import com.maraberto.beaches.application.BathingAreaImportService;
 import com.maraberto.beaches.application.BathingAreaImportService.ImportCommand;
 import com.maraberto.beaches.application.ImportMode;
 import com.maraberto.identity.application.AuthenticationService;
+import com.maraberto.operations.api.PostChanged;
+import com.maraberto.operations.application.StationService;
+import com.maraberto.operations.domain.StationKind;
 import com.maraberto.support.PostgisIntegrationTest;
 import com.maraberto.support.TestOperatorAuth;
 import java.nio.charset.StandardCharsets;
@@ -28,12 +31,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 
 /**
  * Estruturas e sinalização de ponta a ponta: rotas públicas, papéis e
  * vigência aplicada na leitura (RF01/RF12/RF38).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@RecordApplicationEvents
 class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
 
     private static final String PREFIX = "se-areas-banho:";
@@ -52,6 +58,9 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
 
     @Autowired
     private BathingAreaImportService importService;
+
+    @Autowired
+    private StationService stationService;
 
     private TestOperatorAuth.Session lifeguard;
     private TestOperatorAuth.Session admin;
@@ -122,6 +131,20 @@ class PublicOperationsIntegrationTests extends PostgisIntegrationTest {
         assertThat(fixed.get("active").asBoolean()).isFalse();
         assertThat(fixed.get("statusNote").asText()).isEqualTo("Em reforma");
         assertThat(fixed.get("deactivatedAt").isNull()).isFalse();
+    }
+
+    @Test
+    void deactivatingAStationPublishesPostChanged(ApplicationEvents events) {
+        // O evento é publicado na thread do serviço; o endpoint HTTP roda em
+        // outra thread e não aparece no ApplicationEvents do teste.
+        stationService.setActive(admin.userId(), StationKind.FIXED, postId, false, "Em reforma");
+
+        assertThat(events.stream(PostChanged.class))
+                .anySatisfy(event -> {
+                    assertThat(event.stationId()).isEqualTo(postId);
+                    assertThat(event.kind()).isEqualTo("FIXED");
+                    assertThat(event.active()).isFalse();
+                });
     }
 
     @Test

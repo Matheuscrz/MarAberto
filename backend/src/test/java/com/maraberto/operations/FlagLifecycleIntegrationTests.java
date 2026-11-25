@@ -11,6 +11,7 @@ import com.maraberto.beaches.application.ImportMode;
 import com.maraberto.identity.api.dto.RegisterOperationalUserCommand;
 import com.maraberto.identity.application.AuthenticationService;
 import com.maraberto.identity.domain.Role;
+import com.maraberto.operations.api.FlagChanged;
 import com.maraberto.operations.api.FlagResponse;
 import com.maraberto.operations.api.LaunchFlagRequest;
 import com.maraberto.operations.api.PublicFlag;
@@ -29,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 
 /**
  * Ciclo de vida da sinalização (RF12/RN01).
@@ -38,6 +41,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * setor quando o lançamento é de setor.
  */
 @SpringBootTest
+@RecordApplicationEvents
 class FlagLifecycleIntegrationTests extends PostgisIntegrationTest {
 
     private static final String PREFIX = "se-areas-banho:";
@@ -76,6 +80,27 @@ class FlagLifecycleIntegrationTests extends PostgisIntegrationTest {
                         validCpf(suffix),
                         "demo1234",
                         Role.LIFEGUARD));
+    }
+
+    @Test
+    void launchingAndClosingAFlagPublishesFlagChanged(ApplicationEvents events) {
+        UUID beachId = importBeachWithTwoSectors();
+        UUID north = sectorId(beachId, "Setor Norte");
+
+        FlagResponse launched = flagService.launch(
+                operatorId, launch(beachId, north, FlagColor.YELLOW, null)).flag();
+
+        assertThat(events.stream(FlagChanged.class)).hasSize(1);
+        FlagChanged published = events.stream(FlagChanged.class).findFirst().orElseThrow();
+        assertThat(published.flagId()).isEqualTo(launched.id());
+        assertThat(published.beachId()).isEqualTo(beachId);
+        assertThat(published.sectorId()).isEqualTo(north);
+
+        flagService.close(operatorId, launched.id());
+
+        assertThat(events.stream(FlagChanged.class))
+                .as("encerrar também avisa o cache público")
+                .hasSize(2);
     }
 
     @Test
