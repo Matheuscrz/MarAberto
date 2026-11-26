@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.UUID;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/admin/audit")
+@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Auditoria (TI)", description = "Trilha imutável de ações sensíveis")
 @SecurityRequirement(name = "bearerAuth")
 public class AuditController {
