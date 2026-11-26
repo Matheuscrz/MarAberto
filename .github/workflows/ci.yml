@@ -71,7 +71,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Instalar dependências
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Verificar lint e fronteiras de features
         run: npm run lint
