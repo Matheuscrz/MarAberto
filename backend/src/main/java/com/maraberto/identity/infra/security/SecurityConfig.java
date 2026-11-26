@@ -62,8 +62,13 @@ public class SecurityConfig {
                         // /me exige access token válido.
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/auth/login",
+                                "/api/v1/auth/mfa/verify",
                                 "/api/v1/auth/refresh",
                                 "/api/v1/auth/logout").permitAll()
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/v1/auth/mfa/setup",
+                                "/api/v1/auth/mfa/confirm",
+                                "/api/v1/auth/mfa/disable").hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/auth/me").authenticated()
                         // Rotas públicas do banhista.
                         .requestMatchers(HttpMethod.POST, "/api/v1/emergency-calls/**").permitAll()

@@ -2,6 +2,7 @@ package com.maraberto.identity.infra.security;
 
 import com.maraberto.identity.api.IdentityApiExceptionHandler;
 import com.maraberto.identity.domain.Role;
+import com.maraberto.identity.infra.OperationalUserRepository;
 import com.maraberto.shared.security.web.ApiProblemWriter;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
@@ -10,7 +11,12 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.time.Instant;
+import java.util.Date;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -38,10 +44,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final ApiProblemWriter problemWriter;
+    private final TokenRevocationService tokenRevocationService;
+    private final OperationalUserRepository userRepository;
 
     public JwtAuthenticationFilter(JwtService jwtService, ApiProblemWriter problemWriter) {
+        this(jwtService, problemWriter, null, null);
+    }
+
+    @Autowired
+    public JwtAuthenticationFilter(
+            JwtService jwtService,
+            ApiProblemWriter problemWriter,
+            TokenRevocationService tokenRevocationService,
+            OperationalUserRepository userRepository) {
         this.jwtService = jwtService;
         this.problemWriter = problemWriter;
+        this.tokenRevocationService = tokenRevocationService;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -71,6 +90,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         try {
             Claims claims = jwtService.validateAndExtractClaims(token);
+            if (JwtService.PURPOSE_MFA_CHALLENGE.equals(claims.get("purpose", String.class))) {
+                SecurityContextHolder.clearContext();
+                return true;
+            }
             String userId = claims.getSubject();
             String roleClaim = claims.get("role", String.class);
             if (userId == null || userId.isBlank() || roleClaim == null || roleClaim.isBlank()) {
@@ -79,12 +102,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 SecurityContextHolder.clearContext();
                 return true;
             }
+            UUID userUuid = UUID.fromString(userId);
             Role role;
             try {
                 role = Role.valueOf(roleClaim);
             } catch (IllegalArgumentException unknownRole) {
                 SecurityContextHolder.clearContext();
                 return true;
+            }
+            if (tokenRevocationService != null) {
+                Date issuedAtDate = claims.getIssuedAt();
+                Instant issuedAt = issuedAtDate == null ? null : issuedAtDate.toInstant();
+                if (tokenRevocationService.isRevoked(claims.getId(), userUuid, issuedAt)) {
+                    SecurityContextHolder.clearContext();
+                    return true;
+                }
+            }
+            if (userRepository != null) {
+                Optional<Role> activeRole = userRepository.findActiveRoleById(userUuid);
+                if (activeRole.isEmpty() || activeRole.get() != role) {
+                    SecurityContextHolder.clearContext();
+                    return true;
+                }
             }
             if (Boolean.TRUE.equals(claims.get("mustChangePassword", Boolean.class))
                     && !passwordChangeAllowed(request)) {

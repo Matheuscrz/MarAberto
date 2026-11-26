@@ -177,6 +177,14 @@ maraberto:
     temporary-password-ttl: ${IDENTITY_TEMPORARY_PASSWORD_TTL:PT24H}
     # Política da senha definitiva (o cadastro antigo continua com o mínimo 8).
     password-min-length: ${IDENTITY_PASSWORD_MIN_LENGTH:12}
+    bootstrap-admin:
+      # Cria o usuário administrador inicial (admin / admin) com troca obrigatória
+      # de senha no primeiro login quando não existe nenhum ADMIN ativo no banco.
+      enabled: ${ADMIN_BOOTSTRAP_ENABLED:true}
+      username: ${ADMIN_BOOTSTRAP_USERNAME:admin}
+      email: ${ADMIN_BOOTSTRAP_EMAIL:admin@maraberto.local}
+      password: ${ADMIN_BOOTSTRAP_PASSWORD:admin}
+      cpf: ${ADMIN_BOOTSTRAP_CPF:12345678909}
     dev-seed:
       # Contas de desenvolvimento para o login real das três áreas. Desligado
       # por padrão e recusado no perfil `prod`.

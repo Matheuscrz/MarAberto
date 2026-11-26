@@ -4,7 +4,13 @@ import com.maraberto.identity.api.dto.AuthResponse;
 import com.maraberto.identity.api.dto.AuthenticatedUserResponse;
 import com.maraberto.identity.api.dto.ChangePasswordRequest;
 import com.maraberto.identity.api.dto.LoginCommand;
+import com.maraberto.identity.api.dto.MfaCodeRequest;
+import com.maraberto.identity.api.dto.MfaConfirmResponse;
+import com.maraberto.identity.api.dto.MfaDisableRequest;
+import com.maraberto.identity.api.dto.MfaSetupResponse;
+import com.maraberto.identity.api.dto.MfaVerifyRequest;
 import com.maraberto.identity.application.AuthenticationService;
+import com.maraberto.identity.application.MfaService;
 import com.maraberto.identity.application.OriginVerifier;
 import com.maraberto.identity.application.RequestMetadata;
 import com.maraberto.identity.infra.security.CookieProperties;
@@ -44,16 +50,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthenticationService authenticationService;
+    private final MfaService mfaService;
     private final JwtProperties jwtProperties;
     private final CookieProperties cookieProperties;
     private final OriginVerifier originVerifier;
 
     public AuthController(
             AuthenticationService authenticationService,
+            MfaService mfaService,
             JwtProperties jwtProperties,
             CookieProperties cookieProperties,
             OriginVerifier originVerifier) {
         this.authenticationService = authenticationService;
+        this.mfaService = mfaService;
         this.jwtProperties = jwtProperties;
         this.cookieProperties = cookieProperties;
         this.originVerifier = originVerifier;
@@ -80,7 +89,60 @@ public class AuthController {
             HttpServletRequest request) {
         AuthenticationService.LoginResult result =
                 authenticationService.login(command, metadata(request));
+        if (result.refreshToken() == null) {
+            return ResponseEntity.ok(result.response());
+        }
         return withRefreshCookie(result, jwtProperties.getRefreshTokenTtl());
+    }
+
+    @PostMapping("/mfa/verify")
+    @Operation(summary = "Validar segundo fator (TOTP ou código de recuperação)",
+            description = "Conclui o login iniciado quando mfaRequired=true.")
+    public ResponseEntity<AuthResponse> verifyMfa(
+            @Valid @RequestBody MfaVerifyRequest command,
+            HttpServletRequest request) {
+        AuthenticationService.LoginResult result = authenticationService.verifyMfa(
+                command.challengeToken(), command.code(), metadata(request));
+        return withRefreshCookie(result, jwtProperties.getRefreshTokenTtl());
+    }
+
+    @PostMapping("/mfa/setup")
+    @SecurityRequirement(name = "bearerAuth")
+    @Operation(summary = "Iniciar configuração de MFA (TOTP)",
+            description = "Gera segredo Base32 e URI otpauth:// para Coordenação e TI.")
+    public MfaSetupResponse setupMfa(Authentication authentication) {
+        return mfaService.setup(UUID.fromString(authentication.getName()));
+    }
+
+    @PostMapping("/mfa/confirm")
+    @SecurityRequirement(name = "bearerAuth")
+    @Operation(summary = "Confirmar ativação de MFA (TOTP)",
+            description = "Valida o primeiro código TOTP e retorna 8 códigos de recuperação de uso único.")
+    public MfaConfirmResponse confirmMfa(
+            @Valid @RequestBody MfaCodeRequest command,
+            Authentication authentication,
+            HttpServletRequest request) {
+        return mfaService.confirm(
+                UUID.fromString(authentication.getName()), command.code(), metadata(request));
+    }
+
+    @PostMapping("/mfa/disable")
+    @SecurityRequirement(name = "bearerAuth")
+    @Operation(summary = "Desativar MFA (TOTP)",
+            description = "Exige senha atual e código TOTP ou código de recuperação; revoga todas as sessões.")
+    public ResponseEntity<Void> disableMfa(
+            @Valid @RequestBody MfaDisableRequest command,
+            Authentication authentication,
+            HttpServletRequest request) {
+        mfaService.disable(
+                UUID.fromString(authentication.getName()),
+                command.currentPassword(),
+                command.code(),
+                metadata(request));
+        return ResponseEntity.noContent()
+                .header(HttpHeaders.SET_COOKIE,
+                        AuthCookie.clear(cookieProperties.isSecure()).toString())
+                .build();
     }
 
     @PostMapping("/refresh")
@@ -107,7 +169,11 @@ public class AuthController {
     @ApiResponse(responseCode = "204", description = "Sessão encerrada")
     public ResponseEntity<Void> logout(HttpServletRequest request) {
         originVerifier.verify(request);
-        authenticationService.logout(AuthCookie.read(request, cookieProperties.isSecure()));
+        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
+        String bearer = (authHeader != null && authHeader.startsWith("Bearer "))
+                ? authHeader.substring(7).trim()
+                : null;
+        authenticationService.logout(AuthCookie.read(request, cookieProperties.isSecure()), bearer);
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, AuthCookie.clear(cookieProperties.isSecure()).toString())
                 .build();

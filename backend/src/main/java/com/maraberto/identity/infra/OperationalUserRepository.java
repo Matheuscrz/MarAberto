@@ -25,6 +25,11 @@ public interface OperationalUserRepository
 
     boolean existsByBadgeNumber(String badgeNumber);
 
+    boolean existsByRoleAndActiveTrue(Role role);
+
+    @Query("SELECT u.role FROM OperationalUser u WHERE u.id = :id AND u.active = true")
+    Optional<Role> findActiveRoleById(@Param("id") UUID id);
+
     @Query("SELECT u.id FROM OperationalUser u WHERE u.role = :role AND u.active = true")
     List<UUID> findActiveIdsByRole(@Param("role") Role role);
 }
