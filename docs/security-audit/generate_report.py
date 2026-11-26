@@ -42,10 +42,16 @@ SEVERITY_LABELS = {
     "INFORMATIVA": "Informativa",
 }
 
+CAT_ISOLAMENTO = "1. Banco sem Tranca (Isolamento)"
+CAT_PERMISSAO = "2. Permissão no Navegador / Auth"
+CAT_IDOR = "3. IDOR"
+CAT_CHAVES = "4. Chaves Expostas (Hardcode)"
+CAT_INPUTS = "5. Inputs sem Tratamento (XSS/SSRF)"
+
 FINDINGS = [
     {
         "id": "F-01",
-        "category": "3. IDOR",
+        "category": CAT_IDOR,
         "severity": "ALTA",
         "location": "backend/src/main/java/com/maraberto/operations/api/OperationStationController.java:158-179\nbackend/src/main/java/com/maraberto/operations/application/StationService.java:279-305",
         "title": "Reposicionamento de qualquer posto ou base móvel sem verificação de posse/plantão",
@@ -73,7 +79,7 @@ FINDINGS = [
     },
     {
         "id": "F-02",
-        "category": "2. Permissão no Navegador / Auth",
+        "category": CAT_PERMISSAO,
         "severity": "ALTA",
         "location": "backend/src/main/java/com/maraberto/identity/infra/security/JwtAccessTokenVerifier.java:25-39\nbackend/src/main/java/com/maraberto/realtime/infra/StompAuthenticationInterceptor.java:72-81",
         "title": "WebSocket STOMP ignora blacklist JWT, status active e troca obrigatória de senha",
@@ -99,7 +105,7 @@ FINDINGS = [
     },
     {
         "id": "F-03",
-        "category": "4. Chaves Expostas (Hardcode)",
+        "category": CAT_CHAVES,
         "severity": "ALTA",
         "location": "docker-compose.yml:14,21-22,28,30,39,75,111-112,126-127\ndocker-compose.tunnel.yml:17-18",
         "title": "Defaults públicos de segredos no Docker Compose e ausência de trava de startup para DB/Rabbit/Admin",
@@ -125,7 +131,7 @@ FINDINGS = [
     },
     {
         "id": "F-04",
-        "category": "3. IDOR",
+        "category": CAT_IDOR,
         "severity": "MEDIA",
         "location": "backend/src/main/java/com/maraberto/operations/api/FlagController.java:69-88\nbackend/src/main/java/com/maraberto/operations/application/FlagService.java:136-153",
         "title": "Encerramento de qualquer sinalização (bandeira) por ID sem validação de escopo",
@@ -151,7 +157,7 @@ FINDINGS = [
     },
     {
         "id": "F-05",
-        "category": "5. Inputs sem Tratamento (XSS/SSRF)",
+        "category": CAT_INPUTS,
         "severity": "MEDIA",
         "location": "backend/src/main/java/com/maraberto/realtime/api/PushSubscriptionController.java:62-75\nbackend/src/main/java/com/maraberto/realtime/infra/WebPushSender.java:44-49",
         "title": "Endpoint Web Push aceito sem validação de esquema HTTPS ou bloqueio de rede interna (SSRF)",
@@ -174,7 +180,7 @@ FINDINGS = [
     },
     {
         "id": "F-06",
-        "category": "1. Banco sem Tranca (Isolamento)",
+        "category": CAT_ISOLAMENTO,
         "severity": "MEDIA",
         "location": "backend/src/main/java/com/maraberto/occurrences/api/OccurrenceController.java:262-267\nbackend/src/main/java/com/maraberto/operations/api/ManagementTeamController.java:56-61\nbackend/src/main/java/com/maraberto/operations/api/ManagementUnmappedSignalController.java:56-87",
         "title": "Ausência de escopo territorial (praia/batalhão) para o papel COORDINATOR",
@@ -200,7 +206,7 @@ FINDINGS = [
     },
     {
         "id": "F-07",
-        "category": "4. Chaves Expostas (Hardcode)",
+        "category": CAT_CHAVES,
         "severity": "BAIXA",
         "location": "web/src/features/auth/demo.ts:19-40\nweb/dist/assets/demo-*.js:1",
         "title": "Credenciais e lógica de login demo embutidas no bundle de produção do frontend",
@@ -222,7 +228,7 @@ FINDINGS = [
     },
     {
         "id": "F-08",
-        "category": "2. Permissão no Navegador / Auth",
+        "category": CAT_PERMISSAO,
         "severity": "BAIXA",
         "location": "backend/src/main/java/com/maraberto/identity/infra/security/SecurityConfig.java:80,87-107",
         "title": "Rota inativa /api/v1/tides/** em permitAll() e ausência de @PreAuthorize nos controllers",
@@ -244,7 +250,7 @@ FINDINGS = [
     },
     {
         "id": "F-09",
-        "category": "5. Inputs sem Tratamento (XSS/SSRF)",
+        "category": CAT_INPUTS,
         "severity": "INFORMATIVA",
         "location": "web/src/features/management/pages/ManagementLearnPage.tsx:623\nbackend/src/main/java/com/maraberto/realtime/api/PushSubscriptionController.java:112-123",
         "title": "Pequenas inconsistências de sanitização/tamanho sem impacto de XSS direto",
@@ -568,7 +574,8 @@ def build_donut_svg(counts: dict[str, int]) -> str:
         ly += 26
 
     return f"""
-    <svg viewBox="0 0 380 220" width="100%" height="205" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 380 220" width="100%" height="205" role="img" aria-label="Distribuição de achados por severidade" xmlns="http://www.w3.org/2000/svg">
+      <title>Distribuição de achados por severidade</title>
       {''.join(paths)}
       <text x="{cx}" y="{cy - 4}" text-anchor="middle" font-size="26" font-weight="800" fill="#0f172a">{total}</text>
       <text x="{cx}" y="{cy + 14}" text-anchor="middle" font-size="10.5" fill="#64748b" font-weight="600">ACHADOS</text>
@@ -591,7 +598,8 @@ def build_bar_svg(cat_counts: list[tuple[str, int, str]]) -> str:
         )
         y += 38
     return f"""
-    <svg viewBox="0 0 390 220" width="100%" height="205" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 390 220" width="100%" height="205" role="img" aria-label="Achados por categoria de segurança" xmlns="http://www.w3.org/2000/svg">
+      <title>Achados por categoria de segurança</title>
       {''.join(bars)}
     </svg>
     """
@@ -604,16 +612,16 @@ def chip(sev: str) -> str:
 
 
 def render_html() -> str:
-    sev_counts = {k: 0 for k in ["CRITICA", "ALTA", "MEDIA", "BAIXA", "INFORMATIVA"]}
+    sev_counts = dict.fromkeys(["CRITICA", "ALTA", "MEDIA", "BAIXA", "INFORMATIVA"], 0)
     for f in FINDINGS:
         sev_counts[f["severity"]] += 1
 
     categories = [
-        ("1. Banco sem Tranca", "1. Banco sem Tranca (Isolamento)", "#D97706"),
-        ("2. Permissão / Auth", "2. Permissão no Navegador / Auth", "#EA580C"),
-        ("3. IDOR", "3. IDOR", "#EA580C"),
-        ("4. Chaves Expostas", "4. Chaves Expostas (Hardcode)", "#EA580C"),
-        ("5. Inputs (XSS/SSRF)", "5. Inputs sem Tratamento (XSS/SSRF)", "#D97706"),
+        ("1. Banco sem Tranca", CAT_ISOLAMENTO, "#D97706"),
+        ("2. Permissão / Auth", CAT_PERMISSAO, "#EA580C"),
+        ("3. IDOR", CAT_IDOR, "#EA580C"),
+        ("4. Chaves Expostas", CAT_CHAVES, "#EA580C"),
+        ("5. Inputs (XSS/SSRF)", CAT_INPUTS, "#D97706"),
     ]
     cat_counts = [
         (short, sum(1 for f in FINDINGS if f["category"] == full), color)
@@ -930,7 +938,7 @@ def render_html() -> str:
     font-size: 7.4pt;
     line-height: 1.35;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: break-word;
     margin: 6px 0;
   }}
   .exploit {{
@@ -969,7 +977,7 @@ def render_html() -> str:
     font-size: 7.7pt;
     line-height: 1.38;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: break-word;
     margin: 0 0 12px 0;
     break-inside: avoid;
   }}
