@@ -26,7 +26,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final StompAuthenticationInterceptor authenticationInterceptor;
 
     public WebSocketConfig(
-            @Value("${maraberto.realtime.allowed-origins:http://localhost:5173,http://localhost:3000}")
+            @Value("${maraberto.realtime.allowed-origins:http://localhost,http://127.0.0.1,http://localhost:5173,http://localhost:3000}")
                     String[] allowedOrigins,
             StompAuthenticationInterceptor authenticationInterceptor) {
         this.allowedOrigins = allowedOrigins;

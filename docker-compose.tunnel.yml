@@ -10,7 +10,7 @@ services:
       # permitiria forjar o IP e escapar do rate limit e do lockout do login.
       FORWARD_HEADERS_STRATEGY: native
       # Permite WebSocket STOMP e requisições vindas da URL pública do túnel
-      REALTIME_ALLOWED_ORIGINS: ${REALTIME_ALLOWED_ORIGINS:-http://localhost:3000}
+      REALTIME_ALLOWED_ORIGINS: ${REALTIME_ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
       # Ativa usuários e postos de demonstração para o QA conseguir logar e testar.
       # O túnel é público: com `true`, as contas `@maraberto.dev` (senha `demo1234`)
       # e os postos demo ficam acessíveis para quem tiver a URL.
@@ -25,7 +25,7 @@ services:
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: maraberto-tunnel
-    command: tunnel --no-autoupdate --url http://web:80
+    command: tunnel --no-autoupdate --url http://web:8080
     depends_on:
       - web
     restart: unless-stopped
