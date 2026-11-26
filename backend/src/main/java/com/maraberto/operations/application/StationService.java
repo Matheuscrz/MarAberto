@@ -279,7 +279,15 @@ public class StationService {
     /** Reposiciona a estrutura com a leitura atual do aparelho (RF11). */
     @Transactional
     public StationAdminView moveStation(
-            StationKind kind, UUID id, StationPositionRequest request) {
+            UUID actorId,
+            boolean privileged,
+            StationKind kind,
+            UUID id,
+            StationPositionRequest request) {
+        findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
+        if (!privileged && !ownedByOpenShift(actorId, kind, id)) {
+            throw new StationOutsideShiftException();
+        }
         String table = tableOf(kind);
         int updated = jdbc.update("""
                         UPDATE %s
@@ -298,6 +306,12 @@ public class StationService {
         if (updated == 0) {
             throw new StationNotFoundException();
         }
+        auditTrail.record(AuditEvent.of(
+                actorId,
+                AuditActions.STATION_REPOSITIONED,
+                AuditEntityTypes.STATION,
+                id,
+                Map.of("kind", kind.name())));
         StationAdminView moved = findAdmin(kind, id)
                 .orElseThrow(StationNotFoundException::new);
         events.publishEvent(new PostChanged(id, kind.name(), moved.active()));

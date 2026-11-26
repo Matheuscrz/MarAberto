@@ -534,6 +534,15 @@ class FlagLocationAndMediaTests extends PostgisIntegrationTest {
         assertThat(station.get("latitude").asDouble())
                 .isCloseTo(BEACH_MIN_Y + 0.0005, within(1e-6));
 
+        // F-01: guarda-vidas só reposiciona estrutura vinculada ao seu plantão aberto.
+        ResponseEntity<String> openedShift = restTemplate.postForEntity(
+                "/api/v1/dispatch/shifts",
+                authorized(lifeguard.accessToken(), """
+                        {"postId": "%s", "latitude": %s, "longitude": %s}
+                        """.formatted(stationId, BEACH_MIN_Y + 0.0005, BEACH_MIN_X + 0.0005)),
+                String.class);
+        assertThat(openedShift.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
         double newLatitude = BEACH_MIN_Y + 0.0008;
         double newLongitude = BEACH_MIN_X + 0.0008;
         ResponseEntity<String> moved = restTemplate.exchange(
