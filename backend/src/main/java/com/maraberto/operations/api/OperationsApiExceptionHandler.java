@@ -1,6 +1,7 @@
 package com.maraberto.operations.api;
 
 import com.maraberto.operations.domain.FlagNotFoundException;
+import com.maraberto.operations.domain.FlagOutsideScopeException;
 import com.maraberto.operations.domain.ShiftAlreadyOpenException;
 import com.maraberto.operations.domain.ShiftNotFoundException;
 import com.maraberto.operations.domain.StationNotFoundException;
@@ -92,6 +93,17 @@ public class OperationsApiExceptionHandler extends ResponseEntityExceptionHandle
                 HttpStatus.NOT_FOUND,
                 "https://maraberto.org/problems/flag-not-found",
                 "Sinalização não encontrada",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    @ExceptionHandler(FlagOutsideScopeException.class)
+    public ResponseEntity<Object> handleFlagOutsideScope(
+            FlagOutsideScopeException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.FORBIDDEN,
+                "https://maraberto.org/problems/flag-outside-scope",
+                "Sinalização fora do seu escopo",
                 exception.getMessage(),
                 request), new HttpHeaders());
     }

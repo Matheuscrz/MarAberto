@@ -166,6 +166,9 @@ public class OperationStationController {
             @ApiResponse(responseCode = "400", description = "Payload inválido (RFC 9457)",
                     content = @Content(mediaType = "application/problem+json",
                             schema = @Schema(implementation = ApiProblem.class))),
+            @ApiResponse(responseCode = "403", description = "Estrutura fora do plantão do operador (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class))),
             @ApiResponse(responseCode = "404", description = "Estrutura inexistente (RFC 9457)",
                     content = @Content(mediaType = "application/problem+json",
                             schema = @Schema(implementation = ApiProblem.class)))
@@ -174,8 +177,14 @@ public class OperationStationController {
             @Parameter(description = "Tipo da estrutura", example = "FIXED")
             @PathVariable StationKind kind,
             @PathVariable UUID stationId,
-            @Valid @RequestBody StationPositionRequest request) {
-        return stationService.moveStation(kind, stationId, request);
+            @Valid @RequestBody StationPositionRequest request,
+            Authentication authentication) {
+        return stationService.moveStation(
+                userId(authentication),
+                isPrivileged(authentication),
+                kind,
+                stationId,
+                request);
     }
 
     private static UUID userId(Authentication authentication) {

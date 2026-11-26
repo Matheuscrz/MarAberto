@@ -53,6 +53,26 @@ public class OccurrenceQueryService {
             Instant beforeOccurredAt,
             Long beforeNumber,
             int limit) {
+        return list(
+                userId, allScopes, false, status, emergencyCallId, activeOnly, closedOnly,
+                ciospPending, from, to, beforeOccurredAt, beforeNumber, limit);
+    }
+
+    @Transactional(readOnly = true)
+    public OccurrencePage list(
+            UUID userId,
+            boolean allScopes,
+            boolean bypassTerritorialScope,
+            OccurrenceStatus status,
+            UUID emergencyCallId,
+            boolean activeOnly,
+            boolean closedOnly,
+            boolean ciospPending,
+            Instant from,
+            Instant to,
+            Instant beforeOccurredAt,
+            Long beforeNumber,
+            int limit) {
         if ((beforeOccurredAt == null) != (beforeNumber == null)) {
             throw new IllegalArgumentException(
                     "Informe beforeOccurredAt e beforeNumber juntos para paginar.");
@@ -64,8 +84,8 @@ public class OccurrenceQueryService {
         int size = clamp(limit);
         // Uma linha a mais decide `hasMore` sem uma segunda consulta de count.
         List<OccurrenceView> rows = occurrenceRepository.findAll(
-                userId, allScopes, status, emergencyCallId, activeOnly, closedOnly,
-                ciospPending, from, to, beforeOccurredAt, beforeNumber, size + 1);
+                userId, allScopes, bypassTerritorialScope, status, emergencyCallId, activeOnly,
+                closedOnly, ciospPending, from, to, beforeOccurredAt, beforeNumber, size + 1);
         boolean hasMore = rows.size() > size;
         List<OccurrenceView> items = hasMore
                 ? List.copyOf(rows.subList(0, size))
@@ -80,8 +100,14 @@ public class OccurrenceQueryService {
 
     @Transactional(readOnly = true)
     public OccurrenceDetailView get(UUID occurrenceId, UUID userId, boolean allScopes) {
+        return get(occurrenceId, userId, allScopes, false);
+    }
+
+    @Transactional(readOnly = true)
+    public OccurrenceDetailView get(
+            UUID occurrenceId, UUID userId, boolean allScopes, boolean bypassTerritorialScope) {
         return OccurrenceViews.detail(occurrenceRepository
-                .findDetail(occurrenceId, userId, allScopes, false)
+                .findDetail(occurrenceId, userId, allScopes, bypassTerritorialScope, false)
                 .orElseThrow(() -> new OccurrenceNotFoundException(occurrenceId)));
     }
 

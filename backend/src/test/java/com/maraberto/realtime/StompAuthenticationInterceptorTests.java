@@ -64,6 +64,16 @@ class StompAuthenticationInterceptorTests {
     }
 
     @Test
+    void rejectsConnectWhenPasswordChangeIsRequired() {
+        StompAuthenticationInterceptor tempPasswordInterceptor = new StompAuthenticationInterceptor(
+                token -> Optional.of(new AccessTokenClaims(USER_ID, "LIFEGUARD", true)));
+
+        assertThatThrownBy(() -> tempPasswordInterceptor.preSend(connect("Bearer token-temp"), null))
+                .isInstanceOf(MessagingException.class)
+                .hasMessageContaining("Troca de senha");
+    }
+
+    @Test
     void lifeguardCanSubscribeToOwnSosQueue() {
         Message<?> result = interceptor.preSend(
                 subscribe(SosDestinations.SOS_SUBSCRIPTION, "LIFEGUARD"), null);

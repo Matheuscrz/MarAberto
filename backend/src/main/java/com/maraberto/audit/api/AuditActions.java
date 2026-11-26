@@ -13,12 +13,14 @@ public final class AuditActions {
     public static final String USER_ACTIVATED = "USER_ACTIVATED";
     public static final String USER_DEACTIVATED = "USER_DEACTIVATED";
     public static final String USER_ROLE_CHANGED = "USER_ROLE_CHANGED";
+    public static final String USER_SCOPE_UPDATED = "USER_SCOPE_UPDATED";
     public static final String USER_PASSWORD_RESET = "USER_PASSWORD_RESET";
     public static final String PASSWORD_CHANGED = "PASSWORD_CHANGED";
     public static final String MFA_ENABLED = "MFA_ENABLED";
     public static final String MFA_DISABLED = "MFA_DISABLED";
     public static final String STATION_ACTIVATED = "STATION_ACTIVATED";
     public static final String STATION_DEACTIVATED = "STATION_DEACTIVATED";
+    public static final String STATION_REPOSITIONED = "STATION_REPOSITIONED";
     public static final String SHIFT_CLOSED_IDLE = "SHIFT_CLOSED_IDLE";
     public static final String IMPORT_APPLIED = "IMPORT_APPLIED";
     public static final String UNMAPPED_SIGNAL_DECIDED = "UNMAPPED_SIGNAL_DECIDED";

@@ -620,7 +620,7 @@ export function ManagementLearnPage() {
                         className="inline-flex items-center gap-1 font-semibold text-ocean-800 underline"
                       >
                         <ExternalLink aria-hidden="true" className="size-3" />
-                        {item.externalLinkLabel ?? "Link externo"}
+                        {sanitizeText(item.externalLinkLabel ?? "Link externo", 80) || "Link externo"}
                       </a>
                     ) : null}
                   </div>

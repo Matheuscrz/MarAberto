@@ -1,0 +1,124 @@
+# Stack de produção do MarAberto.
+# Todas as credenciais e segredos são obrigatórios via `.env` (sem defaults).
+# Uso: docker compose -f docker-compose.prod.yml up -d --build
+name: maraberto-prod
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: maraberto-backend
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-maraberto}
+      DB_USER: ${POSTGRES_USER:?defina POSTGRES_USER no .env}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      STORAGE_PROVIDER: s3
+      STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:-http://garage:3900}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-garage}
+      STORAGE_S3_ACCESS_KEY: ${GARAGE_ACCESS_KEY:?defina GARAGE_ACCESS_KEY no .env}
+      STORAGE_S3_SECRET_KEY: ${GARAGE_SECRET_KEY:?defina GARAGE_SECRET_KEY no .env}
+      BATHING_AREAS_IMPORT_BUCKET: ${GARAGE_BUCKET:-media-public}
+      CRYPTO_KEY_ID: ${CRYPTO_KEY_ID:-k1}
+      CRYPTO_MASTER_KEY: ${CRYPTO_MASTER_KEY:?defina CRYPTO_MASTER_KEY no .env}
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+      SECURITY_COOKIE_SECURE: "true"
+      SECURITY_ALLOWED_ORIGINS: ${SECURITY_ALLOWED_ORIGINS:?defina SECURITY_ALLOWED_ORIGINS no .env}
+      REALTIME_ALLOWED_ORIGINS: ${REALTIME_ALLOWED_ORIGINS:?defina REALTIME_ALLOWED_ORIGINS no .env}
+      ADMIN_BOOTSTRAP_ENABLED: ${ADMIN_BOOTSTRAP_ENABLED:-true}
+      ADMIN_BOOTSTRAP_USERNAME: ${ADMIN_BOOTSTRAP_USERNAME:-admin}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:?defina ADMIN_BOOTSTRAP_EMAIL no .env}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:?defina ADMIN_BOOTSTRAP_PASSWORD no .env}
+      IDENTITY_DEV_SEED: "false"
+      OPERATIONS_DEV_SEED: "false"
+      BATHING_AREAS_DEV_SEED: "false"
+      PUSH_VAPID_PUBLIC_KEY: ${PUSH_VAPID_PUBLIC_KEY:-}
+      PUSH_VAPID_PRIVATE_KEY: ${PUSH_VAPID_PRIVATE_KEY:-}
+      PUSH_VAPID_SUBJECT: ${PUSH_VAPID_SUBJECT:-mailto:contato@maraberto.dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      garage:
+        condition: service_started
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: maraberto-web
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: maraberto-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-maraberto}
+      POSTGRES_USER: ${POSTGRES_USER:?defina POSTGRES_USER no .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    volumes:
+      - maraberto_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?defina POSTGRES_USER no .env} -d ${POSTGRES_DB:-maraberto}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    container_name: maraberto-redis
+    volumes:
+      - maraberto_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  garage:
+    image: dxflrs/garage:v2.4.1
+    container_name: maraberto-garage
+    command: /garage server --single-node --default-bucket
+    environment:
+      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_ACCESS_KEY:?defina GARAGE_ACCESS_KEY no .env}
+      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_SECRET_KEY:?defina GARAGE_SECRET_KEY no .env}
+      GARAGE_DEFAULT_BUCKET: ${GARAGE_BUCKET:-media-public}
+    volumes:
+      - ./deploy/garage/garage.toml:/etc/garage.toml:ro
+      - maraberto_garage_data:/var/lib/garage
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: maraberto-rabbitmq
+    profiles: ["rabbit"]
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?defina RABBITMQ_USER no .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?defina RABBITMQ_PASSWORD no .env}
+    volumes:
+      - maraberto_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  maraberto_postgres_data:
+  maraberto_redis_data:
+  maraberto_garage_data:
+  maraberto_rabbitmq_data:

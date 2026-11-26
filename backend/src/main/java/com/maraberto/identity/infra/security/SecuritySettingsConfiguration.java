@@ -41,6 +41,30 @@ public class SecuritySettingsConfiguration {
         }
         if (production) {
             requireProductionOrigins(cookieProperties.getAllowedOrigins());
+            rejectDefaultCredentials();
+        }
+    }
+
+    private void rejectDefaultCredentials() {
+        String dbPassword = environment.getProperty("spring.datasource.password");
+        if ("maraberto".equals(dbPassword)) {
+            throw new IllegalStateException(
+                    "spring.datasource.password padrão ('maraberto') não é aceita em produção; "
+                            + "defina DB_PASSWORD/POSTGRES_PASSWORD no ambiente");
+        }
+        String rabbitPassword = environment.getProperty("spring.rabbitmq.password");
+        if ("maraberto".equals(rabbitPassword) || "guest".equals(rabbitPassword)) {
+            throw new IllegalStateException(
+                    "spring.rabbitmq.password padrão não é aceita em produção; "
+                            + "defina RABBITMQ_PASSWORD no ambiente");
+        }
+        boolean bootstrapEnabled = Boolean.parseBoolean(
+                environment.getProperty("maraberto.identity.bootstrap-admin.enabled", "true"));
+        String adminPassword = environment.getProperty("maraberto.identity.bootstrap-admin.password");
+        if (bootstrapEnabled && "admin".equals(adminPassword)) {
+            throw new IllegalStateException(
+                    "ADMIN_BOOTSTRAP_PASSWORD padrão ('admin') não é aceita em produção; "
+                            + "defina uma senha inicial forte ou desative ADMIN_BOOTSTRAP_ENABLED");
         }
     }
 

@@ -60,7 +60,7 @@ Todo o código reside em `com.maraberto.<modulo>`. Módulos só podem importar t
    - **MFA opcional (TOTP RFC 6238):** `COORDINATOR` e `ADMIN` podem ativar ou desativar voluntariamente em `/api/v1/auth/mfa/{setup,confirm,disable}`, com 8 códigos de recuperação de uso único (armazenados apenas como hash SHA-256).
    - **Bootstrap do Administrador Inicial:** `AdminBootstrapRunner` cria `admin` (senha padrão `admin`, configurável via `ADMIN_BOOTSTRAP_*`) com `must_change_password = true` apenas se não existir nenhum `ADMIN` ativo. Até trocar a senha, todas as rotas de negócio respondem `403 password-change-required`.
 4. **Travas do perfil `prod` (`SPRING_PROFILES_ACTIVE=prod`):**
-   - Recusa `CRYPTO_MASTER_KEY` padrão, `JWT_SECRET` padrão, `STORAGE_PROVIDER=stub`, `SECURITY_COOKIE_SECURE=false`, origens HTTP em `SECURITY_ALLOWED_ORIGINS` e qualquer `*_DEV_SEED=true`.
+   - Recusa `CRYPTO_MASTER_KEY` padrão, `JWT_SECRET` padrão, `STORAGE_PROVIDER=stub`, `SECURITY_COOKIE_SECURE=false`, origens HTTP em `SECURITY_ALLOWED_ORIGINS`, credenciais padrão de PostgreSQL/Garage/RabbitMQ/Admin (`maraberto`, `maraberto-secret-key`, `admin`) e qualquer `*_DEV_SEED=true`.
    - Desliga Swagger/OpenAPI automaticamente (`application-prod.yml`).
 
 ---
@@ -88,7 +88,7 @@ Todo o código reside em `com.maraberto.<modulo>`. Módulos só podem importar t
    - `REALTIME_ALLOWED_ORIGINS=https://seu-dominio.cbm.uf.gov.br`
    - Credenciais próprias de PostgreSQL, Garage (S3) e RabbitMQ (opcional, com `SPRING_PROFILES_ACTIVE=prod,rabbit`).
    - Chaves VAPID (`PUSH_VAPID_*`) para Web Push no PWA.
-4. **Subir a stack:** `docker compose up -d --build`.
+4. **Subir a stack:** em desenvolvimento use `docker compose up -d --build`; em produção use `docker compose -f docker-compose.prod.yml up -d --build` (sem defaults de segredos e com `SPRING_PROFILES_ACTIVE=prod`).
 5. **Primeiro acesso:** entrar em `/login` com `admin` / `admin`, definir a senha definitiva, importar o KML das áreas de banho do estado em `/gestao/importar` e cadastrar a equipe em `/admin/usuarios`.
 
 ---

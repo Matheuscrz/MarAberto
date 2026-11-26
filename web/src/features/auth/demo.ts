@@ -16,45 +16,50 @@ export interface DemoAccount {
   readonly user: OperatorUser;
 }
 
-const DEMO_PASSWORD = "demo1234";
+const DEMO_PASSWORD = import.meta.env.DEV ? "demo1234" : "";
 
-export const DEMO_ACCOUNTS: readonly DemoAccount[] = [
-  {
-    identifier: "operador",
-    password: DEMO_PASSWORD,
-    user: {
-      id: "demo-guarda",
-      name: "Sgt. Silva",
-      role: "LIFEGUARD",
-      badgeNumber: "BM-10492",
-      mustChangePassword: false,
-    },
-  },
-  {
-    identifier: "coordenador",
-    password: DEMO_PASSWORD,
-    user: {
-      id: "demo-coordenacao",
-      name: "Ten. Rocha",
-      role: "COORDINATOR",
-      badgeNumber: "CBM-2041",
-      mustChangePassword: false,
-    },
-  },
-  {
-    identifier: "admin",
-    password: DEMO_PASSWORD,
-    user: {
-      id: "demo-ti",
-      name: "Ana (TI)",
-      role: "ADMIN",
-      email: "ti@maraberto.dev",
-      mustChangePassword: false,
-    },
-  },
-];
+export const DEMO_ACCOUNTS: readonly DemoAccount[] = import.meta.env.DEV
+  ? [
+      {
+        identifier: "operador",
+        password: DEMO_PASSWORD,
+        user: {
+          id: "demo-guarda",
+          name: "Sgt. Silva",
+          role: "LIFEGUARD",
+          badgeNumber: "BM-10492",
+          mustChangePassword: false,
+        },
+      },
+      {
+        identifier: "coordenador",
+        password: DEMO_PASSWORD,
+        user: {
+          id: "demo-coordenacao",
+          name: "Ten. Rocha",
+          role: "COORDINATOR",
+          badgeNumber: "CBM-2041",
+          mustChangePassword: false,
+        },
+      },
+      {
+        identifier: "admin",
+        password: DEMO_PASSWORD,
+        user: {
+          id: "demo-ti",
+          name: "Ana (TI)",
+          role: "ADMIN",
+          email: "ti@maraberto.dev",
+          mustChangePassword: false,
+        },
+      },
+    ]
+  : [];
 
 export function demoLogin(credentials: LoginCredentials): AuthSession {
+  if (!import.meta.env.DEV) {
+    throw new Error("Modo de demonstração indisponível em produção.");
+  }
   const identifier = credentials.identifier.trim().toLocaleLowerCase("pt-BR");
   const account = DEMO_ACCOUNTS.find((item) => item.identifier === identifier);
 

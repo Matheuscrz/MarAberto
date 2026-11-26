@@ -149,6 +149,15 @@ public class JdbcFlagRepository {
                 .findFirst();
     }
 
+    public Optional<UUID> findAuthor(UUID id) {
+        return jdbc.query(
+                        "SELECT set_by FROM flag_updates WHERE id = :id",
+                        new MapSqlParameterSource("id", id),
+                        (rs, rowNum) -> rs.getObject("set_by", UUID.class))
+                .stream()
+                .findFirst();
+    }
+
     public void close(UUID id, UUID closedBy, Instant when) {
         jdbc.update("""
                         UPDATE flag_updates

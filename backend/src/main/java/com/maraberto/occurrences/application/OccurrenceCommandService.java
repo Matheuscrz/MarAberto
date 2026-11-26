@@ -69,12 +69,22 @@ public class OccurrenceCommandService {
             UUID userId,
             boolean allScopes,
             CreateOccurrenceRequest request) {
+        return create(userId, allScopes, false, request);
+    }
+
+    @Transactional
+    public CreateOccurrenceResponse create(
+            UUID userId,
+            boolean allScopes,
+            boolean bypassTerritorialScope,
+            CreateOccurrenceRequest request) {
         validateManualCreate(request);
 
         Optional<UUID> existingId = occurrenceRepository.findIdByClientRequestId(
                 request.clientRequestId());
         if (existingId.isPresent()) {
-            OccurrenceDetailView existing = detail(existingId.get(), userId, allScopes);
+            OccurrenceDetailView existing = detail(
+                    existingId.get(), userId, allScopes, bypassTerritorialScope);
             return new CreateOccurrenceResponse(existing, findDuplicates(existing.occurrence()));
         }
 
@@ -119,7 +129,7 @@ public class OccurrenceCommandService {
             UUID id = occurrenceRepository.findIdByClientRequestId(request.clientRequestId())
                     .orElseThrow(() -> new IllegalStateException(
                             "Conflito de clientRequestId sem registro correspondente."));
-            OccurrenceDetailView existing = detail(id, userId, allScopes);
+            OccurrenceDetailView existing = detail(id, userId, allScopes, bypassTerritorialScope);
             return new CreateOccurrenceResponse(existing, findDuplicates(existing.occurrence()));
         }
 
@@ -158,7 +168,8 @@ public class OccurrenceCommandService {
                         "nature", request.nature().name(),
                         "status", status.name())));
 
-        OccurrenceDetailView created = detail(occurrenceId, userId, allScopes);
+        OccurrenceDetailView created = detail(
+                occurrenceId, userId, allScopes, bypassTerritorialScope);
         return new CreateOccurrenceResponse(created, findDuplicates(created.occurrence()));
     }
 
@@ -168,7 +179,18 @@ public class OccurrenceCommandService {
             UUID userId,
             boolean allScopes,
             CloseOccurrenceRequest request) {
-        OccurrenceRepository.OccurrenceDetail current = lock(occurrenceId, userId, allScopes);
+        return close(occurrenceId, userId, allScopes, false, request);
+    }
+
+    @Transactional
+    public OccurrenceDetailView close(
+            UUID occurrenceId,
+            UUID userId,
+            boolean allScopes,
+            boolean bypassTerritorialScope,
+            CloseOccurrenceRequest request) {
+        OccurrenceRepository.OccurrenceDetail current = lock(
+                occurrenceId, userId, allScopes, bypassTerritorialScope);
         if (isClosed(current.view().status())) {
             throw new OccurrenceAlreadyClosedException(occurrenceId);
         }
@@ -224,7 +246,7 @@ public class OccurrenceCommandService {
                         "to", write.status().name(),
                         "outcome", request.outcome().name())));
 
-        return detail(occurrenceId, userId, allScopes);
+        return detail(occurrenceId, userId, allScopes, bypassTerritorialScope);
     }
 
     @Transactional
@@ -233,7 +255,18 @@ public class OccurrenceCommandService {
             UUID userId,
             boolean allScopes,
             UpdateOccurrenceRequest request) {
-        OccurrenceRepository.OccurrenceDetail current = lock(occurrenceId, userId, allScopes);
+        return update(occurrenceId, userId, allScopes, false, request);
+    }
+
+    @Transactional
+    public OccurrenceDetailView update(
+            UUID occurrenceId,
+            UUID userId,
+            boolean allScopes,
+            boolean bypassTerritorialScope,
+            UpdateOccurrenceRequest request) {
+        OccurrenceRepository.OccurrenceDetail current = lock(
+                occurrenceId, userId, allScopes, bypassTerritorialScope);
 
         String protocol = clean(request.ciospProtocol());
         CiospStatus ciospStatus = resolveCiospOnUpdate(request, current, protocol);
@@ -275,7 +308,7 @@ public class OccurrenceCommandService {
                     Map.of("fields", fields)));
         }
 
-        return detail(occurrenceId, userId, allScopes);
+        return detail(occurrenceId, userId, allScopes, bypassTerritorialScope);
     }
 
     @Transactional
@@ -284,7 +317,18 @@ public class OccurrenceCommandService {
             UUID userId,
             boolean allScopes,
             RevealVictimRequest request) {
-        OccurrenceRepository.OccurrenceDetail current = lock(occurrenceId, userId, allScopes);
+        return reveal(occurrenceId, userId, allScopes, false, request);
+    }
+
+    @Transactional
+    public VictimView reveal(
+            UUID occurrenceId,
+            UUID userId,
+            boolean allScopes,
+            boolean bypassTerritorialScope,
+            RevealVictimRequest request) {
+        OccurrenceRepository.OccurrenceDetail current = lock(
+                occurrenceId, userId, allScopes, bypassTerritorialScope);
         OccurrenceRepository.VictimData victim = current.victim();
         if (!victim.recorded()) {
             throw new OccurrenceVictimNotFoundException(occurrenceId);
@@ -309,15 +353,16 @@ public class OccurrenceCommandService {
     }
 
     private OccurrenceRepository.OccurrenceDetail lock(
-            UUID occurrenceId, UUID userId, boolean allScopes) {
-        return occurrenceRepository.findDetail(occurrenceId, userId, allScopes, true)
+            UUID occurrenceId, UUID userId, boolean allScopes, boolean bypassTerritorialScope) {
+        return occurrenceRepository
+                .findDetail(occurrenceId, userId, allScopes, bypassTerritorialScope, true)
                 .orElseThrow(() -> new OccurrenceNotFoundException(occurrenceId));
     }
 
     private OccurrenceDetailView detail(
-            UUID occurrenceId, UUID userId, boolean allScopes) {
+            UUID occurrenceId, UUID userId, boolean allScopes, boolean bypassTerritorialScope) {
         return OccurrenceViews.detail(occurrenceRepository
-                .findDetail(occurrenceId, userId, allScopes, false)
+                .findDetail(occurrenceId, userId, allScopes, bypassTerritorialScope, false)
                 .orElseThrow(() -> new OccurrenceNotFoundException(occurrenceId)));
     }
 

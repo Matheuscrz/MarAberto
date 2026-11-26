@@ -28,11 +28,16 @@ public class WebPushSender {
 
     private final PushProperties pushProperties;
     private final PushSubscriptionRepository repository;
+    private final WebPushEndpointValidator endpointValidator;
     private volatile PushService pushService;
 
-    public WebPushSender(PushProperties pushProperties, PushSubscriptionRepository repository) {
+    public WebPushSender(
+            PushProperties pushProperties,
+            PushSubscriptionRepository repository,
+            WebPushEndpointValidator endpointValidator) {
         this.pushProperties = pushProperties;
         this.repository = repository;
+        this.endpointValidator = endpointValidator;
     }
 
     public void send(PushSubscription subscription, String jsonPayload) {
@@ -40,9 +45,10 @@ public class WebPushSender {
         if (service == null) {
             return;
         }
+        String endpoint = endpointValidator.validateForSend(subscription.endpoint());
         try {
             Notification notification = new Notification(
-                    subscription.endpoint(),
+                    endpoint,
                     subscription.p256dh(),
                     subscription.auth(),
                     jsonPayload.getBytes(StandardCharsets.UTF_8));

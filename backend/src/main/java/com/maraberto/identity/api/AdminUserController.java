@@ -5,8 +5,11 @@ import com.maraberto.identity.api.dto.AdminUserView;
 import com.maraberto.identity.api.dto.CreateAdminUserRequest;
 import com.maraberto.identity.api.dto.ProvisionedAdminUserResponse;
 import com.maraberto.identity.api.dto.UpdateAdminUserRequest;
+import com.maraberto.identity.api.dto.UpdateUserBeachScopesRequest;
+import com.maraberto.identity.api.dto.UserBeachScopesView;
 import com.maraberto.identity.application.AdminUserService;
 import com.maraberto.identity.application.RequestMetadata;
+import com.maraberto.identity.application.UserBeachScopeService;
 import com.maraberto.identity.domain.Role;
 import com.maraberto.shared.api.ApiProblem;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,11 +27,13 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -42,14 +47,19 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/admin/users")
+@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Usuários (TI)", description = "Cadastro, papel, ativação e reset de senha")
 @SecurityRequirement(name = "bearerAuth")
 public class AdminUserController {
 
     private final AdminUserService adminUserService;
+    private final UserBeachScopeService userBeachScopeService;
 
-    public AdminUserController(AdminUserService adminUserService) {
+    public AdminUserController(
+            AdminUserService adminUserService,
+            UserBeachScopeService userBeachScopeService) {
         this.adminUserService = adminUserService;
+        this.userBeachScopeService = userBeachScopeService;
     }
 
     @GetMapping
@@ -155,6 +165,24 @@ public class AdminUserController {
                 .header(HttpHeaders.PRAGMA, "no-cache")
                 .body(adminUserService.resetPassword(
                         actor(authentication), userId, metadata(httpRequest)));
+    }
+
+    @GetMapping("/{userId}/beach-scopes")
+    @Operation(summary = "Consultar escopo territorial do usuário",
+            description = "Devolve as áreas de banho vinculadas ao usuário (lista vazia = escopo irrestrito).")
+    public UserBeachScopesView getBeachScopes(@PathVariable UUID userId) {
+        return userBeachScopeService.getScopes(userId);
+    }
+
+    @PutMapping("/{userId}/beach-scopes")
+    @Operation(summary = "Definir escopo territorial do usuário",
+            description = "Substitui a lista de áreas de banho visíveis por um coordenador regional. "
+                    + "Enviar lista vazia remove a restrição.")
+    public UserBeachScopesView replaceBeachScopes(
+            @PathVariable UUID userId,
+            @Valid @RequestBody UpdateUserBeachScopesRequest request,
+            Authentication authentication) {
+        return userBeachScopeService.replaceScopes(actor(authentication), userId, request.beachIds());
     }
 
     private static UUID actor(Authentication authentication) {

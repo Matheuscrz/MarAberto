@@ -9,9 +9,13 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.UUID;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/management/team")
+@PreAuthorize("hasAnyRole('COORDINATOR', 'ADMIN')")
 @Tag(name = "Coordenação (equipe)",
         description = "Plantões abertos, última posição e volume do dia")
 @SecurityRequirement(name = "bearerAuth")
@@ -53,10 +58,14 @@ public class ManagementTeamController {
                     content = @Content(mediaType = "application/problem+json",
                             schema = @Schema(implementation = ApiProblem.class)))
     })
-    public ResponseEntity<ManagementTeamView> team() {
+    public ResponseEntity<ManagementTeamView> team(Authentication authentication) {
+        UUID requesterId = UUID.fromString(authentication.getName());
+        boolean isAdmin = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch("ROLE_ADMIN"::equals);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .header(HttpHeaders.PRAGMA, "no-cache")
-                .body(teamService.team());
+                .body(teamService.team(requesterId, isAdmin));
     }
 }

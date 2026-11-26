@@ -73,6 +73,9 @@ public class FlagController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Sinalização encerrada",
                     content = @Content(schema = @Schema(implementation = FlagResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Sinalização fora do escopo do operador (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class))),
             @ApiResponse(responseCode = "404", description = "Sinalização inexistente ou já encerrada (RFC 9457)",
                     content = @Content(mediaType = "application/problem+json",
                             schema = @Schema(implementation = ApiProblem.class))),
@@ -84,10 +87,17 @@ public class FlagController {
             @Parameter(description = "Identificador do lançamento")
             @PathVariable UUID flagId,
             Authentication authentication) {
-        return flagService.close(userId(authentication), flagId);
+        return flagService.close(userId(authentication), isPrivileged(authentication), flagId);
     }
 
     private static UUID userId(Authentication authentication) {
         return UUID.fromString(authentication.getName());
+    }
+
+    private static boolean isPrivileged(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .map(authority -> authority.getAuthority())
+                .anyMatch(authority -> authority.equals("ROLE_COORDINATOR")
+                        || authority.equals("ROLE_ADMIN"));
     }
 }

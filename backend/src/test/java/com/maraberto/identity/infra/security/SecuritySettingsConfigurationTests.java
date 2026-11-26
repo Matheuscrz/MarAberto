@@ -51,6 +51,58 @@ class SecuritySettingsConfigurationTests {
                 .doesNotThrowAnyException();
     }
 
+    @Test
+    void rejectsDefaultDatabasePasswordInProduction() {
+        MockEnvironment environment = prodEnvironment();
+        environment.setProperty("spring.datasource.password", "maraberto");
+        assertThatThrownBy(() -> validateWithEnvironment(environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("spring.datasource.password");
+    }
+
+    @Test
+    void rejectsDefaultRabbitPasswordInProduction() {
+        MockEnvironment environment = prodEnvironment();
+        environment.setProperty("spring.rabbitmq.password", "maraberto");
+        assertThatThrownBy(() -> validateWithEnvironment(environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("spring.rabbitmq.password");
+    }
+
+    @Test
+    void rejectsDefaultAdminBootstrapPasswordInProduction() {
+        MockEnvironment environment = prodEnvironment();
+        environment.setProperty("maraberto.identity.bootstrap-admin.enabled", "true");
+        environment.setProperty("maraberto.identity.bootstrap-admin.password", "admin");
+        assertThatThrownBy(() -> validateWithEnvironment(environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ADMIN_BOOTSTRAP_PASSWORD");
+    }
+
+    @Test
+    void acceptsCustomCredentialsInProduction() {
+        MockEnvironment environment = prodEnvironment();
+        environment.setProperty("spring.datasource.password", "s3nha-db-forte!");
+        environment.setProperty("spring.rabbitmq.password", "s3nha-rabbit-forte!");
+        environment.setProperty("maraberto.identity.bootstrap-admin.enabled", "true");
+        environment.setProperty("maraberto.identity.bootstrap-admin.password", "s3nha-admin-forte!");
+        assertThatCode(() -> validateWithEnvironment(environment))
+                .doesNotThrowAnyException();
+    }
+
+    private MockEnvironment prodEnvironment() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("prod");
+        return environment;
+    }
+
+    private void validateWithEnvironment(MockEnvironment environment) {
+        CookieProperties properties = new CookieProperties();
+        properties.setSecure(true);
+        properties.setAllowedOrigins(PRODUCTION_ORIGINS);
+        new SecuritySettingsConfiguration(properties, environment).validate();
+    }
+
     private void validate(String profile, boolean secure, List<String> allowedOrigins) {
         CookieProperties properties = new CookieProperties();
         properties.setSecure(secure);

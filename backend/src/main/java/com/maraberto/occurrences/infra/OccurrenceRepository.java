@@ -93,10 +93,26 @@ public class OccurrenceRepository {
             FROM opened
             """;
 
-    /** Escopo de leitura/escrita: o responsável, ou coordenação/TI. */
+    /**
+     * Escopo de leitura/escrita:
+     * <ul>
+     *   <li>{@code ADMIN} ({@code bypassTerritorialScope = TRUE}): acesso irrestrito.</li>
+     *   <li>{@code COORDINATOR} ({@code allScopes = TRUE}): irrestrito se não houver linhas em
+     *       {@code user_beach_scopes}; caso contrário, restrito às praias vinculadas (F-06).</li>
+     *   <li>{@code LIFEGUARD}: apenas ocorrências atendidas pelo próprio operador.</li>
+     * </ul>
+     */
     private static final String SCOPE_SQL = """
             (
-                :allScopes = TRUE
+                (:allScopes = TRUE AND (
+                    :bypassTerritorialScope = TRUE
+                    OR NOT EXISTS (
+                        SELECT 1 FROM user_beach_scopes ubs WHERE ubs.user_id = :userId
+                    )
+                    OR o.beach_id IN (
+                        SELECT ubs.beach_id FROM user_beach_scopes ubs WHERE ubs.user_id = :userId
+                    )
+                ))
                 OR o.responder_id = :userId
                 OR (o.responder_id IS NULL AND EXISTS (
                     SELECT 1
@@ -191,7 +207,26 @@ public class OccurrenceRepository {
             Instant beforeOccurredAt,
             Long beforeNumber,
             int limit) {
-        MapSqlParameterSource params = scopeParams(userId, allScopes)
+        return findAll(
+                userId, allScopes, false, status, emergencyCallId, activeOnly, closedOnly,
+                ciospPending, from, to, beforeOccurredAt, beforeNumber, limit);
+    }
+
+    public List<OccurrenceView> findAll(
+            UUID userId,
+            boolean allScopes,
+            boolean bypassTerritorialScope,
+            OccurrenceStatus status,
+            UUID emergencyCallId,
+            boolean activeOnly,
+            boolean closedOnly,
+            boolean ciospPending,
+            Instant from,
+            Instant to,
+            Instant beforeOccurredAt,
+            Long beforeNumber,
+            int limit) {
+        MapSqlParameterSource params = scopeParams(userId, allScopes, bypassTerritorialScope)
                 .addValue("status", status == null ? null : status.name(), Types.VARCHAR)
                 .addValue("limit", limit);
         StringBuilder sql = new StringBuilder(
@@ -239,7 +274,16 @@ public class OccurrenceRepository {
 
     public Optional<OccurrenceDetail> findDetail(
             UUID occurrenceId, UUID userId, boolean allScopes, boolean forUpdate) {
-        MapSqlParameterSource params = scopeParams(userId, allScopes)
+        return findDetail(occurrenceId, userId, allScopes, false, forUpdate);
+    }
+
+    public Optional<OccurrenceDetail> findDetail(
+            UUID occurrenceId,
+            UUID userId,
+            boolean allScopes,
+            boolean bypassTerritorialScope,
+            boolean forUpdate) {
+        MapSqlParameterSource params = scopeParams(userId, allScopes, bypassTerritorialScope)
                 .addValue("occurrenceId", occurrenceId);
         String sql = "SELECT " + VIEW_COLUMNS + DETAIL_COLUMNS + DETAIL_FROM_SQL
                 + " WHERE o.id = :occurrenceId AND " + SCOPE_SQL
@@ -585,10 +629,12 @@ public class OccurrenceRepository {
                 """, params);
     }
 
-    private MapSqlParameterSource scopeParams(UUID userId, boolean allScopes) {
+    private MapSqlParameterSource scopeParams(
+            UUID userId, boolean allScopes, boolean bypassTerritorialScope) {
         return new MapSqlParameterSource()
                 .addValue("userId", userId, Types.OTHER)
-                .addValue("allScopes", allScopes, Types.BOOLEAN);
+                .addValue("allScopes", allScopes, Types.BOOLEAN)
+                .addValue("bypassTerritorialScope", bypassTerritorialScope, Types.BOOLEAN);
     }
 
     private OccurrenceView view(ResultSet rs) throws SQLException {

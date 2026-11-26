@@ -7,6 +7,7 @@ import com.maraberto.operations.api.FlagResponse;
 import com.maraberto.operations.api.LaunchFlagRequest;
 import com.maraberto.operations.api.PublicFlag;
 import com.maraberto.operations.domain.FlagNotFoundException;
+import com.maraberto.operations.domain.FlagOutsideScopeException;
 import com.maraberto.operations.infra.JdbcFlagRepository;
 import com.maraberto.operations.infra.PublicOperationsRepository;
 import java.time.Duration;
@@ -134,9 +135,23 @@ public class FlagService {
     /** Encerra a sinalização antes da validade; o histórico permanece. */
     @Transactional
     public FlagResponse close(UUID userId, UUID flagId) {
+        return close(userId, false, flagId);
+    }
+
+    /**
+     * Encerra a sinalização antes da validade; o histórico permanece.
+     *
+     * <p>Guarda-vidas só encerram bandeiras que lançaram ou da área de banho do
+     * seu plantão aberto. Coordenação e TI podem encerrar qualquer sinalização.
+     */
+    @Transactional
+    public FlagResponse close(UUID userId, boolean privileged, UUID flagId) {
         FlagResponse current = flags.findById(flagId)
                 .filter(flag -> flag.closedAt() == null)
                 .orElseThrow(FlagNotFoundException::new);
+        if (!privileged && !canCloseFlag(userId, flagId, current.beachId())) {
+            throw new FlagOutsideScopeException();
+        }
         Instant now = Instant.now();
         flags.close(flagId, userId, now);
         events.publishEvent(new FlagChanged(
@@ -150,6 +165,35 @@ public class FlagService {
                 current.validUntil(),
                 now,
                 current.photoUrls());
+    }
+
+    private boolean canCloseFlag(UUID userId, UUID flagId, UUID beachId) {
+        if (flags.findAuthor(flagId).filter(userId::equals).isPresent()) {
+            return true;
+        }
+        Boolean onBeachShift = jdbc.query("""
+                        SELECT EXISTS (
+                            SELECT 1
+                              FROM shift_sessions s
+                              LEFT JOIN lifeguard_posts p ON p.id = s.post_id
+                             WHERE s.user_id = :userId
+                               AND s.ended_at IS NULL
+                               AND (
+                                   p.beach_id = :beachId
+                                   OR (s.post_id IS NULL AND s.last_position IS NOT NULL AND EXISTS (
+                                       SELECT 1
+                                         FROM beaches b
+                                        WHERE b.id = :beachId
+                                          AND ST_Contains(b.boundary, s.last_position::geometry)
+                                   ))
+                               )
+                        )
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("userId", userId)
+                        .addValue("beachId", beachId),
+                rs -> rs.next() ? rs.getBoolean(1) : false);
+        return Boolean.TRUE.equals(onBeachShift);
     }
 
     /**

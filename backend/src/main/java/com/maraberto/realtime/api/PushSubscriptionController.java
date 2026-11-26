@@ -3,12 +3,14 @@ package com.maraberto.realtime.api;
 import com.maraberto.realtime.domain.PushChannel;
 import com.maraberto.realtime.infra.PushProperties;
 import com.maraberto.realtime.infra.PushSubscriptionRepository;
+import com.maraberto.realtime.infra.WebPushEndpointValidator;
 import com.maraberto.shared.security.sanitization.Sanitized;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -36,12 +38,15 @@ public class PushSubscriptionController {
 
     private final PushSubscriptionRepository repository;
     private final PushProperties pushProperties;
+    private final WebPushEndpointValidator endpointValidator;
 
     public PushSubscriptionController(
             PushSubscriptionRepository repository,
-            PushProperties pushProperties) {
+            PushProperties pushProperties,
+            WebPushEndpointValidator endpointValidator) {
         this.repository = repository;
         this.pushProperties = pushProperties;
+        this.endpointValidator = endpointValidator;
     }
 
     @GetMapping("/vapid-public-key")
@@ -69,7 +74,13 @@ public class PushSubscriptionController {
                         HttpStatus.BAD_REQUEST,
                         "Inscrição WEB_PUSH exige endpoint, p256dh e auth.");
             }
-            repository.upsert(userId, PushChannel.WEB_PUSH, request.endpoint().trim(),
+            String validatedEndpoint;
+            try {
+                validatedEndpoint = endpointValidator.validateForRegistration(request.endpoint());
+            } catch (IllegalArgumentException exception) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage());
+            }
+            repository.upsert(userId, PushChannel.WEB_PUSH, validatedEndpoint,
                     request.p256dh().trim(), request.auth().trim());
             return ResponseEntity.noContent().build();
         }
@@ -111,14 +122,14 @@ public class PushSubscriptionController {
 
     public record RegisterPushSubscriptionRequest(
             @NotNull PushChannel channel,
-            @Sanitized String endpoint,
-            @Sanitized String p256dh,
-            @Sanitized String auth,
-            @Sanitized String token) {
+            @Sanitized @Size(max = WebPushEndpointValidator.MAX_ENDPOINT_LENGTH) String endpoint,
+            @Sanitized @Size(max = 256) String p256dh,
+            @Sanitized @Size(max = 256) String auth,
+            @Sanitized @Size(max = 512) String token) {
     }
 
     public record UnregisterPushSubscriptionRequest(
-            @Sanitized String endpoint,
-            @Sanitized String token) {
+            @Sanitized @Size(max = WebPushEndpointValidator.MAX_ENDPOINT_LENGTH) String endpoint,
+            @Sanitized @Size(max = 512) String token) {
     }
 }
