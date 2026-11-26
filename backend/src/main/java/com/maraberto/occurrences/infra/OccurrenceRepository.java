@@ -2,6 +2,7 @@ package com.maraberto.occurrences.infra;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.maraberto.occurrences.api.DuplicateCandidateView;
 import com.maraberto.occurrences.api.OccurrenceView;
 import com.maraberto.occurrences.domain.CiospStatus;
 import com.maraberto.occurrences.domain.OccurrenceNature;
@@ -244,6 +245,215 @@ public class OccurrenceRepository {
                 + " WHERE o.id = :occurrenceId AND " + SCOPE_SQL
                 + (forUpdate ? " FOR UPDATE OF o" : "");
         return jdbc.query(sql, params, (rs, rowNum) -> detail(rs)).stream().findFirst();
+    }
+
+    public Optional<UUID> findIdByClientRequestId(UUID clientRequestId) {
+        return jdbc.query("""
+                SELECT id FROM occurrences WHERE client_request_id = :clientRequestId
+                """,
+                new MapSqlParameterSource("clientRequestId", clientRequestId),
+                (rs, rowNum) -> rs.getObject("id", UUID.class))
+                .stream()
+                .findFirst();
+    }
+
+    public boolean existsBeach(UUID beachId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM beaches WHERE id = :id",
+                new MapSqlParameterSource("id", beachId),
+                Integer.class);
+        return count != null && count > 0;
+    }
+
+    public boolean existsSector(UUID sectorId, UUID beachId) {
+        String sql = beachId == null
+                ? "SELECT COUNT(*) FROM beach_sectors WHERE id = :sectorId"
+                : "SELECT COUNT(*) FROM beach_sectors WHERE id = :sectorId AND beach_id = :beachId";
+        MapSqlParameterSource params = new MapSqlParameterSource("sectorId", sectorId)
+                .addValue("beachId", beachId, Types.OTHER);
+        Integer count = jdbc.queryForObject(sql, params, Integer.class);
+        return count != null && count > 0;
+    }
+
+    /**
+     * Registra uma ocorrência manual de forma idempotente via {@code client_request_id}.
+     * Quando há coordenada e praia/setor não foram informados, resolve pelo PostGIS.
+     */
+    public Optional<UUID> insertManual(ManualInsert data) {
+        boolean hasCoordinates = data.latitude() != null && data.longitude() != null;
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("clientRequestId", data.clientRequestId(), Types.OTHER)
+                .addValue("origin", data.origin().name(), Types.VARCHAR)
+                .addValue("nature", data.nature().name(), Types.VARCHAR)
+                .addValue("status", data.status().name(), Types.VARCHAR)
+                .addValue("outcome", data.outcome() == null ? null : data.outcome().name(),
+                        Types.VARCHAR)
+                .addValue("occurredAt", OffsetDateTime.ofInstant(data.occurredAt(), ZoneOffset.UTC))
+                .addValue("latitude", data.latitude(), Types.DOUBLE)
+                .addValue("longitude", data.longitude(), Types.DOUBLE)
+                .addValue("accuracyMeters", data.accuracyMeters(), Types.NUMERIC)
+                .addValue("beachId", data.beachId(), Types.OTHER)
+                .addValue("sectorId", data.sectorId(), Types.OTHER)
+                .addValue("postId", data.postId(), Types.OTHER)
+                .addValue("referenceText", data.referenceText(), Types.VARCHAR)
+                .addValue("summary", data.summary(), Types.VARCHAR)
+                .addValue("outcomeNotes", data.outcomeNotes(), Types.VARCHAR)
+                .addValue("externalProtocol", data.externalProtocol(), Types.VARCHAR)
+                .addValue("ciospStatus", data.ciospStatus().name(), Types.VARCHAR)
+                .addValue("ciospProtocol", data.ciospProtocol(), Types.VARCHAR)
+                .addValue("victimName", data.victimName(), Types.VARCHAR)
+                .addValue("victimAge", data.victimAge(), Types.VARCHAR)
+                .addValue("victimContact", data.victimContact(), Types.VARCHAR)
+                .addValue("victimCondition", data.victimCondition(), Types.VARCHAR)
+                .addValue("actorId", data.actorId(), Types.OTHER);
+
+        String sql = hasCoordinates ? """
+                WITH point AS (
+                    SELECT ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326) AS geom
+                ),
+                sector AS (
+                    SELECT s.id, s.beach_id
+                    FROM beach_sectors s, point p
+                    WHERE s.active
+                      AND ST_Contains(s.geometry, p.geom)
+                    ORDER BY s.display_order, s.id
+                    LIMIT 1
+                ),
+                area AS (
+                    SELECT b.id
+                    FROM beaches b, point p
+                    WHERE b.active
+                      AND ST_Contains(b.boundary, p.geom)
+                    ORDER BY b.id
+                    LIMIT 1
+                )
+                INSERT INTO occurrences (
+                    client_request_id, origin, nature, status, outcome_type,
+                    occurred_at, location, location_accuracy_m,
+                    beach_id, beach_sector_id, post_id, reference_text,
+                    summary, outcome_notes, external_protocol,
+                    ciosp_status, ciosp_protocol, ciosp_registered_at, ciosp_registered_by,
+                    victim_name, victim_age, victim_contact, victim_condition,
+                    responder_id, registered_by, closed_at, closed_by,
+                    created_at, updated_at)
+                SELECT :clientRequestId, :origin, :nature, :status, CAST(:outcome AS varchar),
+                       :occurredAt, CAST(p.geom AS geography), :accuracyMeters,
+                       COALESCE(CAST(:beachId AS uuid), sector.beach_id, area.id),
+                       COALESCE(CAST(:sectorId AS uuid), sector.id),
+                       CAST(:postId AS uuid), CAST(:referenceText AS text),
+                       :summary, CAST(:outcomeNotes AS text), CAST(:externalProtocol AS varchar),
+                       :ciospStatus, CAST(:ciospProtocol AS varchar),
+                       CASE WHEN :ciospStatus = 'REGISTERED' THEN NOW() ELSE NULL END,
+                       CASE WHEN :ciospStatus = 'REGISTERED' THEN CAST(:actorId AS uuid) ELSE NULL END,
+                       CAST(:victimName AS text), CAST(:victimAge AS text),
+                       CAST(:victimContact AS text), CAST(:victimCondition AS text),
+                       :actorId, :actorId,
+                       CASE WHEN :outcome IS NOT NULL THEN NOW() ELSE NULL END,
+                       CASE WHEN :outcome IS NOT NULL THEN CAST(:actorId AS uuid) ELSE NULL END,
+                       NOW(), NOW()
+                FROM point p
+                LEFT JOIN sector ON TRUE
+                LEFT JOIN area ON TRUE
+                ON CONFLICT (client_request_id) DO NOTHING
+                RETURNING id
+                """ : """
+                INSERT INTO occurrences (
+                    client_request_id, origin, nature, status, outcome_type,
+                    occurred_at, location, location_accuracy_m,
+                    beach_id, beach_sector_id, post_id, reference_text,
+                    summary, outcome_notes, external_protocol,
+                    ciosp_status, ciosp_protocol, ciosp_registered_at, ciosp_registered_by,
+                    victim_name, victim_age, victim_contact, victim_condition,
+                    responder_id, registered_by, closed_at, closed_by,
+                    created_at, updated_at)
+                VALUES (
+                    :clientRequestId, :origin, :nature, :status, CAST(:outcome AS varchar),
+                    :occurredAt, NULL, NULL,
+                    CAST(:beachId AS uuid), CAST(:sectorId AS uuid),
+                    CAST(:postId AS uuid), CAST(:referenceText AS text),
+                    :summary, CAST(:outcomeNotes AS text), CAST(:externalProtocol AS varchar),
+                    :ciospStatus, CAST(:ciospProtocol AS varchar),
+                    CASE WHEN :ciospStatus = 'REGISTERED' THEN NOW() ELSE NULL END,
+                    CASE WHEN :ciospStatus = 'REGISTERED' THEN CAST(:actorId AS uuid) ELSE NULL END,
+                    CAST(:victimName AS text), CAST(:victimAge AS text),
+                    CAST(:victimContact AS text), CAST(:victimCondition AS text),
+                    :actorId, :actorId,
+                    CASE WHEN :outcome IS NOT NULL THEN NOW() ELSE NULL END,
+                    CASE WHEN :outcome IS NOT NULL THEN CAST(:actorId AS uuid) ELSE NULL END,
+                    NOW(), NOW())
+                ON CONFLICT (client_request_id) DO NOTHING
+                RETURNING id
+                """;
+
+        return jdbc.query(sql, params, (rs, rowNum) -> rs.getObject("id", UUID.class))
+                .stream()
+                .findFirst();
+    }
+
+    /**
+     * Busca ocorrências ou chamados SOS próximos no espaço e no tempo (RN13).
+     */
+    public List<DuplicateCandidateView> findNearbyDuplicates(
+            UUID excludeOccurrenceId,
+            double latitude,
+            double longitude,
+            Instant from,
+            Instant to,
+            double radiusMeters) {
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("excludeId", excludeOccurrenceId, Types.OTHER)
+                .addValue("latitude", latitude, Types.DOUBLE)
+                .addValue("longitude", longitude, Types.DOUBLE)
+                .addValue("from", OffsetDateTime.ofInstant(from, ZoneOffset.UTC))
+                .addValue("to", OffsetDateTime.ofInstant(to, ZoneOffset.UTC))
+                .addValue("radiusMeters", radiusMeters, Types.DOUBLE);
+
+        String sql = """
+                WITH ref AS (
+                    SELECT CAST(ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326) AS geography) AS geog
+                )
+                SELECT kind, id, number, origin, status, occurred_at, distance_meters
+                FROM (
+                    SELECT 'OCCURRENCE' AS kind,
+                           o.id,
+                           o.number,
+                           o.origin,
+                           o.status,
+                           o.occurred_at,
+                           ST_Distance(o.location, ref.geog) AS distance_meters
+                    FROM occurrences o, ref
+                    WHERE o.id <> :excludeId
+                      AND o.location IS NOT NULL
+                      AND o.occurred_at BETWEEN :from AND :to
+                      AND ST_DWithin(o.location, ref.geog, :radiusMeters)
+                    UNION ALL
+                    SELECT 'EMERGENCY_CALL' AS kind,
+                           c.id,
+                           NULL::bigint AS number,
+                           'SOS_CITIZEN' AS origin,
+                           c.status,
+                           c.created_at AS occurred_at,
+                           ST_Distance(c.location, ref.geog) AS distance_meters
+                    FROM emergency_calls c, ref
+                    WHERE c.location IS NOT NULL
+                      AND c.created_at BETWEEN :from AND :to
+                      AND ST_DWithin(c.location, ref.geog, :radiusMeters)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM occurrences o2 WHERE o2.emergency_call_id = c.id
+                      )
+                ) candidates
+                ORDER BY distance_meters ASC, occurred_at DESC
+                LIMIT 10
+                """;
+
+        return jdbc.query(sql, params, (rs, rowNum) -> new DuplicateCandidateView(
+                rs.getString("kind"),
+                rs.getObject("id", UUID.class),
+                rs.getObject("number", Long.class),
+                rs.getString("origin"),
+                rs.getString("status"),
+                instant(rs, "occurred_at"),
+                rs.getDouble("distance_meters")));
     }
 
     /**
@@ -490,6 +700,32 @@ public class OccurrenceRepository {
             String closedByName,
             VictimData victim,
             long version) {
+    }
+
+    public record ManualInsert(
+            UUID clientRequestId,
+            OccurrenceOrigin origin,
+            OccurrenceNature nature,
+            OccurrenceStatus status,
+            OccurrenceOutcome outcome,
+            Instant occurredAt,
+            Double latitude,
+            Double longitude,
+            Double accuracyMeters,
+            UUID beachId,
+            UUID sectorId,
+            UUID postId,
+            String referenceText,
+            String summary,
+            String outcomeNotes,
+            String externalProtocol,
+            CiospStatus ciospStatus,
+            String ciospProtocol,
+            String victimName,
+            String victimAge,
+            String victimContact,
+            String victimCondition,
+            UUID actorId) {
     }
 
     public record CloseWrite(

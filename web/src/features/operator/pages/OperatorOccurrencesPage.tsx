@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle,
   ChevronDown,
   ClipboardList,
@@ -19,14 +20,16 @@ import { useNearbyBeaches } from "@/features/beaches";
 import {
   OccurrenceList,
   OccurrenceSheet,
+  createOccurrence,
   isActiveOccurrence,
+  occurrenceErrorMessage,
   useOccurrences,
+  type DuplicateCandidate,
 } from "@/features/occurrences";
 import type {
   OccurrenceNature,
   OccurrenceOrigin,
   OccurrenceOutcome,
-  OperatorOccurrence,
 } from "@/features/operator/types";
 import {
   NATURE_LABEL,
@@ -45,8 +48,8 @@ interface Position {
  *
  * <p>As do SOS chegam prontas do servidor: a ficha nasce no ack, já com número
  * interno, praia/setor e pendência de CIOSP. O registro manual (193, rádio,
- * atendimento em campo) ainda é rascunho local — o `POST /api/v1/occurrences`
- * entra com o formulário de campo e a ficha de transcrição do CIOSP.
+ * presencial ou atendimento em campo) envia para `POST /api/v1/occurrences`
+ * com idempotência por `clientRequestId` e alerta não bloqueante de duplicata.
  */
 export function OperatorOccurrencesPage() {
   const {
@@ -62,18 +65,23 @@ export function OperatorOccurrencesPage() {
   const [selectedOccurrenceId, setSelectedOccurrenceId] = useState<
     string | null
   >(null);
-  const [drafts, setDrafts] = useState<readonly OperatorOccurrence[]>([]);
   const [origin, setOrigin] = useState<OccurrenceOrigin>("FIELD_ATTENDED");
   const [nature, setNature] = useState<OccurrenceNature>("RESCUE");
-  const [outcome, setOutcome] = useState<OccurrenceOutcome>("RESOLVED");
+  const [outcome, setOutcome] = useState<OccurrenceOutcome | "">("RESOLVED");
   const [occurredAt, setOccurredAt] = useState(toLocalInput(new Date()));
   const [beachId, setBeachId] = useState("");
-  const [sector, setSector] = useState("");
   const [reference, setReference] = useState("");
   const [summary, setSummary] = useState("");
   const [protocol, setProtocol] = useState("");
   const [position, setPosition] = useState<Position | null>(null);
   const [geoMessage, setGeoMessage] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [createdMessage, setCreatedMessage] = useState<string | null>(null);
+  const [duplicates, setDuplicates] = useState<readonly DuplicateCandidate[]>(
+    [],
+  );
+  const requestIdRef = useRef<string | null>(null);
 
   // A ocorrência é registrada sobre uma área do mapeamento real, num raio de
   // até 30 km: o guarda-vidas escolhe entre o que está perto dele agora.
@@ -126,46 +134,67 @@ export function OperatorOccurrencesPage() {
     }
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const beach = beaches.find((item) => item.id === effectiveBeachId);
-    if (!beach || !summary.trim()) return;
+    setSubmitError(null);
+    setCreatedMessage(null);
 
-    const isClosedWithoutCiosp =
-      outcome === "FALSE_ALARM" || outcome === "CANCELLED";
+    const trimmedSummary = summary.trim();
+    const trimmedReference = reference.trim();
+    if (!trimmedSummary) {
+      setSubmitError("Informe o resumo do atendimento.");
+      return;
+    }
+    if (!position && (!effectiveBeachId || !trimmedReference)) {
+      setSubmitError(
+        "Sem coordenada GPS, informe a praia e o ponto de referência.",
+      );
+      return;
+    }
 
-    const occurrence: OperatorOccurrence = {
-      id: `occ-${Date.now()}`,
-      number: drafts.length + 1,
-      clientRequestId: newRequestId(),
-      origin,
-      nature,
-      outcome,
-      ciospStatus: isClosedWithoutCiosp ? "NOT_REQUIRED" : "PENDING",
-      occurredAt: new Date(occurredAt).toISOString(),
-      beachId: beach.id,
-      beachName: beach.name,
-      sector: sector.trim() || undefined,
-      reference: reference.trim() || beach.name,
-      summary: summary.trim(),
-      protocol: protocol.trim() || undefined,
-      latitude: position?.latitude,
-      longitude: position?.longitude,
-      accuracyMeters: position?.accuracyMeters,
-      createdAt: new Date().toISOString(),
-    };
+    const clientRequestId = requestIdRef.current ?? newRequestId();
+    requestIdRef.current = clientRequestId;
+    setSubmitting(true);
 
-    setDrafts((previous) => [occurrence, ...previous]);
-    setOrigin("FIELD_ATTENDED");
-    setNature("RESCUE");
-    setOutcome("RESOLVED");
-    setOccurredAt(toLocalInput(new Date()));
-    setSector("");
-    setReference("");
-    setSummary("");
-    setProtocol("");
-    setPosition(null);
-    setGeoMessage(null);
+    try {
+      const response = await createOccurrence({
+        clientRequestId,
+        origin,
+        nature,
+        occurredAt: new Date(occurredAt).toISOString(),
+        latitude: position?.latitude,
+        longitude: position?.longitude,
+        accuracyMeters: position?.accuracyMeters,
+        beachId: effectiveBeachId || undefined,
+        referenceText: trimmedReference || undefined,
+        summary: trimmedSummary,
+        outcome: outcome || undefined,
+        externalProtocol:
+          origin === "CBM_193" || origin === "EXTERNAL_OTHER"
+            ? protocol.trim() || undefined
+            : undefined,
+      });
+
+      requestIdRef.current = null;
+      setOrigin("FIELD_ATTENDED");
+      setNature("RESCUE");
+      setOutcome("RESOLVED");
+      setOccurredAt(toLocalInput(new Date()));
+      setReference("");
+      setSummary("");
+      setProtocol("");
+      setPosition(null);
+      setGeoMessage(null);
+      setDuplicates(response.possibleDuplicates);
+      setCreatedMessage(
+        `Ocorrência #${response.detail.occurrence.number} registrada.`,
+      );
+      reload();
+    } catch (error) {
+      setSubmitError(occurrenceErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -181,11 +210,10 @@ export function OperatorOccurrencesPage() {
         }
       />
 
-      <dl className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <dl className="mb-4 grid grid-cols-3 gap-2">
         <SummaryTile label="Atendimentos" value={counts.total} />
         <SummaryTile label="Em atendimento" value={counts.inProgress} />
         <SummaryTile label="CIOSP pendente" value={counts.ciosp} />
-        <SummaryTile label="Rascunhos locais" value={drafts.length} />
       </dl>
 
       <section className="mb-4">
@@ -291,9 +319,9 @@ export function OperatorOccurrencesPage() {
           Registrar ocorrência do 193, do rádio ou de campo
         </summary>
         <p className="mt-1 text-[11px] leading-relaxed text-ocean-500">
-          O envio ao servidor entra com o formulário de campo. Por enquanto o
-          registro fica como rascunho neste navegador e não entra na lista do
-          SOS.
+          Informe as coordenadas do atendimento ou selecione a praia com ponto de
+          referência. Se houver registro próximo nos últimos 30 min, o sistema
+          exibe um aviso sem bloquear o envio.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-3 grid gap-3">
@@ -386,22 +414,11 @@ export function OperatorOccurrencesPage() {
             </label>
 
             <label className="block text-xs font-semibold text-ocean-800">
-              Setor / trecho (opcional)
-              <input
-                type="text"
-                maxLength={80}
-                value={sector}
-                onChange={(event) => setSector(event.target.value)}
-                placeholder="Ex.: Setor Norte, em frente ao quiosque"
-                className="mt-1 h-9 w-full rounded-lg border border-ocean-200 px-3 text-xs font-normal focus:border-ocean-600 focus:outline-none"
-              />
-            </label>
-
-            <label className="block text-xs font-semibold text-ocean-800">
-              Ponto de referência
+              Ponto de referência {position ? "(opcional)" : "(obrigatório sem GPS)"}
               <input
                 type="text"
                 maxLength={160}
+                required={!position}
                 value={reference}
                 onChange={(event) => setReference(event.target.value)}
                 placeholder="Ex.: ao lado do posto 02"
@@ -409,29 +426,32 @@ export function OperatorOccurrencesPage() {
               />
             </label>
 
-            {origin === "CBM_193" ? (
+            {origin === "CBM_193" || origin === "EXTERNAL_OTHER" ? (
               <label className="block text-xs font-semibold text-ocean-800">
-                Protocolo do 193 (opcional)
+                {origin === "CBM_193"
+                  ? "Protocolo do 193 (recomendado)"
+                  : "Protocolo externo (opcional)"}
                 <input
                   type="text"
                   maxLength={40}
                   value={protocol}
                   onChange={(event) => setProtocol(event.target.value)}
-                  placeholder="Nº informado pelo CBM"
+                  placeholder="Nº informado pelo canal"
                   className="mt-1 h-9 w-full rounded-lg border border-ocean-200 px-3 text-xs font-normal focus:border-ocean-600 focus:outline-none"
                 />
               </label>
             ) : null}
 
             <label className="block text-xs font-semibold text-ocean-800">
-              Desfecho
+              Desfecho (opcional se ainda em andamento)
               <select
                 value={outcome}
                 onChange={(event) =>
-                  setOutcome(event.target.value as OccurrenceOutcome)
+                  setOutcome(event.target.value as OccurrenceOutcome | "")
                 }
                 className="mt-1 h-9 w-full rounded-lg border border-ocean-200 bg-white px-3 text-xs font-normal focus:border-ocean-600 focus:outline-none"
               >
+                <option value="">Ainda em atendimento</option>
                 {Object.entries(OUTCOME_LABEL).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
@@ -460,72 +480,66 @@ export function OperatorOccurrencesPage() {
             atendimento é restrita à operação e não aparece em listagem pública.
           </p>
 
+          {submitError ? (
+            <output className="block rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+              {submitError}
+            </output>
+          ) : null}
+
+          {createdMessage ? (
+            <output className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900">
+              <CheckCircle aria-hidden="true" className="size-4 shrink-0" />
+              {createdMessage}
+            </output>
+          ) : null}
+
+          {duplicates.length > 0 ? (
+            <aside className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+              <p className="flex items-center gap-1.5 font-bold">
+                <AlertTriangle aria-hidden="true" className="size-4 shrink-0 text-amber-700" />
+                Possível duplicata próxima (≤ 200 m e ≤ 30 min)
+              </p>
+              <p className="mt-1 text-[11px] text-amber-900">
+                Sua ocorrência foi registrada normalmente. Confira se algum dos
+                registros abaixo trata do mesmo atendimento:
+              </p>
+              <ul className="mt-2 grid gap-1.5">
+                {duplicates.map((candidate) => (
+                  <li
+                    key={`${candidate.kind}-${candidate.id}`}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-[11px]"
+                  >
+                    <span>
+                      {candidate.kind === "OCCURRENCE" && candidate.number !== null
+                        ? `Ocorrência #${candidate.number}`
+                        : "Chamado SOS"}{" "}
+                      · {Math.round(candidate.distanceMeters)} m ·{" "}
+                      {formatDateTime(candidate.occurredAt)}
+                    </span>
+                    {candidate.kind === "OCCURRENCE" ? (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOccurrenceId(candidate.id)}
+                        className="font-bold text-ocean-800 underline-offset-2 hover:underline"
+                      >
+                        Abrir ficha
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </aside>
+          ) : null}
+
           <button
             type="submit"
-            className="inline-flex h-9 w-fit items-center gap-1.5 rounded-lg bg-ocean-950 px-4 text-xs font-bold text-white transition hover:bg-ocean-900"
+            disabled={submitting}
+            className="inline-flex h-9 w-fit items-center gap-1.5 rounded-lg bg-ocean-950 px-4 text-xs font-bold text-white transition hover:bg-ocean-900 disabled:cursor-progress disabled:opacity-70"
           >
             <Send aria-hidden="true" className="size-4" />
-            Salvar rascunho
+            {submitting ? "Registrando…" : "Registrar ocorrência"}
           </button>
         </form>
-
-        {drafts.length > 0 ? (
-          <>
-            <h3 className="mb-2 mt-4 text-xs font-bold uppercase tracking-wider text-ocean-500">
-              Rascunhos deste navegador
-            </h3>
-            <ul className="grid gap-2">
-              {drafts.map((occurrence) => (
-                <li
-                  key={occurrence.id}
-                  className="rounded-xl border border-ocean-900/10 bg-ocean-50/40 p-3 text-xs shadow-sm"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="flex flex-wrap items-center gap-1.5 font-bold text-ocean-950">
-                      <span className="font-mono">
-                        rascunho {occurrence.number}
-                      </span>
-                      {NATURE_LABEL[occurrence.nature]}
-                      <span className="rounded-full border border-ocean-200 bg-white px-2 py-0.5 text-[10px] text-ocean-700">
-                        {ORIGIN_LABEL[occurrence.origin]}
-                      </span>
-                    </p>
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${
-                        occurrence.ciospStatus === "PENDING"
-                          ? "border-amber-300 bg-amber-50 text-amber-900"
-                          : "border-ocean-200 bg-ocean-50 text-ocean-600"
-                      }`}
-                    >
-                      {occurrence.ciospStatus === "PENDING" ? (
-                        "CIOSP pendente"
-                      ) : (
-                        <CheckCircle aria-hidden="true" className="size-3" />
-                      )}
-                      {occurrence.ciospStatus === "PENDING"
-                        ? ""
-                        : "Sem CIOSP"}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-ocean-600">
-                    {occurrence.beachName}
-                    {occurrence.sector ? ` · ${occurrence.sector}` : ""} ·{" "}
-                    {formatDateTime(occurrence.occurredAt)} ·{" "}
-                    {OUTCOME_LABEL[occurrence.outcome]}
-                  </p>
-                  <p className="mt-1 text-ocean-700">{occurrence.summary}</p>
-                  <p className="mt-1 text-[10px] text-ocean-500">
-                    {occurrence.reference}
-                    {occurrence.latitude !== undefined &&
-                    occurrence.longitude !== undefined
-                      ? ` · ${occurrence.latitude.toFixed(5)}, ${occurrence.longitude.toFixed(5)}`
-                      : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
       </details>
     </div>
   );

@@ -16,6 +16,7 @@ import jakarta.validation.Valid;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -131,6 +133,28 @@ public class OccurrenceController {
             Authentication authentication) {
         return occurrenceQueryService.get(
                 occurrenceId, userId(authentication), seesAllScopes(authentication));
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "Registrar ocorrência manual",
+            description = "Registra ocorrência externa (CBM_193, EXTERNAL_OTHER) ou atendimento em "
+                    + "campo (FIELD_ATTENDED) com idempotência por clientRequestId, validação de "
+                    + "local (coordenada ou praia + referência) e aviso não bloqueante de duplicata "
+                    + "(≤ 200 m e ≤ 30 min).")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Ocorrência registrada",
+                    content = @Content(schema = @Schema(
+                            implementation = CreateOccurrenceResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Dados inválidos (RFC 9457)",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ApiProblem.class)))
+    })
+    public CreateOccurrenceResponse create(
+            @Valid @RequestBody CreateOccurrenceRequest request,
+            Authentication authentication) {
+        return occurrenceCommandService.create(
+                userId(authentication), seesAllScopes(authentication), request);
     }
 
     @PostMapping("/{occurrenceId}/close")

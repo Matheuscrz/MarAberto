@@ -6,6 +6,9 @@ import com.maraberto.audit.api.AuditEvent;
 import com.maraberto.audit.api.AuditTrail;
 import com.maraberto.emergency.api.SosCallCloser;
 import com.maraberto.occurrences.api.CloseOccurrenceRequest;
+import com.maraberto.occurrences.api.CreateOccurrenceRequest;
+import com.maraberto.occurrences.api.CreateOccurrenceResponse;
+import com.maraberto.occurrences.api.DuplicateCandidateView;
 import com.maraberto.occurrences.api.OccurrenceDetailView;
 import com.maraberto.occurrences.api.RevealVictimRequest;
 import com.maraberto.occurrences.api.UpdateOccurrenceRequest;
@@ -13,16 +16,20 @@ import com.maraberto.occurrences.api.VictimView;
 import com.maraberto.occurrences.domain.CiospStatus;
 import com.maraberto.occurrences.domain.OccurrenceAlreadyClosedException;
 import com.maraberto.occurrences.domain.OccurrenceNotFoundException;
+import com.maraberto.occurrences.domain.OccurrenceOrigin;
 import com.maraberto.occurrences.domain.OccurrenceStatus;
 import com.maraberto.occurrences.domain.OccurrenceTransitionException;
 import com.maraberto.occurrences.domain.OccurrenceVictimNotFoundException;
 import com.maraberto.occurrences.infra.OccurrenceRepository;
 import com.maraberto.shared.security.crypto.SensitiveDataProtector;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,22 +42,124 @@ import org.springframework.transaction.annotation.Transactional;
  * (vítima identificada, protocolo do CIOSP, correção do relato).
  */
 @Service
+@EnableConfigurationProperties(OccurrenceProperties.class)
 public class OccurrenceCommandService {
 
     private final OccurrenceRepository occurrenceRepository;
     private final SensitiveDataProtector protector;
     private final SosCallCloser sosCallCloser;
     private final AuditTrail auditTrail;
+    private final OccurrenceProperties properties;
 
     public OccurrenceCommandService(
             OccurrenceRepository occurrenceRepository,
             SensitiveDataProtector protector,
             SosCallCloser sosCallCloser,
-            AuditTrail auditTrail) {
+            AuditTrail auditTrail,
+            OccurrenceProperties properties) {
         this.occurrenceRepository = occurrenceRepository;
         this.protector = protector;
         this.sosCallCloser = sosCallCloser;
         this.auditTrail = auditTrail;
+        this.properties = properties;
+    }
+
+    @Transactional
+    public CreateOccurrenceResponse create(
+            UUID userId,
+            boolean allScopes,
+            CreateOccurrenceRequest request) {
+        validateManualCreate(request);
+
+        Optional<UUID> existingId = occurrenceRepository.findIdByClientRequestId(
+                request.clientRequestId());
+        if (existingId.isPresent()) {
+            OccurrenceDetailView existing = detail(existingId.get(), userId, allScopes);
+            return new CreateOccurrenceResponse(existing, findDuplicates(existing.occurrence()));
+        }
+
+        String referenceText = clean(request.referenceText());
+        String summary = clean(request.summary());
+        String outcomeNotes = clean(request.outcomeNotes());
+        String externalProtocol = clean(request.externalProtocol());
+        String ciospProtocol = clean(request.ciospProtocol());
+
+        OccurrenceStatus status = request.outcome() != null
+                ? request.outcome().status()
+                : OccurrenceStatus.OPEN;
+        CiospStatus ciospStatus = resolveCiospOnCreate(request, ciospProtocol);
+
+        OccurrenceRepository.ManualInsert insert = new OccurrenceRepository.ManualInsert(
+                request.clientRequestId(),
+                request.origin(),
+                request.nature(),
+                status,
+                request.outcome(),
+                request.occurredAt(),
+                request.latitude(),
+                request.longitude(),
+                request.accuracyMeters(),
+                request.beachId(),
+                request.sectorId(),
+                request.postId(),
+                referenceText,
+                encrypt(summary, SensitiveDataProtector.AAD_OCCURRENCE_SUMMARY),
+                encrypt(outcomeNotes, SensitiveDataProtector.AAD_OCCURRENCE_OUTCOME),
+                externalProtocol,
+                ciospStatus,
+                ciospProtocol,
+                encryptOptional(request.victimName()),
+                encryptOptional(request.victimAge()),
+                encryptOptional(request.victimContact()),
+                encryptOptional(request.victimCondition()),
+                userId);
+
+        Optional<UUID> insertedId = occurrenceRepository.insertManual(insert);
+        if (insertedId.isEmpty()) {
+            UUID id = occurrenceRepository.findIdByClientRequestId(request.clientRequestId())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Conflito de clientRequestId sem registro correspondente."));
+            OccurrenceDetailView existing = detail(id, userId, allScopes);
+            return new CreateOccurrenceResponse(existing, findDuplicates(existing.occurrence()));
+        }
+
+        UUID occurrenceId = insertedId.get();
+        occurrenceRepository.appendEvent(
+                occurrenceId,
+                "OPENED",
+                userId,
+                Map.of("origin", request.origin().name()));
+
+        if (request.outcome() != null) {
+            occurrenceRepository.appendEvent(
+                    occurrenceId,
+                    "STATUS_CHANGED",
+                    userId,
+                    Map.of(
+                            "from", OccurrenceStatus.OPEN.name(),
+                            "to", status.name(),
+                            "outcome", request.outcome().name()));
+        }
+        if (ciospStatus == CiospStatus.REGISTERED) {
+            occurrenceRepository.appendEvent(
+                    occurrenceId,
+                    "CIOSP_REGISTERED",
+                    userId,
+                    Map.of("status", CiospStatus.REGISTERED.name()));
+        }
+
+        auditTrail.record(AuditEvent.of(
+                userId,
+                AuditActions.OCCURRENCE_CREATED,
+                AuditEntityTypes.OCCURRENCE,
+                occurrenceId,
+                Map.of(
+                        "origin", request.origin().name(),
+                        "nature", request.nature().name(),
+                        "status", status.name())));
+
+        OccurrenceDetailView created = detail(occurrenceId, userId, allScopes);
+        return new CreateOccurrenceResponse(created, findDuplicates(created.occurrence()));
     }
 
     @Transactional
@@ -210,6 +319,67 @@ public class OccurrenceCommandService {
         return OccurrenceViews.detail(occurrenceRepository
                 .findDetail(occurrenceId, userId, allScopes, false)
                 .orElseThrow(() -> new OccurrenceNotFoundException(occurrenceId)));
+    }
+
+    private void validateManualCreate(CreateOccurrenceRequest request) {
+        if (request.origin() == OccurrenceOrigin.SOS_CITIZEN) {
+            throw new IllegalArgumentException(
+                    "Registro manual aceita apenas CBM_193, EXTERNAL_OTHER ou FIELD_ATTENDED.");
+        }
+        boolean hasLat = request.latitude() != null;
+        boolean hasLon = request.longitude() != null;
+        if (hasLat != hasLon) {
+            throw new IllegalArgumentException(
+                    "Latitude e longitude devem ser informadas juntas.");
+        }
+        if (hasLat) {
+            if (request.latitude() < -90.0 || request.latitude() > 90.0) {
+                throw new IllegalArgumentException("Latitude deve estar entre -90 e 90.");
+            }
+            if (request.longitude() < -180.0 || request.longitude() > 180.0) {
+                throw new IllegalArgumentException("Longitude deve estar entre -180 e 180.");
+            }
+            if (request.accuracyMeters() != null && request.accuracyMeters() < 0) {
+                throw new IllegalArgumentException("Precisão da coordenada não pode ser negativa.");
+            }
+        } else if (request.beachId() == null || clean(request.referenceText()) == null) {
+            throw new IllegalArgumentException(
+                    "Informe as coordenadas ou a praia com ponto de referência.");
+        }
+        if (request.beachId() != null && !occurrenceRepository.existsBeach(request.beachId())) {
+            throw new IllegalArgumentException("Área de banho informada não foi encontrada.");
+        }
+        if (request.sectorId() != null
+                && !occurrenceRepository.existsSector(request.sectorId(), request.beachId())) {
+            throw new IllegalArgumentException("Setor informado não pertence à área ou não existe.");
+        }
+    }
+
+    private List<DuplicateCandidateView> findDuplicates(
+            com.maraberto.occurrences.api.OccurrenceView occurrence) {
+        if (occurrence.latitude() == null || occurrence.longitude() == null) {
+            return List.of();
+        }
+        Instant from = occurrence.occurredAt().minus(properties.duplicateWindow());
+        Instant to = occurrence.occurredAt().plus(properties.duplicateWindow());
+        return occurrenceRepository.findNearbyDuplicates(
+                occurrence.id(),
+                occurrence.latitude(),
+                occurrence.longitude(),
+                from,
+                to,
+                properties.duplicateRadiusMeters());
+    }
+
+    private static CiospStatus resolveCiospOnCreate(
+            CreateOccurrenceRequest request, String protocol) {
+        if (protocol != null) {
+            return CiospStatus.REGISTERED;
+        }
+        if (request.outcome() != null && !request.outcome().requiresCiosp()) {
+            return CiospStatus.NOT_REQUIRED;
+        }
+        return CiospStatus.PENDING;
     }
 
     private static boolean isClosed(OccurrenceStatus status) {
