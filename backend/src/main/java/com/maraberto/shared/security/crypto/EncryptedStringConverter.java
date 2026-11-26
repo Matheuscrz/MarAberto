@@ -34,6 +34,10 @@ public class EncryptedStringConverter implements AttributeConverter<String, Stri
         encryptor = fieldEncryptor;
     }
 
+    public static FieldEncryptor currentEncryptor() {
+        return encryptor;
+    }
+
     @Override
     public String convertToDatabaseColumn(String attribute) {
         if (attribute == null) {

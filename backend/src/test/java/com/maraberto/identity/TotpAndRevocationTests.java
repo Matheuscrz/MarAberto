@@ -63,26 +63,31 @@ class TotpAndRevocationTests {
 
     @Test
     void columnScopedAadPreventsCrossColumnCiphertextSwapAndReadsLegacy() {
-        byte[] key = new byte[32];
-        for (int i = 0; i < key.length; i++) {
-            key[i] = (byte) (i + 1);
+        FieldEncryptor previous = EncryptedStringConverter.currentEncryptor();
+        try {
+            byte[] key = new byte[32];
+            for (int i = 0; i < key.length; i++) {
+                key[i] = (byte) (i + 1);
+            }
+            FieldEncryptor encryptor = new FieldEncryptor("k1", key, Map.of());
+            EncryptedStringConverter.configure(encryptor);
+
+            var emailConverter = new OperationalUserFieldConverters.EmailConverter();
+            var cpfConverter = new OperationalUserFieldConverters.CpfConverter();
+
+            String encryptedEmail = emailConverter.convertToDatabaseColumn("admin@maraberto.local");
+            assertThat(emailConverter.convertToEntityAttribute(encryptedEmail)).isEqualTo("admin@maraberto.local");
+
+            // Trocar ciphertext de email para a coluna CPF deve falhar na autenticação GCM.
+            assertThatThrownBy(() -> cpfConverter.convertToEntityAttribute(encryptedEmail))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            // Compatibilidade retroativa: registro legado cifrado com AAD_JPA_FIELD continua legível.
+            String legacyCiphertext = encryptor.encrypt("legado@maraberto.local", SensitiveDataProtector.AAD_JPA_FIELD);
+            assertThat(emailConverter.convertToEntityAttribute(legacyCiphertext))
+                    .isEqualTo("legado@maraberto.local");
+        } finally {
+            EncryptedStringConverter.configure(previous);
         }
-        FieldEncryptor encryptor = new FieldEncryptor("k1", key, Map.of());
-        EncryptedStringConverter.configure(encryptor);
-
-        var emailConverter = new OperationalUserFieldConverters.EmailConverter();
-        var cpfConverter = new OperationalUserFieldConverters.CpfConverter();
-
-        String encryptedEmail = emailConverter.convertToDatabaseColumn("admin@maraberto.local");
-        assertThat(emailConverter.convertToEntityAttribute(encryptedEmail)).isEqualTo("admin@maraberto.local");
-
-        // Trocar ciphertext de email para a coluna CPF deve falhar na autenticação GCM.
-        assertThatThrownBy(() -> cpfConverter.convertToEntityAttribute(encryptedEmail))
-                .isInstanceOf(IllegalArgumentException.class);
-
-        // Compatibilidade retroativa: registro legado cifrado com AAD_JPA_FIELD continua legível.
-        String legacyCiphertext = encryptor.encrypt("legado@maraberto.local", SensitiveDataProtector.AAD_JPA_FIELD);
-        assertThat(emailConverter.convertToEntityAttribute(legacyCiphertext))
-                .isEqualTo("legado@maraberto.local");
     }
 }

@@ -221,6 +221,16 @@ public class AuthenticationService {
             String currentPassword,
             String newPassword,
             RequestMetadata metadata) {
+        changePassword(userId, currentPassword, newPassword, metadata, null);
+    }
+
+    @Transactional
+    public void changePassword(
+            UUID userId,
+            String currentPassword,
+            String newPassword,
+            RequestMetadata metadata,
+            String bearerToken) {
         OperationalUser user = userRepository.findById(userId)
                 .filter(OperationalUser::isActive)
                 .orElseThrow(InvalidRefreshTokenException::new);
@@ -238,10 +248,25 @@ public class AuthenticationService {
         userRepository.saveAndFlush(user);
         refreshTokenService.revokeAllForUser(userId);
         tokenRevocationService.revokeAllForUser(userId, now);
+        revokeBearerIfPresent(bearerToken);
 
         auditTrail.record(AuditEvent.of(
                         userId, AuditActions.PASSWORD_CHANGED, "USER", userId, Map.of())
                 .withIpAddress(metadata == null ? null : metadata.ipAddress()));
+    }
+
+    private void revokeBearerIfPresent(String bearerToken) {
+        if (bearerToken == null || bearerToken.isBlank()) {
+            return;
+        }
+        try {
+            Claims claims = jwtService.validateAndExtractClaims(bearerToken.trim());
+            Date exp = claims.getExpiration();
+            tokenRevocationService.revokeToken(
+                    claims.getId(), exp == null ? null : exp.toInstant());
+        } catch (JwtException | IllegalArgumentException ignored) {
+            // Token já expirado ou inválido não precisa entrar na blacklist.
+        }
     }
 
     private OperationalUser authenticate(LoginCommand cmd) {

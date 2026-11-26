@@ -215,11 +215,16 @@ public class AuthController {
             @Valid @RequestBody ChangePasswordRequest command,
             Authentication authentication,
             HttpServletRequest request) {
+        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
+        String bearer = (authHeader != null && authHeader.startsWith("Bearer "))
+                ? authHeader.substring(7).trim()
+                : null;
         authenticationService.changePassword(
                 UUID.fromString(authentication.getName()),
                 command.currentPassword(),
                 command.newPassword(),
-                metadata(request));
+                metadata(request),
+                bearer);
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE,
                         AuthCookie.clear(cookieProperties.isSecure()).toString())

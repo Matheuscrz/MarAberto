@@ -2,6 +2,7 @@ package com.maraberto.identity.infra.security;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -73,7 +74,9 @@ public class TokenRevocationService {
         if (userId == null) {
             return;
         }
-        Instant cutoff = revokedAt != null ? revokedAt : Instant.now();
+        // JWT `iat` (RFC 7519) tem granularidade de segundos: truncar evita
+        // rejeitar um novo login emitido no mesmo segundo logo após a troca de senha.
+        Instant cutoff = (revokedAt != null ? revokedAt : Instant.now()).truncatedTo(ChronoUnit.SECONDS);
         localUserCutoff.put(userId, cutoff);
 
         StringRedisTemplate redis = redisProvider.getIfAvailable();
@@ -103,7 +106,7 @@ public class TokenRevocationService {
         }
         if (userId != null && issuedAt != null) {
             Instant cutoff = localUserCutoff.get(userId);
-            if (cutoff != null && !issuedAt.isAfter(cutoff)) {
+            if (cutoff != null && issuedAt.isBefore(cutoff)) {
                 return true;
             }
         }
@@ -118,7 +121,7 @@ public class TokenRevocationService {
                     String rawCutoff = redis.opsForValue().get(USER_PREFIX + userId);
                     if (rawCutoff != null) {
                         long cutoffMillis = Long.parseLong(rawCutoff);
-                        if (issuedAt.toEpochMilli() <= cutoffMillis) {
+                        if (issuedAt.toEpochMilli() < cutoffMillis) {
                             return true;
                         }
                     }
