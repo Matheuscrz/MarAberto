@@ -2,33 +2,39 @@ import { apiRequest, apiRequestVoid } from "@/shared/lib/api-client";
 import type {
   AuthSession,
   LoginCredentials,
+  LoginOutcome,
   OperatorUser,
 } from "@/features/auth/types";
 
-/**
- * Contrato do módulo `identity`. O refresh opaco viaja no cookie
- * `__Secure-maraberto_rt; Path=/api/v1/auth`; no navegador o `api-client` usa
- * `credentials: "same-origin"` e no app o HTTP nativo devolve o `Set-Cookie`
- * para o jar do aparelho. O JS da aplicação nunca lê o valor.
- */
 interface SessionResponse {
-  readonly accessToken: string;
+  readonly accessToken: string | null;
   /** Validade do access token em segundos. */
   readonly expiresIn: number;
   readonly user: OperatorUser;
+  readonly mfaRequired?: boolean;
+  readonly mfaChallengeToken?: string | null;
+}
+
+export interface MfaSetupData {
+  readonly secret: string;
+  readonly otpauthUri: string;
+}
+
+export interface MfaConfirmData {
+  readonly recoveryCodes: readonly string[];
 }
 
 function toSession(response: SessionResponse): AuthSession {
   return {
     user: response.user,
-    accessToken: response.accessToken,
+    accessToken: response.accessToken ?? "",
     expiresAt: Date.now() + Math.max(response.expiresIn, 0) * 1000,
   };
 }
 
 export async function loginRequest(
   credentials: LoginCredentials,
-): Promise<AuthSession> {
+): Promise<LoginOutcome> {
   const response = await apiRequest<SessionResponse>(
     "/api/v1/auth/login",
     {
@@ -38,7 +44,65 @@ export async function loginRequest(
     },
     10000,
   );
+  if (response.mfaRequired && response.mfaChallengeToken) {
+    return {
+      kind: "mfa_required",
+      challengeToken: response.mfaChallengeToken,
+      user: response.user,
+    };
+  }
+  return { kind: "authenticated", session: toSession(response) };
+}
+
+export async function verifyMfaRequest(input: {
+  readonly challengeToken: string;
+  readonly code: string;
+}): Promise<AuthSession> {
+  const response = await apiRequest<SessionResponse>(
+    "/api/v1/auth/mfa/verify",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+    10000,
+  );
   return toSession(response);
+}
+
+export async function setupMfaRequest(): Promise<MfaSetupData> {
+  return apiRequest<MfaSetupData>(
+    "/api/v1/auth/mfa/setup",
+    { method: "POST" },
+    8000,
+  );
+}
+
+export async function confirmMfaRequest(code: string): Promise<MfaConfirmData> {
+  return apiRequest<MfaConfirmData>(
+    "/api/v1/auth/mfa/confirm",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    },
+    8000,
+  );
+}
+
+export async function disableMfaRequest(input: {
+  readonly currentPassword: string;
+  readonly code: string;
+}): Promise<void> {
+  await apiRequestVoid(
+    "/api/v1/auth/mfa/disable",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+    8000,
+  );
 }
 
 /** Restaura a sessão no boot (o cookie de refresh é a única prova guardada). */

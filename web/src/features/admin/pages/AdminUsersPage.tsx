@@ -26,7 +26,7 @@ import {
   type ActiveFilter,
   type AdminUserFilters,
 } from "@/features/admin/hooks/use-admin-users";
-import { ROLE_LABEL, useCurrentUser } from "@/features/auth";
+import { MfaSettingsCard, ROLE_LABEL, useCurrentUser } from "@/features/auth";
 import type { Role } from "@/features/auth/types";
 
 /**
@@ -289,6 +289,8 @@ export function AdminUsersPage() {
         primeiro acesso, use “Redefinir senha”. Toda ação desta tela entra na
         auditoria.
       </p>
+
+      <MfaSettingsCard />
     </div>
   );
 }
@@ -561,10 +563,7 @@ function TemporaryPasswordPanel({
   };
 
   return (
-    <section
-      role="status"
-      className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm"
-    >
+    <output className="mb-4 block rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
       <h2 className="flex items-center gap-1.5 text-sm font-bold text-amber-950">
         <AlertTriangle aria-hidden="true" className="size-4" />
         Senha temporária de {sanitizeText(provisioned.user.name, 120)}
@@ -599,7 +598,7 @@ function TemporaryPasswordPanel({
           Já entreguei
         </button>
       </div>
-    </section>
+    </output>
   );
 }
 

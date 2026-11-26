@@ -2,6 +2,7 @@ export { RequireRole } from "@/features/auth/guards";
 export { useSessionBootstrap } from "@/features/auth/session-boot";
 export { installAuthBridge } from "@/features/auth/api-auth";
 export { useLogout } from "@/features/auth/use-logout";
+export { MfaSettingsCard } from "@/features/auth/components/MfaSettingsCard";
 export {
   useAuthSession,
   useCurrentUser,
