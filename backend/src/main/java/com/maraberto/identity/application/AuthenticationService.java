@@ -3,6 +3,7 @@ package com.maraberto.identity.application;
 import com.maraberto.audit.api.AuditActions;
 import com.maraberto.audit.api.AuditEvent;
 import com.maraberto.audit.api.AuditTrail;
+import com.maraberto.identity.api.dto.ActiveSessionView;
 import com.maraberto.identity.api.dto.AuthResponse;
 import com.maraberto.identity.api.dto.AuthenticatedUserResponse;
 import com.maraberto.identity.api.dto.LoginCommand;
@@ -23,6 +24,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -206,6 +208,25 @@ public class AuthenticationService {
                 .filter(OperationalUser::isActive)
                 .map(AuthenticatedUserResponse::from)
                 .orElseThrow(InvalidRefreshTokenException::new);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ActiveSessionView> activeSessions(UUID userId, String rawCurrentRefreshToken) {
+        return refreshTokenService.listActiveSessions(userId, rawCurrentRefreshToken);
+    }
+
+    @Transactional
+    public boolean revokeSession(UUID userId, UUID sessionFamilyId, String rawCurrentRefreshToken, String bearerToken) {
+        boolean revokedCurrent = refreshTokenService.revokeDeviceSession(userId, sessionFamilyId, rawCurrentRefreshToken);
+        if (revokedCurrent) {
+            revokeBearerIfPresent(bearerToken);
+        }
+        return revokedCurrent;
+    }
+
+    @Transactional
+    public void revokeOtherSessions(UUID userId, String rawCurrentRefreshToken) {
+        refreshTokenService.revokeOtherDeviceSessions(userId, rawCurrentRefreshToken);
     }
 
     /**

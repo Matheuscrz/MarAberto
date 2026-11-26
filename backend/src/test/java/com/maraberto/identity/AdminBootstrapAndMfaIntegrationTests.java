@@ -2,6 +2,7 @@ package com.maraberto.identity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -9,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import com.maraberto.identity.api.IdentityApiExceptionHandler;
+import com.maraberto.identity.domain.OperationalUser;
 import com.maraberto.identity.domain.Role;
 import com.maraberto.identity.infra.AdminBootstrapRunner;
 import com.maraberto.identity.infra.AuthSessionRepository;
@@ -17,8 +19,10 @@ import com.maraberto.identity.infra.UserRecoveryCodeRepository;
 import com.maraberto.identity.infra.security.TotpGenerator;
 import com.maraberto.shared.security.crypto.BlindIndexer;
 import com.maraberto.support.PostgisIntegrationTest;
+import jakarta.servlet.http.Cookie;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -177,5 +181,94 @@ class AdminBootstrapAndMfaIntegrationTests extends PostgisIntegrationTest {
                         .contentType(APPLICATION_JSON)
                         .content("{\"challengeToken\":\"" + challengeToken + "\",\"code\":\"" + codes.get(0) + "\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void lifeguardCanEnableMfaAndManageConnectedDevices() throws Exception {
+        OperationalUser lifeguard = new OperationalUser(
+                UUID.randomUUID(),
+                "Sgt. Silva",
+                "BM-2001",
+                "gv@maraberto.local",
+                blindIndexer.index("gv@maraberto.local"),
+                "11144477735",
+                blindIndexer.indexDigits("11144477735"),
+                passwordEncoder.encode("SenhaForte1234"),
+                Role.LIFEGUARD);
+        users.save(lifeguard);
+
+        // Login em dois dispositivos distintos.
+        MvcResult deviceA = mockMvc.perform(post("/api/v1/auth/login")
+                        .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0.0.0")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"identifier":"gv@maraberto.local","password":"SenhaForte1234"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        String tokenA = JsonPath.read(deviceA.getResponse().getContentAsString(), "$.accessToken");
+        Cookie cookieA = extractRefreshCookie(deviceA);
+
+        MvcResult deviceB = mockMvc.perform(post("/api/v1/auth/login")
+                        .header(HttpHeaders.USER_AGENT, "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"identifier":"gv@maraberto.local","password":"SenhaForte1234"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie cookieB = extractRefreshCookie(deviceB);
+
+        // Guarda-vidas consegue configurar e confirmar MFA TOTP.
+        MvcResult setupRes = mockMvc.perform(post("/api/v1/auth/mfa/setup")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.secret").isNotEmpty())
+                .andExpect(jsonPath("$.otpauthUri").isNotEmpty())
+                .andReturn();
+        String secret = JsonPath.read(setupRes.getResponse().getContentAsString(), "$.secret");
+        String code = totpGenerator.currentCode(secret, Instant.now());
+
+        mockMvc.perform(post("/api/v1/auth/mfa/confirm")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA)
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"code\":\"" + code + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recoveryCodes.length()").value(8));
+
+        // Lista de dispositivos conectados traz os dois, com o atual no topo.
+        mockMvc.perform(get("/api/v1/auth/sessions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA)
+                        .cookie(cookieA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].current").value(true))
+                .andExpect(jsonPath("$[1].current").value(false));
+
+        // Encerrar outros dispositivos revoga o refresh do dispositivo B e mantém o A.
+        mockMvc.perform(delete("/api/v1/auth/sessions/others")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA)
+                        .cookie(cookieA))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .header(HttpHeaders.ORIGIN, "http://localhost")
+                        .cookie(cookieB))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/v1/auth/sessions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenA)
+                        .cookie(cookieA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].current").value(true));
+    }
+
+    private static Cookie extractRefreshCookie(MvcResult result) {
+        String setCookie = result.getResponse().getHeader(HttpHeaders.SET_COOKIE);
+        assertThat(setCookie).isNotBlank();
+        String pair = setCookie.split(";", 2)[0];
+        int eq = pair.indexOf('=');
+        return new Cookie(pair.substring(0, eq), pair.substring(eq + 1));
     }
 }

@@ -68,7 +68,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/auth/mfa/setup",
                                 "/api/v1/auth/mfa/confirm",
-                                "/api/v1/auth/mfa/disable").hasAnyRole("COORDINATOR", "ADMIN")
+                                "/api/v1/auth/mfa/disable").hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/auth/me").authenticated()
                         // Rotas públicas do banhista.
                         .requestMatchers(HttpMethod.POST, "/api/v1/emergency-calls/**").permitAll()
