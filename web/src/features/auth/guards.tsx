@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { homePathForRole } from "@/features/auth/lib/role-home";
+import {
+  buildUnauthenticatedLoginTarget,
+  homePathForRole,
+} from "@/features/auth/lib/role-home";
 import { useAuthSession } from "@/features/auth/session";
 import type { Role } from "@/features/auth/types";
 
@@ -17,6 +20,7 @@ interface RequireRoleProps {
 export function RequireRole({ roles, children }: RequireRoleProps) {
   const status = useAuthSession((state) => state.status);
   const user = useAuthSession((state) => state.user);
+  const loginRedirect = useAuthSession((state) => state.loginRedirect);
   const location = useLocation();
 
   if (status === "unknown") {
@@ -30,9 +34,12 @@ export function RequireRole({ roles, children }: RequireRoleProps) {
   }
 
   if (status !== "authenticated" || !user) {
-    const next = `${location.pathname}${location.search}`;
+    const currentPath = `${location.pathname}${location.search}`;
     return (
-      <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />
+      <Navigate
+        to={buildUnauthenticatedLoginTarget(currentPath, loginRedirect)}
+        replace
+      />
     );
   }
 

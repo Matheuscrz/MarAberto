@@ -27,7 +27,7 @@ export function useLogout(): {
     } catch {
       // Sessão local é descartada de qualquer forma.
     } finally {
-      clearSession();
+      clearSession("/login");
       // O aparelho para de receber push da sessão encerrada (sem efeito no PWA).
       void stopPushNotifications();
       setPending(false);

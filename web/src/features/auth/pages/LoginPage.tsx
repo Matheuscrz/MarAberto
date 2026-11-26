@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Link,
   Navigate,
@@ -23,8 +23,7 @@ import {
 } from "@/features/auth/demo";
 import {
   ROLE_LABEL,
-  homePathForRole,
-  isInternalPath,
+  resolvePostLoginTarget,
 } from "@/features/auth/lib/role-home";
 import { useAuthSession } from "@/features/auth/session";
 import type { AuthSession } from "@/features/auth/types";
@@ -32,24 +31,18 @@ import type { AuthSession } from "@/features/auth/types";
 /**
  * Login único (`/login`) para as três áreas. O papel decide o destino:
  * guarda-vidas → `/operador`, coordenação → `/gestao`, TI → `/admin`.
- * `next` só aceita caminho interno (evita redirecionamento aberto).
+ * `next` só aceita caminho interno de retorno pós-login.
  */
-function resolveTarget(
-  user: AuthSession["user"],
-  next: string | null,
-): string {
-  if (user.mustChangePassword) {
-    return "/trocar-senha";
-  }
-  return isInternalPath(next) ? next : homePathForRole(user.role);
-}
-
 export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const status = useAuthSession((state) => state.status);
   const user = useAuthSession((state) => state.user);
+  const loginRedirect = useAuthSession((state) => state.loginRedirect);
   const setSession = useAuthSession((state) => state.setSession);
+  const clearLoginRedirect = useAuthSession(
+    (state) => state.clearLoginRedirect,
+  );
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -64,14 +57,20 @@ export function LoginPage() {
   const next = searchParams.get("next");
   const passwordChanged = searchParams.get("senha") === "alterada";
 
+  useEffect(() => {
+    if (loginRedirect) {
+      clearLoginRedirect();
+    }
+  }, [loginRedirect, clearLoginRedirect]);
+
   // Já autenticado: não faz sentido mostrar o formulário de novo.
   if (status === "authenticated" && user) {
-    return <Navigate to={resolveTarget(user, next)} replace />;
+    return <Navigate to={resolvePostLoginTarget(user, next)} replace />;
   }
 
   const finishLogin = (session: AuthSession) => {
     setSession(session);
-    navigate(resolveTarget(session.user, next), { replace: true });
+    navigate(resolvePostLoginTarget(session.user, next), { replace: true });
   };
 
   const authenticate = async () => {
