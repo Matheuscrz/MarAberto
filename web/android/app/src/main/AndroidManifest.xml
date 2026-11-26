@@ -38,6 +38,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Necessário no Android 13+ (API 33+) para exibir alertas de SOS com o app fechado. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Plantão, SOS e cadastro de posto/base usam a posição do aparelho. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />

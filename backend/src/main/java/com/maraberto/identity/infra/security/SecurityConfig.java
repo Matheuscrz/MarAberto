@@ -98,6 +98,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/operations/**").hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers("/api/v1/dispatch/**")
                         .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
+                        .requestMatchers("/api/v1/push/**")
+                        .hasAnyRole("LIFEGUARD", "COORDINATOR", "ADMIN")
                         // Ocorrência: o guarda-vidas lê e encerra a ficha do que
                         // atendeu; o escopo por `responder_id` é aplicado na
                         // consulta (RN15).

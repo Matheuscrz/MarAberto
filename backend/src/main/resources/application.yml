@@ -63,6 +63,20 @@ maraberto:
     # Origens aceitas no handshake do WebSocket. Inclui localhost e 127.0.0.1
     # porque o navegador trata os dois como origens distintas no dev local.
     allowed-origins: ${REALTIME_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000}
+  push:
+    vapid:
+      # Chaves VAPID para Web Push (PWA). Em desenvolvimento/teste sem chaves
+      # configuradas, o envio Web Push fica inativo sem impedir o boot.
+      public-key: ${PUSH_VAPID_PUBLIC_KEY:}
+      private-key: ${PUSH_VAPID_PRIVATE_KEY:}
+      subject: ${PUSH_VAPID_SUBJECT:mailto:contato@maraberto.dev}
+    fcm:
+      # Envio FCM HTTP v1 para o app Capacitor Android (requer service account
+      # fora do repositório). Sem credenciais, apenas o registro do token fica ativo.
+      enabled: ${PUSH_FCM_ENABLED:false}
+      project-id: ${PUSH_FCM_PROJECT_ID:}
+      credentials-file: ${PUSH_FCM_CREDENTIALS_FILE:}
+      endpoint: ${PUSH_FCM_ENDPOINT:}
   dispatch:
     # Raio padrão de cobertura quando o posto/base não define o seu (metros).
     default-coverage-radius-m: ${DISPATCH_DEFAULT_COVERAGE_RADIUS_M:2000}
@@ -235,6 +249,10 @@ server:
     max-swallow-size: 64KB
 
 management:
+  health:
+    rabbit:
+      # RabbitMQ é perfil opcional (`rabbit`, ADR-004): não pode derrubar /actuator/health no perfil mínimo.
+      enabled: false
   endpoints:
     web:
       exposure:
