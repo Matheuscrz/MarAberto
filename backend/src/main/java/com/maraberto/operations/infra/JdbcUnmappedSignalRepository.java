@@ -3,6 +3,7 @@ package com.maraberto.operations.infra;
 import com.maraberto.operations.api.UnmappedSignalView;
 import com.maraberto.operations.domain.FlagColor;
 import com.maraberto.operations.domain.UnmappedSignalStatus;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -125,26 +126,52 @@ public class JdbcUnmappedSignalRepository {
         }
     }
 
+    private static final String SCOPE_SQL = """
+            (
+                :unrestricted = TRUE
+                OR NOT EXISTS (
+                    SELECT 1 FROM user_beach_scopes ubs WHERE ubs.user_id = :requesterId
+                )
+                OR COALESCE(u.beach_id, p.beach_id, n.id) IN (
+                    SELECT ubs.beach_id FROM user_beach_scopes ubs WHERE ubs.user_id = :requesterId
+                )
+            )
+            """;
+
     /**
      * Registros da fila, das mais recentes para as mais antigas.
      *
      * @param status estado filtrado, ou {@code null} para todos
      */
     public List<UnmappedSignalView> findAll(UnmappedSignalStatus status, int limit) {
+        return findAll(status, limit, null, true);
+    }
+
+    public List<UnmappedSignalView> findAll(
+            UnmappedSignalStatus status, int limit, UUID requesterId, boolean unrestricted) {
         return jdbc.query(
                 "SELECT " + SELECT_COLUMNS
                         + " WHERE (CAST(:status AS text) IS NULL OR u.status = CAST(:status AS text))"
+                        + " AND " + SCOPE_SQL
                         + " ORDER BY u.created_at DESC, u.id LIMIT :limit",
                 new MapSqlParameterSource()
                         .addValue("status", status == null ? null : status.name())
-                        .addValue("limit", limit),
+                        .addValue("limit", limit)
+                        .addValue("requesterId", requesterId, Types.OTHER)
+                        .addValue("unrestricted", unrestricted, Types.BOOLEAN),
                 (rs, rowNum) -> view(rs));
     }
 
     public Optional<UnmappedSignalView> findById(UUID id) {
+        return findById(id, null, true);
+    }
+
+    public Optional<UnmappedSignalView> findById(UUID id, UUID requesterId, boolean unrestricted) {
         return jdbc.query(
-                        "SELECT " + SELECT_COLUMNS + " WHERE u.id = :id",
-                        new MapSqlParameterSource("id", id),
+                        "SELECT " + SELECT_COLUMNS + " WHERE u.id = :id AND " + SCOPE_SQL,
+                        new MapSqlParameterSource("id", id)
+                                .addValue("requesterId", requesterId, Types.OTHER)
+                                .addValue("unrestricted", unrestricted, Types.BOOLEAN),
                         (rs, rowNum) -> view(rs))
                 .stream()
                 .findFirst();

@@ -15,7 +15,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/v1/management/unmapped-signals")
+@PreAuthorize("hasAnyRole('COORDINATOR', 'ADMIN')")
 @Tag(name = "Áreas não identificadas",
         description = "Fila de sinalizações registradas fora do mapeamento")
 @SecurityRequirement(name = "bearerAuth")
@@ -58,8 +61,9 @@ public class ManagementUnmappedSignalController {
                     example = "PENDING")
             @RequestParam(required = false) UnmappedSignalStatus status,
             @Parameter(description = "Máximo de registros devolvidos (1 a 200)", example = "100")
-            @RequestParam(required = false, defaultValue = "100") int limit) {
-        return service.list(status, limit);
+            @RequestParam(required = false, defaultValue = "100") int limit,
+            Authentication authentication) {
+        return service.list(status, limit, userId(authentication), isAdmin(authentication));
     }
 
     @PostMapping("/{signalId}/decision")
@@ -83,6 +87,16 @@ public class ManagementUnmappedSignalController {
             @Valid @RequestBody UnmappedSignalDecisionRequest request,
             Authentication authentication) {
         return service.decide(
-                UUID.fromString(authentication.getName()), signalId, request);
+                userId(authentication), isAdmin(authentication), signalId, request);
+    }
+
+    private static UUID userId(Authentication authentication) {
+        return UUID.fromString(authentication.getName());
+    }
+
+    private static boolean isAdmin(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch("ROLE_ADMIN"::equals);
     }
 }

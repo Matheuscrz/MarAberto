@@ -107,8 +107,14 @@ public class UnmappedSignalService {
      */
     @Transactional(readOnly = true)
     public List<UnmappedSignalView> list(UnmappedSignalStatus status, int limit) {
+        return list(status, limit, null, true);
+    }
+
+    @Transactional(readOnly = true)
+    public List<UnmappedSignalView> list(
+            UnmappedSignalStatus status, int limit, UUID requesterId, boolean unrestricted) {
         int size = Math.max(1, Math.min(limit, MAX_LIST_SIZE));
-        return repository.findAll(status, size);
+        return repository.findAll(status, size, requesterId, unrestricted);
     }
 
     /**
@@ -123,8 +129,18 @@ public class UnmappedSignalService {
             UUID coordinatorId,
             UUID signalId,
             UnmappedSignalDecisionRequest request) {
-        repository.findById(signalId).orElseThrow(UnmappedSignalNotFoundException::new);
-        validate(request);
+        return decide(coordinatorId, false, signalId, request);
+    }
+
+    @Transactional
+    public UnmappedSignalView decide(
+            UUID coordinatorId,
+            boolean unrestricted,
+            UUID signalId,
+            UnmappedSignalDecisionRequest request) {
+        repository.findById(signalId, coordinatorId, unrestricted)
+                .orElseThrow(UnmappedSignalNotFoundException::new);
+        validate(request, coordinatorId, unrestricted);
         repository.decide(
                 signalId,
                 request.decision(),
@@ -155,7 +171,8 @@ public class UnmappedSignalService {
         return detail;
     }
 
-    private void validate(UnmappedSignalDecisionRequest request) {
+    private void validate(
+            UnmappedSignalDecisionRequest request, UUID coordinatorId, boolean unrestricted) {
         if (request.decision() != UnmappedSignalStatus.IDENTIFIED) {
             if (request.beachId() != null || request.sectorId() != null) {
                 throw new IllegalArgumentException(
@@ -168,8 +185,33 @@ public class UnmappedSignalService {
                     "Identificar o local exige a área de banho (beachId)");
         }
         requireActiveBeach(request.beachId());
+        if (!unrestricted) {
+            requireBeachInScope(coordinatorId, request.beachId());
+        }
         if (request.sectorId() != null) {
             requireSectorOfBeach(request.beachId(), request.sectorId());
+        }
+    }
+
+    private void requireBeachInScope(UUID userId, UUID beachId) {
+        Boolean allowed = jdbc.query("""
+                        SELECT NOT EXISTS (
+                                   SELECT 1 FROM user_beach_scopes WHERE user_id = :userId
+                               )
+                            OR EXISTS (
+                                   SELECT 1
+                                     FROM user_beach_scopes
+                                    WHERE user_id = :userId
+                                      AND beach_id = :beachId
+                               )
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("userId", userId)
+                        .addValue("beachId", beachId),
+                rs -> rs.next() ? rs.getBoolean(1) : false);
+        if (!Boolean.TRUE.equals(allowed)) {
+            throw new IllegalArgumentException(
+                    "Área de banho fora do seu escopo territorial");
         }
     }
 

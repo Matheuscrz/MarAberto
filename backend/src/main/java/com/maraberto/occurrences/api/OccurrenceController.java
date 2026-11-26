@@ -103,6 +103,7 @@ public class OccurrenceController {
         return occurrenceQueryService.list(
                 userId(authentication),
                 seesAllScopes(authentication),
+                isAdmin(authentication),
                 status,
                 emergencyCallId,
                 active,
@@ -132,7 +133,10 @@ public class OccurrenceController {
             @PathVariable UUID occurrenceId,
             Authentication authentication) {
         return occurrenceQueryService.get(
-                occurrenceId, userId(authentication), seesAllScopes(authentication));
+                occurrenceId,
+                userId(authentication),
+                seesAllScopes(authentication),
+                isAdmin(authentication));
     }
 
     @PostMapping
@@ -154,7 +158,10 @@ public class OccurrenceController {
             @Valid @RequestBody CreateOccurrenceRequest request,
             Authentication authentication) {
         return occurrenceCommandService.create(
-                userId(authentication), seesAllScopes(authentication), request);
+                userId(authentication),
+                seesAllScopes(authentication),
+                isAdmin(authentication),
+                request);
     }
 
     @PostMapping("/{occurrenceId}/close")
@@ -178,7 +185,11 @@ public class OccurrenceController {
             @Valid @RequestBody CloseOccurrenceRequest request,
             Authentication authentication) {
         return occurrenceCommandService.close(
-                occurrenceId, userId(authentication), seesAllScopes(authentication), request);
+                occurrenceId,
+                userId(authentication),
+                seesAllScopes(authentication),
+                isAdmin(authentication),
+                request);
     }
 
     @PatchMapping("/{occurrenceId}")
@@ -203,7 +214,11 @@ public class OccurrenceController {
             @Valid @RequestBody UpdateOccurrenceRequest request,
             Authentication authentication) {
         return occurrenceCommandService.update(
-                occurrenceId, userId(authentication), seesAllScopes(authentication), request);
+                occurrenceId,
+                userId(authentication),
+                seesAllScopes(authentication),
+                isAdmin(authentication),
+                request);
     }
 
     @PostMapping("/{occurrenceId}/victim/reveal")
@@ -223,7 +238,11 @@ public class OccurrenceController {
             @Valid @RequestBody RevealVictimRequest request,
             Authentication authentication) {
         return occurrenceCommandService.reveal(
-                occurrenceId, userId(authentication), seesAllScopes(authentication), request);
+                occurrenceId,
+                userId(authentication),
+                seesAllScopes(authentication),
+                isAdmin(authentication),
+                request);
     }
 
     private static UUID userId(Authentication authentication) {
@@ -264,5 +283,11 @@ public class OccurrenceController {
                 .map(GrantedAuthority::getAuthority)
                 .anyMatch(authority -> "ROLE_COORDINATOR".equals(authority)
                         || "ROLE_ADMIN".equals(authority));
+    }
+
+    private static boolean isAdmin(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch("ROLE_ADMIN"::equals);
     }
 }

@@ -3,6 +3,7 @@ package com.maraberto.operations.application;
 import com.maraberto.identity.api.OperatorProfile;
 import com.maraberto.identity.api.OperatorProfiles;
 import com.maraberto.operations.api.ManagementTeamView;
+import java.sql.Types;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -56,6 +57,7 @@ public class ManagementTeamService {
               LEFT JOIN mobile_bases m ON m.id = s.mobile_base_id
               LEFT JOIN LATERAL (
                   SELECT bs.name AS sector_name,
+                         sb.id AS beach_id,
                          sb.name AS beach_name
                     FROM beach_sectors bs
                     JOIN beaches sb ON sb.id = bs.beach_id
@@ -65,6 +67,15 @@ public class ManagementTeamService {
                    ORDER BY bs.display_order, bs.id
                    LIMIT 1
               ) sector ON TRUE
+              LEFT JOIN LATERAL (
+                  SELECT ab.id
+                    FROM beaches ab
+                   WHERE s.last_position IS NOT NULL
+                     AND ab.active
+                     AND ST_Contains(ab.boundary, CAST(s.last_position AS geometry))
+                   ORDER BY ab.id
+                   LIMIT 1
+              ) area ON TRUE
               LEFT JOIN LATERAL (
                   SELECT COUNT(*) FILTER (
                              WHERE o.occurred_at >= date_trunc('day', NOW())) AS occurrences_today,
@@ -85,6 +96,15 @@ public class ManagementTeamService {
               ) signals ON TRUE
              WHERE s.ended_at IS NULL
                AND s.last_seen_at >= NOW() - make_interval(secs => :leaseSeconds)
+               AND (
+                   :unrestricted = TRUE
+                   OR NOT EXISTS (
+                       SELECT 1 FROM user_beach_scopes ubs WHERE ubs.user_id = :requesterId
+                   )
+                   OR COALESCE(p.beach_id, sector.beach_id, area.id) IN (
+                       SELECT ubs.beach_id FROM user_beach_scopes ubs WHERE ubs.user_id = :requesterId
+                   )
+               )
              ORDER BY s.last_position_at ASC NULLS FIRST, s.started_at ASC
             """;
 
@@ -107,9 +127,16 @@ public class ManagementTeamService {
 
     @Transactional(readOnly = true)
     public ManagementTeamView team() {
+        return team(null, true);
+    }
+
+    @Transactional(readOnly = true)
+    public ManagementTeamView team(UUID requesterId, boolean unrestricted) {
         List<Row> rows = jdbc.query(TEAM_SQL, new MapSqlParameterSource()
                         .addValue("leaseSeconds", leaseTimeout.toSeconds())
-                        .addValue("staleSeconds", positionStaleAfter.toSeconds()),
+                        .addValue("staleSeconds", positionStaleAfter.toSeconds())
+                        .addValue("requesterId", requesterId, Types.OTHER)
+                        .addValue("unrestricted", unrestricted, Types.BOOLEAN),
                 (rs, rowNumber) -> new Row(
                         rs.getObject("shift_id", UUID.class),
                         rs.getObject("user_id", UUID.class),

@@ -11,7 +11,7 @@
 
 ## Stack e Arquitetura
 
-- **Backend (`backend/`)**: Java 21, Spring Boot 3.3.4, **Spring Modulith 1.2.13** (ADR-011), Virtual Threads, Gradle, PostgreSQL 16 + PostGIS, Flyway (`ddl-auto: validate`, **próxima migration: `V29`**), Redis (opcional no boot, nunca fonte da verdade), RabbitMQ (opcional), S3 (Garage).
+- **Backend (`backend/`)**: Java 21, Spring Boot 3.3.4, **Spring Modulith 1.2.13** (ADR-011), Virtual Threads, Gradle, PostgreSQL 16 + PostGIS, Flyway (`ddl-auto: validate`, **próxima migration: `V30`**), Redis (opcional no boot, nunca fonte da verdade), RabbitMQ (opcional), S3 (Garage).
   - **Módulos (`com.maraberto.*`)**: `identity`, `region`, `beaches`, `operations`, `emergency`, `occurrences`, `safety`, `tides` (inativo), `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`.
   - **Fronteira estrita**: Módulos importam apenas pacotes `api/` públicos de outros módulos (`ModularityTests`).
 - **Frontend (`web/`)**: Vite 8, React 19, TypeScript 6, Tailwind 4, MapLibre GL + PMTiles, STOMP/WebSocket.
