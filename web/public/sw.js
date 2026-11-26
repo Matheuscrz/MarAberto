@@ -158,6 +158,52 @@ async function networkFirst(request, event) {
 }
 
 /*
+ * Web Push (VAPID): acorda o service worker mesmo com a aba fechada para
+ * alertar um novo SOS ou fechar a notificação quando outro operador assume.
+ * O payload contém apenas IDs e rota interna (sem coordenadas nem PII).
+ */
+self.addEventListener('push', (event) => {
+  event.waitUntil(
+    (async () => {
+      let data = {};
+      if (event.data) {
+        try {
+          data = event.data.json();
+        } catch {
+          data = {};
+        }
+      }
+      const callId = typeof data.callId === 'string' ? data.callId : '';
+      const status = typeof data.status === 'string' ? data.status : 'DISPATCHED';
+      const tag = callId ? `sos-${callId}` : 'sos-alert';
+
+      if (status === 'CANCELLED') {
+        const notifications = await self.registration.getNotifications({ tag });
+        notifications.forEach((notification) => notification.close());
+        return;
+      }
+
+      const targetUrl =
+        typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/operador';
+
+      await self.registration.showNotification('SOS MarAberto', {
+        body: 'Novo chamado de emergência aguardando atendimento.',
+        tag,
+        renotify: true,
+        requireInteraction: true,
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        data: {
+          url: targetUrl,
+          callId,
+          dispatchId: typeof data.dispatchId === 'string' ? data.dispatchId : '',
+        },
+      });
+    })(),
+  );
+});
+
+/*
  * Clique na notificação do SOS: foca a mesa já aberta ou abre uma nova. O alvo
  * vem de `data.url` (rota interna do console), nunca de conteúdo do chamado.
  */

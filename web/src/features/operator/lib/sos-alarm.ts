@@ -162,16 +162,13 @@ export async function armSosAlerts(): Promise<{
 }> {
   const sound = unlockAlertAudio();
   const permission = await requestAlertPermission();
-  if (isNativeApp()) {
-    // Uma vez por sessão: o registro vale para o app inteiro, não só para o
-    // console. A permissão já foi pedida no gesto acima.
-    await startPushNotifications({
-      onMessage: (message) => {
-        void showPushNotification(message);
-      },
-      onAction: openPushTarget,
-    }).catch(() => undefined);
-  }
+  // Registra push tanto no Capacitor Android (FCM) quanto no PWA (Web Push VAPID).
+  await startPushNotifications({
+    onMessage: (message) => {
+      void showPushNotification(message);
+    },
+    onAction: openPushTarget,
+  }).catch(() => undefined);
   return { sound, permission };
 }
 
