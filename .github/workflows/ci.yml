@@ -13,14 +13,14 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    working-directory: backend
-
 jobs:
   build:
+    name: Backend (Gradle + Testcontainers)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -51,3 +51,30 @@ jobs:
           path: backend/build/reports/tests/
           if-no-files-found: ignore
           retention-days: 7
+
+  web:
+    name: Frontend (Lint + Build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Configurar Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Verificar lint e fronteiras de features
+        run: npm run lint
+
+      - name: Compilar TypeScript e gerar bundle de produção
+        run: npm run build
