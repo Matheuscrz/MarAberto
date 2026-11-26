@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { KeyRound, Loader2, ShieldCheck, ShieldOff } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import QRCode from "qrcode";
+import {
+  Check,
+  Copy,
+  KeyRound,
+  Loader2,
+  ShieldCheck,
+  ShieldOff,
+} from "lucide-react";
 import { ApiError } from "@/shared/lib/api-client";
 import {
   confirmMfaRequest,
@@ -9,17 +18,26 @@ import {
 } from "@/features/auth/api";
 import { useAuthSession, useCurrentUser } from "@/features/auth/session";
 
+interface MfaSettingsCardProps {
+  readonly className?: string;
+}
+
 /**
- * Controle opcional de MFA (TOTP + códigos de recuperação) para perfis
- * privilegiados (COORDINATOR e ADMIN). O uso é voluntário: cada administrador
- * ou coordenador escolhe ativar ou desativar na própria conta.
+ * Controle opcional de MFA (TOTP + códigos de recuperação) para qualquer
+ * operador autenticado (LIFEGUARD, COORDINATOR e ADMIN). O QR Code é gerado
+ * localmente a partir da URI `otpauth://` (sem chamadas externas, respeitando
+ * a CSP).
  */
-export function MfaSettingsCard() {
+export function MfaSettingsCard({ className = "mt-6" }: MfaSettingsCardProps) {
+  const navigate = useNavigate();
   const user = useCurrentUser();
   const clearSession = useAuthSession((s) => s.clearSession);
+  const setMfaEnabled = useAuthSession((s) => s.setMfaEnabled);
 
-  const [mfaActive, setMfaActive] = useState(Boolean(user?.mfaEnabled));
+  const mfaActive = Boolean(user?.mfaEnabled);
   const [setupData, setSetupData] = useState<MfaSetupData | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [secretCopied, setSecretCopied] = useState(false);
   const [confirmCode, setConfirmCode] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<readonly string[] | null>(
     null,
@@ -30,7 +48,7 @@ export function MfaSettingsCard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!user || (user.role !== "ADMIN" && user.role !== "COORDINATOR")) {
+  if (!user) {
     return null;
   }
 
@@ -38,12 +56,35 @@ export function MfaSettingsCard() {
     setBusy(true);
     setError(null);
     setRecoveryCodes(null);
+    setSecretCopied(false);
     try {
-      setSetupData(await setupMfaRequest());
+      const data = await setupMfaRequest();
+      const qr = await QRCode.toDataURL(data.otpauthUri, {
+        width: 220,
+        margin: 2,
+        errorCorrectionLevel: "M",
+        color: {
+          dark: "#0a2540",
+          light: "#ffffff",
+        },
+      }).catch(() => null);
+      setSetupData(data);
+      setQrDataUrl(qr);
     } catch (cause) {
       setError(mfaErrorMessage(cause));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleCopySecret = async () => {
+    if (!setupData?.secret) return;
+    try {
+      await navigator.clipboard.writeText(setupData.secret);
+      setSecretCopied(true);
+      window.setTimeout(() => setSecretCopied(false), 2000);
+    } catch {
+      // Clipboard indisponível no contexto atual; a chave continua selecionável.
     }
   };
 
@@ -53,8 +94,9 @@ export function MfaSettingsCard() {
     setError(null);
     try {
       const result = await confirmMfaRequest(confirmCode.trim());
-      setMfaActive(true);
+      setMfaEnabled(true);
       setSetupData(null);
+      setQrDataUrl(null);
       setConfirmCode("");
       setRecoveryCodes(result.recoveryCodes);
     } catch (cause) {
@@ -73,11 +115,12 @@ export function MfaSettingsCard() {
         currentPassword: disablePassword,
         code: disableCode.trim(),
       });
-      setMfaActive(false);
+      setMfaEnabled(false);
       setDisabling(false);
       setDisablePassword("");
       setDisableCode("");
-      clearSession();
+      clearSession("/login");
+      navigate("/login", { replace: true });
     } catch (cause) {
       setError(mfaErrorMessage(cause));
     } finally {
@@ -86,7 +129,9 @@ export function MfaSettingsCard() {
   };
 
   return (
-    <section className="mt-6 rounded-2xl border border-ocean-200 bg-white p-4 shadow-sm">
+    <section
+      className={`${className} rounded-2xl border border-ocean-200 bg-white p-4 shadow-sm`.trim()}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="flex items-center gap-1.5 text-sm font-bold text-ocean-950">
@@ -144,25 +189,68 @@ export function MfaSettingsCard() {
       {setupData ? (
         <form
           onSubmit={(e) => void handleConfirm(e)}
-          className="mt-3 grid gap-3 rounded-xl border border-ocean-100 bg-ocean-50/50 p-3"
+          className="mt-3 grid gap-4 rounded-xl border border-ocean-100 bg-ocean-50/50 p-4"
         >
           <p className="text-xs text-ocean-800">
-            Cadastre a chave abaixo no seu aplicativo autenticador e informe o
-            código de 6 dígitos gerado para confirmar:
+            Escaneie o QR Code no aplicativo autenticador (Google Authenticator,
+            FreeOTP, Aegis ou similar) ou informe a chave manual abaixo. Em
+            seguida, digite o código de 6 dígitos para confirmar:
           </p>
-          <code className="break-all rounded-lg border border-ocean-200 bg-white px-3 py-2 font-mono text-xs font-bold text-ocean-950">
-            {setupData.secret}
-          </code>
+
+          <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt="QR Code para cadastrar o segundo fator no aplicativo autenticador"
+                width={220}
+                height={220}
+                className="size-44 shrink-0 rounded-xl border border-ocean-200 bg-white p-2 shadow-sm"
+              />
+            ) : null}
+
+            <div className="min-w-0 flex-1 space-y-2">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-ocean-600">
+                Chave manual (Base32)
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="break-all rounded-lg border border-ocean-200 bg-white px-3 py-2 font-mono text-xs font-bold text-ocean-950">
+                  {setupData.secret}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => void handleCopySecret()}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-ocean-200 bg-white px-2.5 text-xs font-bold text-ocean-800 transition hover:bg-ocean-50"
+                >
+                  {secretCopied ? (
+                    <Check
+                      aria-hidden="true"
+                      className="size-3.5 text-emerald-600"
+                    />
+                  ) : (
+                    <Copy aria-hidden="true" className="size-3.5" />
+                  )}
+                  {secretCopied ? "Copiada" : "Copiar chave"}
+                </button>
+              </div>
+              <p className="text-[11px] leading-snug text-ocean-600">
+                O QR Code é gerado localmente no seu navegador — o segredo não é
+                enviado para serviços externos.
+              </p>
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
               required
+              inputMode="numeric"
+              autoComplete="one-time-code"
               maxLength={12}
               value={confirmCode}
               onChange={(e) => setConfirmCode(e.target.value)}
               placeholder="Código de 6 dígitos"
               aria-label="Código de 6 dígitos do autenticador"
-              className="h-9 w-48 rounded-lg border border-ocean-200 bg-white px-3 font-mono text-xs text-ocean-950"
+              className="h-9 w-48 rounded-lg border border-ocean-200 bg-white px-3 font-mono text-xs text-ocean-950 focus:border-ocean-600 focus:outline-none"
             />
             <button
               type="submit"
@@ -173,7 +261,12 @@ export function MfaSettingsCard() {
             </button>
             <button
               type="button"
-              onClick={() => setSetupData(null)}
+              onClick={() => {
+                setSetupData(null);
+                setQrDataUrl(null);
+                setConfirmCode("");
+                setError(null);
+              }}
               className="h-9 rounded-lg px-2.5 text-xs font-semibold text-ocean-600 hover:bg-ocean-100"
             >
               Cancelar

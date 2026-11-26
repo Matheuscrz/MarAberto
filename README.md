@@ -160,8 +160,8 @@ openssl rand -base64 48   # -> JWT_SECRET
 | `JWT_SECRET` | Valor do `.env.example` | **Obrigatório gerar** (`openssl rand -base64 48`) |
 | `POSTGRES_PASSWORD` / `GARAGE_SECRET_KEY` / `RABBITMQ_PASSWORD` | Valor do `.env.example` | **Trocar por senhas fortes** |
 | `SECURITY_COOKIE_SECURE` | `false` *(funciona em HTTP/LAN)* | `true` *(exigido pelo perfil `prod`)* |
-| `SECURITY_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | `https://seu-dominio.gov.br,https://localhost,capacitor://localhost` |
-| `REALTIME_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | `https://seu-dominio.gov.br` |
+| `SECURITY_ALLOWED_ORIGINS` | `http://localhost,http://127.0.0.1` | `https://seu-dominio.gov.br,https://localhost,capacitor://localhost` |
+| `REALTIME_ALLOWED_ORIGINS` | `http://localhost,http://127.0.0.1` | `https://seu-dominio.gov.br` |
 | `ADMIN_BOOTSTRAP_ENABLED` | `true` *(cria `admin` se não houver ADMIN ativo)* | `true` na 1ª subida (pode desligar após trocar a senha) |
 | `ADMIN_BOOTSTRAP_PASSWORD` | `admin` | `admin` ou senha inicial customizada |
 
@@ -177,7 +177,7 @@ docker compose up -d --build
 
 Aguarde os healthchecks ficarem saudáveis (`docker compose ps`):
 
-- **Aplicação Web / PWA (Nginx não-root):** `http://localhost:3000` (ou `http://<IP-DO-SERVIDOR>:3000`)
+- **Aplicação Web / PWA (Nginx não-root):** `http://localhost` (ou `http://<IP-DO-SERVIDOR>`)
 - **API Backend:** `http://localhost:8080` (exposta pelo proxy do Nginx em `/api` e `/ws`)
 - **Healthcheck:** `http://localhost:8080/actuator/health`
 - **Swagger/OpenAPI (apenas fora de `prod`):** `http://localhost:8080/swagger-ui/index.html`
@@ -194,7 +194,7 @@ docker compose down
 
 Na primeira subida com banco vazio, o `AdminBootstrapRunner` cria automaticamente a conta inicial de administração:
 
-- **URL de login:** `http://localhost:3000/login`
+- **URL de login:** `http://localhost/login`
 - **Usuário:** `admin` *(ou `admin@maraberto.local`)*
 - **Senha inicial:** `admin` *(ou o valor definido em `ADMIN_BOOTSTRAP_PASSWORD`)*
 
@@ -212,7 +212,7 @@ Na primeira subida com banco vazio, o `AdminBootstrapRunner` cria automaticament
 
 | Serviço                  | Porta do Host    | Credenciais Padrão (Local) / Notas    |
 | :----------------------- | :--------------- | :------------------------------------ |
-| **Web (Nginx unprivileged)** | `3000`       | Proxy `/api` e `/ws`, CSP, `limit_req`, HSTS sob HTTPS |
+| **Web (Nginx unprivileged)** | `80`         | Proxy `/api` e `/ws`, CSP, `limit_req`, HSTS sob HTTPS |
 | **Backend (Spring Boot)** | `8080`          | Java 21 + Virtual Threads + PostGIS   |
 | **PostgreSQL + PostGIS** | `5432`           | user: `maraberto` / pass: `maraberto` |
 | **Redis**                | `6379`           | Cache, rate limit e blacklist JWT     |

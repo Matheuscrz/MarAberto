@@ -1,5 +1,6 @@
 package com.maraberto.identity.api;
 
+import com.maraberto.identity.api.dto.ActiveSessionView;
 import com.maraberto.identity.api.dto.AuthResponse;
 import com.maraberto.identity.api.dto.AuthenticatedUserResponse;
 import com.maraberto.identity.api.dto.ChangePasswordRequest;
@@ -26,12 +27,16 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -109,7 +114,7 @@ public class AuthController {
     @PostMapping("/mfa/setup")
     @SecurityRequirement(name = "bearerAuth")
     @Operation(summary = "Iniciar configuração de MFA (TOTP)",
-            description = "Gera segredo Base32 e URI otpauth:// para Coordenação e TI.")
+            description = "Gera segredo Base32 e URI otpauth:// para qualquer operador autenticado.")
     public MfaSetupResponse setupMfa(Authentication authentication) {
         return mfaService.setup(UUID.fromString(authentication.getName()));
     }
@@ -192,6 +197,60 @@ public class AuthController {
     })
     public AuthenticatedUserResponse me(Authentication authentication) {
         return authenticationService.currentUser(UUID.fromString(authentication.getName()));
+    }
+
+    @GetMapping("/sessions")
+    @SecurityRequirement(name = "bearerAuth")
+    @Operation(summary = "Dispositivos conectados",
+            description = "Lista as sessões de refresh ativas do operador autenticado, destacando o dispositivo atual.")
+    public ResponseEntity<List<ActiveSessionView>> listSessions(
+            Authentication authentication,
+            HttpServletRequest request) {
+        List<ActiveSessionView> sessions = authenticationService.activeSessions(
+                UUID.fromString(authentication.getName()),
+                AuthCookie.read(request, cookieProperties.isSecure()));
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(sessions);
+    }
+
+    @DeleteMapping("/sessions/others")
+    @SecurityRequirement(name = "bearerAuth")
+    @Operation(summary = "Desconectar outros dispositivos",
+            description = "Revoga todas as sessões de refresh do operador exceto o dispositivo atual.")
+    public ResponseEntity<Void> revokeOtherSessions(
+            Authentication authentication,
+            HttpServletRequest request) {
+        authenticationService.revokeOtherSessions(
+                UUID.fromString(authentication.getName()),
+                AuthCookie.read(request, cookieProperties.isSecure()));
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/sessions/{sessionId}")
+    @SecurityRequirement(name = "bearerAuth")
+    @Operation(summary = "Desconectar um dispositivo",
+            description = "Revoga a família de refresh informada se pertencer ao operador autenticado.")
+    public ResponseEntity<Void> revokeSession(
+            @PathVariable UUID sessionId,
+            Authentication authentication,
+            HttpServletRequest request) {
+        String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
+        String bearer = (authHeader != null && authHeader.startsWith("Bearer "))
+                ? authHeader.substring(7).trim()
+                : null;
+        boolean revokedCurrent = authenticationService.revokeSession(
+                UUID.fromString(authentication.getName()),
+                sessionId,
+                AuthCookie.read(request, cookieProperties.isSecure()),
+                bearer);
+        if (revokedCurrent) {
+            return ResponseEntity.noContent()
+                    .header(HttpHeaders.SET_COOKIE,
+                            AuthCookie.clear(cookieProperties.isSecure()).toString())
+                    .build();
+        }
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/password")

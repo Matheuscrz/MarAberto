@@ -62,7 +62,7 @@ maraberto:
   realtime:
     # Origens aceitas no handshake do WebSocket. Inclui localhost e 127.0.0.1
     # porque o navegador trata os dois como origens distintas no dev local.
-    allowed-origins: ${REALTIME_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000}
+    allowed-origins: ${REALTIME_ALLOWED_ORIGINS:http://localhost,http://127.0.0.1,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000}
   push:
     vapid:
       # Chaves VAPID para Web Push (PWA). Em desenvolvimento/teste sem chaves
@@ -143,7 +143,7 @@ maraberto:
       # (`https://localhost` e `capacitor://localhost`) e o dev local. O perfil
       # `prod` recusa Origem sem HTTPS — a lista de desenvolvimento abaixo não
       # sobe em produção.
-      allowed-origins: ${SECURITY_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://localhost,capacitor://localhost}
+      allowed-origins: ${SECURITY_ALLOWED_ORIGINS:http://localhost,http://127.0.0.1,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000,https://localhost,capacitor://localhost}
     login:
       # Força bruta: limite por origem (token bucket) e bloqueio progressivo
       # por conta (persistido em `operational_users`).

@@ -1,5 +1,6 @@
 package com.maraberto.identity.application;
 
+import com.maraberto.identity.api.dto.ActiveSessionView;
 import com.maraberto.identity.domain.AuthSession;
 import com.maraberto.identity.domain.OperationalUser;
 import com.maraberto.identity.infra.AuthSessionRepository;
@@ -12,6 +13,10 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -125,6 +130,96 @@ public class RefreshTokenService {
     @Transactional
     public void revokeAllForUser(UUID userId) {
         sessions.revokeAllForUser(userId, Instant.now());
+    }
+
+    /**
+     * Lista os dispositivos (famílias de sessão) ativos do operador autenticado,
+     * colocando o dispositivo atual no topo.
+     */
+    @Transactional(readOnly = true)
+    public List<ActiveSessionView> listActiveSessions(UUID userId, String rawCurrentRefreshToken) {
+        Instant now = Instant.now();
+        UUID currentFamilyId = resolveCurrentFamilyId(userId, rawCurrentRefreshToken, now).orElse(null);
+        List<AuthSession> activeRows = sessions.findActiveByUserId(userId, now);
+
+        Map<UUID, ActiveSessionView> byFamily = new LinkedHashMap<>();
+        for (AuthSession row : activeRows) {
+            UUID familyId = row.getFamilyId();
+            ActiveSessionView existing = byFamily.get(familyId);
+            if (existing == null) {
+                byFamily.put(familyId, new ActiveSessionView(
+                        familyId,
+                        row.getUserAgent(),
+                        row.getIssuedAt(),
+                        row.getLastUsedAt(),
+                        row.getExpiresAt(),
+                        familyId.equals(currentFamilyId)));
+            } else {
+                Instant createdAt = row.getIssuedAt().isBefore(existing.createdAt())
+                        ? row.getIssuedAt()
+                        : existing.createdAt();
+                boolean rowNewer = row.getLastUsedAt().isAfter(existing.lastUsedAt());
+                Instant lastUsedAt = rowNewer ? row.getLastUsedAt() : existing.lastUsedAt();
+                Instant expiresAt = row.getExpiresAt().isAfter(existing.expiresAt())
+                        ? row.getExpiresAt()
+                        : existing.expiresAt();
+                String userAgent = rowNewer && row.getUserAgent() != null
+                        ? row.getUserAgent()
+                        : existing.userAgent();
+                byFamily.put(familyId, new ActiveSessionView(
+                        familyId,
+                        userAgent,
+                        createdAt,
+                        lastUsedAt,
+                        expiresAt,
+                        existing.current()));
+            }
+        }
+
+        return byFamily.values().stream()
+                .sorted(Comparator.comparing(ActiveSessionView::current).reversed()
+                        .thenComparing(ActiveSessionView::lastUsedAt, Comparator.reverseOrder()))
+                .toList();
+    }
+
+    /**
+     * Revoga uma família de sessão específica do operador. Retorna {@code true}
+     * quando o dispositivo revogado é o próprio dispositivo da requisição atual.
+     */
+    @Transactional
+    public boolean revokeDeviceSession(UUID userId, UUID familyId, String rawCurrentRefreshToken) {
+        Instant now = Instant.now();
+        boolean isCurrent = resolveCurrentFamilyId(userId, rawCurrentRefreshToken, now)
+                .map(familyId::equals)
+                .orElse(false);
+        sessions.revokeFamilyForUser(userId, familyId, now);
+        return isCurrent;
+    }
+
+    /**
+     * Revoga todos os demais dispositivos do operador, preservando a família do
+     * cookie de refresh da requisição atual.
+     */
+    @Transactional
+    public int revokeOtherDeviceSessions(UUID userId, String rawCurrentRefreshToken) {
+        Instant now = Instant.now();
+        Optional<UUID> currentFamilyId = resolveCurrentFamilyId(userId, rawCurrentRefreshToken, now);
+        if (currentFamilyId.isEmpty()) {
+            return 0;
+        }
+        return sessions.revokeOtherFamiliesForUser(userId, currentFamilyId.get(), now);
+    }
+
+    private Optional<UUID> resolveCurrentFamilyId(UUID userId, String rawCurrentRefreshToken, Instant now) {
+        if (rawCurrentRefreshToken == null || rawCurrentRefreshToken.isBlank()) {
+            return Optional.empty();
+        }
+        return sessions.findByRefreshHash(hash(rawCurrentRefreshToken))
+                .filter(session -> session.getUserId().equals(userId))
+                .filter(session -> !session.isExpired(now))
+                .filter(session -> !session.isRevoked()
+                        || session.wasRotatedWithin(now, properties.getRefreshReuseTolerance()))
+                .map(AuthSession::getFamilyId);
     }
 
     public long refreshTokenTtlSeconds() {

@@ -8,7 +8,6 @@ import com.maraberto.identity.api.dto.MfaSetupResponse;
 import com.maraberto.identity.domain.InvalidCredentialsException;
 import com.maraberto.identity.domain.InvalidRefreshTokenException;
 import com.maraberto.identity.domain.OperationalUser;
-import com.maraberto.identity.domain.Role;
 import com.maraberto.identity.domain.UserRecoveryCode;
 import com.maraberto.identity.infra.OperationalUserRepository;
 import com.maraberto.identity.infra.UserRecoveryCodeRepository;
@@ -30,8 +29,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Gestão de segundo fator (TOTP RFC 6238) e códigos de recuperação de uso único
- * para perfis privilegiados ({@code COORDINATOR} e {@code ADMIN}).
+ * Gestão opcional de segundo fator (TOTP RFC 6238) e códigos de recuperação de
+ * uso único para operadores autenticados ({@code LIFEGUARD},
+ * {@code COORDINATOR} e {@code ADMIN}).
  */
 @Service
 public class MfaService {
@@ -68,7 +68,7 @@ public class MfaService {
 
     @Transactional
     public MfaSetupResponse setup(UUID userId) {
-        OperationalUser user = requirePrivilegedActiveUser(userId);
+        OperationalUser user = requireActiveUser(userId);
         String secret = totpGenerator.generateSecret();
         user.stageTotpSecret(secret, Instant.now());
         users.save(user);
@@ -79,7 +79,7 @@ public class MfaService {
 
     @Transactional
     public MfaConfirmResponse confirm(UUID userId, String code, RequestMetadata metadata) {
-        OperationalUser user = requirePrivilegedActiveUser(userId);
+        OperationalUser user = requireActiveUser(userId);
         Instant now = Instant.now();
         if (user.getTotpSecret() == null || !totpGenerator.verifyCode(user.getTotpSecret(), code, now)) {
             throw new InvalidCredentialsException();
@@ -104,7 +104,7 @@ public class MfaService {
 
     @Transactional
     public void disable(UUID userId, String currentPassword, String code, RequestMetadata metadata) {
-        OperationalUser user = requirePrivilegedActiveUser(userId);
+        OperationalUser user = requireActiveUser(userId);
         if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
             throw new InvalidCredentialsException();
         }
@@ -145,14 +145,10 @@ public class MfaService {
                 .orElse(false);
     }
 
-    private OperationalUser requirePrivilegedActiveUser(UUID userId) {
-        OperationalUser user = users.findById(userId)
+    private OperationalUser requireActiveUser(UUID userId) {
+        return users.findById(userId)
                 .filter(OperationalUser::isActive)
                 .orElseThrow(InvalidRefreshTokenException::new);
-        if (user.getRole() != Role.ADMIN && user.getRole() != Role.COORDINATOR) {
-            throw new IllegalArgumentException("MFA TOTP está disponível para Coordenação e TI");
-        }
-        return user;
     }
 
     private List<String> generateRecoveryCodes() {

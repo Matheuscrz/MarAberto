@@ -4,6 +4,7 @@ import { RootLayout } from "@/app/layout/RootLayout";
 import { OperatorLayout } from "@/app/layout/OperatorLayout";
 import { ManagementLayout } from "@/app/layout/ManagementLayout";
 import { AdminLayout } from "@/app/layout/AdminLayout";
+import { ProfileLayout } from "@/app/layout/ProfileLayout";
 import { RequireRole } from "@/features/auth";
 
 const HomePage = lazy(() =>
@@ -23,6 +24,11 @@ const LoginPage = lazy(() =>
 const ChangePasswordPage = lazy(() =>
   import("@/features/auth/pages/ChangePasswordPage").then((m) => ({
     default: m.ChangePasswordPage,
+  })),
+);
+const ProfilePage = lazy(() =>
+  import("@/features/auth/pages/ProfilePage").then((m) => ({
+    default: m.ProfilePage,
   })),
 );
 const BeachesPage = lazy(() =>
@@ -129,6 +135,16 @@ export function AppRoutes() {
         element={
           <RequireRole roles={["LIFEGUARD", "COORDINATOR", "ADMIN"]}>
             {withFallback(<ChangePasswordPage />)}
+          </RequireRole>
+        }
+      />
+
+      {/* Perfil do usuário autenticado: dados, MFA e troca de senha. */}
+      <Route
+        path="perfil"
+        element={
+          <RequireRole roles={["LIFEGUARD", "COORDINATOR", "ADMIN"]}>
+            <ProfileLayout>{withFallback(<ProfilePage />)}</ProfileLayout>
           </RequireRole>
         }
       />

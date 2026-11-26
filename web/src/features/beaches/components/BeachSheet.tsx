@@ -31,13 +31,13 @@ export function BeachSheet({
   useOverlay(true, panelRef, onClose);
 
   return (
-    <div className="pointer-events-auto absolute inset-x-2 bottom-2 z-30 md:inset-x-auto md:bottom-4 md:right-4 md:w-96">
+    <div className="pointer-events-auto absolute inset-x-2 bottom-2 z-40 md:inset-x-auto md:bottom-4 md:right-4 md:w-96">
       <dialog
         ref={panelRef}
         open
         aria-modal="false"
         aria-label={`Ficha da praia ${sanitizeText(beach.name)}`}
-        className="m-0 block max-h-[55%] w-full overflow-y-auto rounded-2xl border border-ocean-900/10 bg-white/95 p-4 text-left shadow-2xl backdrop-blur md:max-h-[70%]"
+        className="relative m-0 block max-h-[55dvh] w-full overflow-y-auto rounded-2xl border border-ocean-900/10 bg-white/95 p-4 text-left shadow-2xl backdrop-blur md:max-h-[70dvh]"
       >
         <div className="flex items-start justify-between gap-2">
           <div>

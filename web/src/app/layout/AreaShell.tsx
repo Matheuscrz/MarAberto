@@ -87,7 +87,12 @@ export function AreaShell({ title, subtitle, nav, flush = false }: AreaShellProp
             </Link>
 
             {user ? (
-              <div className="flex items-center gap-2 rounded-xl border border-ocean-900/10 bg-ocean-50/60 px-2.5 py-1.5">
+              <Link
+                to="/perfil"
+                aria-label={`Abrir perfil de ${user.name}`}
+                title="Abrir meu perfil, senha e MFA"
+                className="flex items-center gap-2 rounded-xl border border-ocean-900/10 bg-ocean-50/60 px-2.5 py-1.5 transition hover:border-ocean-400 hover:bg-ocean-100/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-700"
+              >
                 <span
                   aria-hidden="true"
                   className="grid size-7 place-items-center rounded-full bg-ocean-950 text-[11px] font-black text-white"
@@ -101,7 +106,7 @@ export function AreaShell({ title, subtitle, nav, flush = false }: AreaShellProp
                     {user.badgeNumber ? ` · ${user.badgeNumber}` : ""}
                   </p>
                 </div>
-              </div>
+              </Link>
             ) : null}
 
             <button
