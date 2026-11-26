@@ -24,6 +24,15 @@ export interface MfaConfirmData {
   readonly recoveryCodes: readonly string[];
 }
 
+export interface ActiveDeviceSession {
+  readonly id: string;
+  readonly userAgent: string | null;
+  readonly createdAt: string;
+  readonly lastUsedAt: string;
+  readonly expiresAt: string;
+  readonly current: boolean;
+}
+
 function toSession(response: SessionResponse): AuthSession {
   return {
     user: response.user,
@@ -151,6 +160,32 @@ export async function logoutRequest(): Promise<void> {
 
 export async function meRequest(): Promise<OperatorUser> {
   return apiRequest<OperatorUser>("/api/v1/auth/me", { method: "GET" });
+}
+
+export async function listActiveSessionsRequest(): Promise<
+  readonly ActiveDeviceSession[]
+> {
+  return apiRequest<readonly ActiveDeviceSession[]>(
+    "/api/v1/auth/sessions",
+    { method: "GET" },
+    8000,
+  );
+}
+
+export async function revokeSessionRequest(sessionId: string): Promise<void> {
+  await apiRequestVoid(
+    `/api/v1/auth/sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" },
+    8000,
+  );
+}
+
+export async function revokeOtherSessionsRequest(): Promise<void> {
+  await apiRequestVoid(
+    "/api/v1/auth/sessions/others",
+    { method: "DELETE" },
+    8000,
+  );
 }
 
 /**
