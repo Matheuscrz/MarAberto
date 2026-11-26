@@ -14,6 +14,10 @@ public class SensitiveDataProtector {
 
     public static final String AAD_EMERGENCY_OUTBOX = "maraberto:emergency-outbox:v1";
     public static final String AAD_JPA_FIELD = "maraberto:jpa-field:v1";
+    public static final String AAD_USER_NAME = "maraberto:operational-users:name:v1";
+    public static final String AAD_USER_EMAIL = "maraberto:operational-users:email:v1";
+    public static final String AAD_USER_CPF = "maraberto:operational-users:cpf:v1";
+    public static final String AAD_USER_TOTP_SECRET = "maraberto:operational-users:totp-secret:v1";
     public static final String AAD_OCCURRENCE_SUMMARY = "maraberto:occurrence-summary:v1";
     public static final String AAD_OCCURRENCE_OUTCOME = "maraberto:occurrence-outcome:v1";
     public static final String AAD_OCCURRENCE_VICTIM = "maraberto:occurrence-victim:v1";

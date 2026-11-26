@@ -20,6 +20,16 @@ public class EncryptedStringConverter implements AttributeConverter<String, Stri
 
     private static volatile FieldEncryptor encryptor;
 
+    private final String aad;
+
+    public EncryptedStringConverter() {
+        this(SensitiveDataProtector.AAD_JPA_FIELD);
+    }
+
+    protected EncryptedStringConverter(String aad) {
+        this.aad = (aad == null || aad.isBlank()) ? SensitiveDataProtector.AAD_JPA_FIELD : aad;
+    }
+
     public static void configure(FieldEncryptor fieldEncryptor) {
         encryptor = fieldEncryptor;
     }
@@ -29,7 +39,7 @@ public class EncryptedStringConverter implements AttributeConverter<String, Stri
         if (attribute == null) {
             return null;
         }
-        return requireEncryptor().encrypt(attribute, SensitiveDataProtector.AAD_JPA_FIELD);
+        return requireEncryptor().encrypt(attribute, aad);
     }
 
     @Override
@@ -37,7 +47,16 @@ public class EncryptedStringConverter implements AttributeConverter<String, Stri
         if (dbData == null) {
             return null;
         }
-        return requireEncryptor().decryptOrPlaintext(dbData, SensitiveDataProtector.AAD_JPA_FIELD);
+        FieldEncryptor current = requireEncryptor();
+        try {
+            return current.decryptOrPlaintext(dbData, aad);
+        } catch (IllegalArgumentException exception) {
+            // Compatibilidade retroativa com registros cifrados antes do AAD por coluna.
+            if (!SensitiveDataProtector.AAD_JPA_FIELD.equals(aad)) {
+                return current.decryptOrPlaintext(dbData, SensitiveDataProtector.AAD_JPA_FIELD);
+            }
+            throw exception;
+        }
     }
 
     private static FieldEncryptor requireEncryptor() {
