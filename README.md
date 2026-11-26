@@ -165,7 +165,7 @@ openssl rand -base64 48   # -> JWT_SECRET
 | `ADMIN_BOOTSTRAP_ENABLED` | `true` *(cria `admin` se não houver ADMIN ativo)* | `true` na 1ª subida (pode desligar após trocar a senha) |
 | `ADMIN_BOOTSTRAP_PASSWORD` | `admin` | `admin` ou senha inicial customizada |
 
-> 🔒 **Travas automáticas do perfil `prod`:** com `SPRING_PROFILES_ACTIVE=prod`, o backend **recusa subir** se detectar `CRYPTO_MASTER_KEY` padrão, `JWT_SECRET` padrão, `SECURITY_COOKIE_SECURE=false`, origens HTTP sem TLS, `STORAGE_PROVIDER=stub` ou `IDENTITY_DEV_SEED=true`, e desliga automaticamente o Swagger/OpenAPI.
+> 🔒 **Travas automáticas do perfil `prod`:** em produção, utilize `docker-compose.prod.yml` (`docker compose -f docker-compose.prod.yml up -d --build`), que exige todos os segredos via `.env` sem defaults e ativa `SPRING_PROFILES_ACTIVE=prod`. Com `prod` ativo, o backend **recusa subir** se detectar `CRYPTO_MASTER_KEY` padrão, `JWT_SECRET` padrão, `SECURITY_COOKIE_SECURE=false`, origens HTTP sem TLS, `STORAGE_PROVIDER=stub`, credenciais padrão de PostgreSQL/Garage/RabbitMQ/Admin (`maraberto`, `maraberto-secret-key`, `admin`) ou `*_DEV_SEED=true`, e desliga automaticamente o Swagger/OpenAPI.
 
 ---
 

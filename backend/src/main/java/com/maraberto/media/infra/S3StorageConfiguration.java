@@ -35,6 +35,7 @@ public class S3StorageConfiguration {
 
     /** Credenciais de exemplo do `docker-compose.yml`; proibidas no perfil `prod`. */
     static final String DEV_ACCESS_KEY = "maraberto-access-key";
+    static final String DEV_SECRET_KEY = "maraberto-secret-key";
 
     private final Environment environment;
 
@@ -44,7 +45,8 @@ public class S3StorageConfiguration {
 
     @PostConstruct
     void validateCredentials() {
-        if (DEV_ACCESS_KEY.equals(propertiesAccessKey())) {
+        if (DEV_ACCESS_KEY.equals(propertiesAccessKey())
+                || DEV_SECRET_KEY.equals(propertiesSecretKey())) {
             if (environment.acceptsProfiles(Profiles.of("prod", "production"))) {
                 throw new IllegalStateException(
                         "a credencial de desenvolvimento do Garage não pode ser usada no perfil "
@@ -57,6 +59,10 @@ public class S3StorageConfiguration {
 
     private String propertiesAccessKey() {
         return environment.getProperty("maraberto.storage.s3.access-key");
+    }
+
+    private String propertiesSecretKey() {
+        return environment.getProperty("maraberto.storage.s3.secret-key");
     }
 
     @Bean
