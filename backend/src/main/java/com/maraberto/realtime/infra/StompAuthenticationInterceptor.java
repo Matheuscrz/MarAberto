@@ -73,6 +73,10 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
         AccessTokenClaims claims = tokenVerifier.verify(extractToken(accessor))
                 .orElseThrow(() -> new MessagingException(
                         "Access token ausente ou inválido para a conexão STOMP"));
+        if (claims.mustChangePassword()) {
+            throw new MessagingException(
+                    "Troca de senha obrigatória antes de conectar ao WebSocket");
+        }
 
         accessor.setUser(new UsernamePasswordAuthenticationToken(
                 claims.userId().toString(),
