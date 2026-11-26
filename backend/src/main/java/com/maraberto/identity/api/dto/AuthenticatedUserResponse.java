@@ -25,7 +25,9 @@ public record AuthenticatedUserResponse(
                 example = "false")
         boolean mustChangePassword,
         @Schema(description = "E-mail do próprio operador", example = "operador@maraberto.dev")
-        String email) {
+        String email,
+        @Schema(description = "Indica se o segundo fator (TOTP) está ativo para a conta", example = "false")
+        boolean mfaEnabled) {
 
     public static AuthenticatedUserResponse from(OperationalUser user) {
         return new AuthenticatedUserResponse(
@@ -34,6 +36,7 @@ public record AuthenticatedUserResponse(
                 user.getRole(),
                 user.getBadgeNumber(),
                 user.isMustChangePassword(),
-                user.getEmail());
+                user.getEmail(),
+                user.isTotpEnabled());
     }
 }

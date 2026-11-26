@@ -107,6 +107,9 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 | :----------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
 | [`docs/Requirements.md`](docs/Requirements.md)                                                                           | Visão, personas, requisitos funcionais e não funcionais, regras de negócio, escala e decisões registradas.             |
 | [`docs/Architecture.md`](docs/Architecture.md)                                                                           | Arquitetura, módulos, modelo de dados, fluxos críticos (SOS), cache, segurança, observabilidade, implantação e riscos. |
+| [`backend/ARCHITECTURE.md`](backend/ARCHITECTURE.md)                                                                     | Guia técnico detalhado do backend (Spring Modulith, PostGIS, segurança, Outbox, RabbitMQ, Web Push) para forks estaduais. |
+| [`web/ARCHITECTURE.md`](web/ARCHITECTURE.md)                                                                             | Guia técnico detalhado do frontend (Feature-Based, MapLibre, PWA, Capacitor 8, RNF18) para forks estaduais.            |
+| [`perf/k6/README.md`](perf/k6/README.md)                                                                                 | Suíte de testes de carga k6 para validação de capacidade e rate-limits.                                                |
 | [`docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md`](docs/plan/fatias-10-13-operacao-gestao-admin-ocupacao.md)   | Backlog detalhado das próximas fatias: console de campo, mapa da coordenação, administração de identidade/auditoria e ocupação pública. |
 | [`Contributing.md`](Contributing.md)                                                                                     | Como contribuir, padrões de código e checklist de Pull Request.                                                        |
 | [`Security.md`](Security.md)                                                                                             | Como reportar vulnerabilidades, modelo de sanitização/criptografia e recomendações de implantação.                     |
@@ -121,53 +124,109 @@ O projeto é estruturado como um **Monólito** em **Java 21 com Spring Boot**, d
 
 ---
 
-## 🚀 5. Guia de Execução Rápida
+## 🚀 5. Como Hospedar e Rodar em seu Servidor (Release v1)
+
+O MarAberto foi projetado para ser auto-hospedado por qualquer Corpo de Bombeiros Militar (CBM) ou equipe técnica via **Docker Compose**, sem nenhum dado regional fixo no código.
 
 ### Pré-requisitos
 
-- **Java 21 LTS** ou superior
-- **Node.js 20+**
-- **Docker & Docker Compose**
+- **Docker** e **Docker Compose** (v2+) no servidor
+- *(Apenas para desenvolvimento fora do Docker)*: **Java 21 LTS** e **Node.js 22+** (validado com Node 24)
 
-### 1. Iniciar Infraestrutura de Apoio
+---
 
-Suba os serviços de banco de dados PostGIS, cache Redis e armazenamento de arquivos S3-compatível via Docker Compose:
+### Passo 1 — Clonar e configurar o ambiente (`.env`)
 
 ```bash
-docker compose up -d
+git clone https://github.com/Matheuscrz/MarAberto.git
+cd MarAberto
+cp .env.example .env
 ```
 
-O Compose também pode construir e subir o backend e o frontend localmente:
+Para **ambientes de homologação/produção**, gere chaves criptográficas exclusivas e substitua no `.env` (nunca use os valores de exemplo em produção):
+
+```bash
+# Chave mestra AES-256-GCM (32 bytes em base64)
+openssl rand -base64 32   # -> CRYPTO_MASTER_KEY
+
+# Segredo de assinatura JWT HS256 (mínimo 32 bytes)
+openssl rand -base64 48   # -> JWT_SECRET
+```
+
+| Variável | QA / Avaliação local (HTTP) | Produção (HTTPS) |
+| :--- | :--- | :--- |
+| `SPRING_PROFILES_ACTIVE` | *(vazio / padrão)* | `prod` *(ou `prod,rabbit` com RabbitMQ)* |
+| `CRYPTO_MASTER_KEY` | Valor do `.env.example` | **Obrigatório gerar** (`openssl rand -base64 32`) |
+| `JWT_SECRET` | Valor do `.env.example` | **Obrigatório gerar** (`openssl rand -base64 48`) |
+| `POSTGRES_PASSWORD` / `GARAGE_SECRET_KEY` / `RABBITMQ_PASSWORD` | Valor do `.env.example` | **Trocar por senhas fortes** |
+| `SECURITY_COOKIE_SECURE` | `false` *(funciona em HTTP/LAN)* | `true` *(exigido pelo perfil `prod`)* |
+| `SECURITY_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | `https://seu-dominio.gov.br,https://localhost,capacitor://localhost` |
+| `REALTIME_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | `https://seu-dominio.gov.br` |
+| `ADMIN_BOOTSTRAP_ENABLED` | `true` *(cria `admin` se não houver ADMIN ativo)* | `true` na 1ª subida (pode desligar após trocar a senha) |
+| `ADMIN_BOOTSTRAP_PASSWORD` | `admin` | `admin` ou senha inicial customizada |
+
+> 🔒 **Travas automáticas do perfil `prod`:** com `SPRING_PROFILES_ACTIVE=prod`, o backend **recusa subir** se detectar `CRYPTO_MASTER_KEY` padrão, `JWT_SECRET` padrão, `SECURITY_COOKIE_SECURE=false`, origens HTTP sem TLS, `STORAGE_PROVIDER=stub` ou `IDENTITY_DEV_SEED=true`, e desliga automaticamente o Swagger/OpenAPI.
+
+---
+
+### Passo 2 — Subir toda a stack com Docker Compose
 
 ```bash
 docker compose up -d --build
 ```
 
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8080
-- Swagger: http://localhost:8080/swagger-ui/index.html
+Aguarde os healthchecks ficarem saudáveis (`docker compose ps`):
 
-Para parar os serviços sem remover os dados persistidos:
+- **Aplicação Web / PWA (Nginx não-root):** `http://localhost:3000` (ou `http://<IP-DO-SERVIDOR>:3000`)
+- **API Backend:** `http://localhost:8080` (exposta pelo proxy do Nginx em `/api` e `/ws`)
+- **Healthcheck:** `http://localhost:8080/actuator/health`
+- **Swagger/OpenAPI (apenas fora de `prod`):** `http://localhost:8080/swagger-ui/index.html`
+
+Para parar os containers preservando o banco e as mídias:
 
 ```bash
 docker compose down
 ```
 
-| Serviço                  | Porta do Host    | Credenciais / Notas                   |
+---
+
+### Passo 3 — Primeiro Acesso e Configuração Inicial
+
+Na primeira subida com banco vazio, o `AdminBootstrapRunner` cria automaticamente a conta inicial de administração:
+
+- **URL de login:** `http://localhost:3000/login`
+- **Usuário:** `admin` *(ou `admin@maraberto.local`)*
+- **Senha inicial:** `admin` *(ou o valor definido em `ADMIN_BOOTSTRAP_PASSWORD`)*
+
+**O que acontece no primeiro login:**
+1. O sistema redireciona obrigatoriamente para `/trocar-senha` e bloqueia todas as demais rotas (`403`) até que você defina uma **senha definitiva** (mínimo 12 caracteres, com maiúsculas, minúsculas e números).
+2. Após definir a senha definitiva, entre novamente em `/login` com `admin` e a nova senha.
+3. **(Opcional) Ative o MFA (TOTP):** em `/admin/usuarios`, administradores e coordenadores podem opcionalmente ativar o segundo fator (Google Authenticator / FreeOTP) e salvar os 8 códigos de recuperação de uso único.
+4. **Cadastre a equipe:** em `/admin/usuarios`, crie as contas de `COORDINATOR` (Coordenação) e `LIFEGUARD` (Guarda-vidas). O sistema gera uma senha temporária exibida **uma única vez**, com troca obrigatória no primeiro acesso de cada usuário.
+5. **Importe o mapa do seu estado:** com uma conta `COORDINATOR` (ou `ADMIN`), acesse `/gestao/importar` e envie o arquivo `.kml` exportado do QGIS com as áreas de banho e setores. O sistema faz *dry-run* com prévia antes de aplicar.
+6. **Configure a aba Aprender (opcional):** em `/gestao/aprender`, cadastre os vídeos educativos do YouTube e materiais de divulgação exibidos em `/aprender`.
+
+---
+
+### Serviços da Stack Docker Compose
+
+| Serviço                  | Porta do Host    | Credenciais Padrão (Local) / Notas    |
 | :----------------------- | :--------------- | :------------------------------------ |
+| **Web (Nginx unprivileged)** | `3000`       | Proxy `/api` e `/ws`, CSP, `limit_req`, HSTS sob HTTPS |
+| **Backend (Spring Boot)** | `8080`          | Java 21 + Virtual Threads + PostGIS   |
 | **PostgreSQL + PostGIS** | `5432`           | user: `maraberto` / pass: `maraberto` |
-| **Redis**                | `6379`           | Cache de dados e rate limiting        |
+| **Redis**                | `6379`           | Cache, rate limit e blacklist JWT     |
 | **Garage S3 API**        | `9000`           | S3-compatível; bucket `media-public`  |
 | **Garage Admin**         | `9001`           | API administrativa                    |
-| **RabbitMQ**             | `5672` / `15672` | AMQP / console de gestão              |
+| **RabbitMQ**             | `5672` / `15672` | Opcional (perfil `rabbit`, DLQ/retry) |
 
-> 🔒 **Estas credenciais são exclusivamente para desenvolvimento local.** Nunca as utilize em produção. Veja as recomendações de implantação em [`Security.md`](Security.md).
->
 > ℹ️ O armazenamento usa **Garage** no lugar do MinIO (ADR-006), porque a imagem CE do MinIO deixou de ser pública. A configuração fica em `deploy/garage/garage.toml`.
 >
-> 🗺️ O backend fala com o Garage por padrão (`STORAGE_PROVIDER=s3`): o KML **aplicado** na importação do mapa é arquivado em `media-public/bathing-areas/<UF>/<sha256>.kml` e a chave fica em `import_batches.source_storage_key`. Sem o Garage no ar a importação continua valendo — só o arquivo de auditoria fica de fora.
+> 🗺️ O backend fala com o Garage por padrão (`STORAGE_PROVIDER=s3`): fotos de sinalizações/postos e o KML aplicado na importação são armazenados em `media-public`.
 
-### 2. Rodar o Backend Spring Boot
+### Desenvolvimento Local (fora do Docker)
+
+#### Rodar o Backend Spring Boot
 
 ```bash
 cd backend

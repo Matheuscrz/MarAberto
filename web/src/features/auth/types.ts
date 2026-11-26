@@ -25,7 +25,17 @@ export interface OperatorUser {
    * direto para `/trocar-senha`.
    */
   readonly mustChangePassword: boolean;
+  /** Indica se a autenticação em dois fatores (TOTP) está ativa para esta conta. */
+  readonly mfaEnabled?: boolean;
 }
+
+export type LoginOutcome =
+  | { readonly kind: "authenticated"; readonly session: AuthSession }
+  | {
+      readonly kind: "mfa_required";
+      readonly challengeToken: string;
+      readonly user: OperatorUser;
+    };
 
 /**
  * Sessão em memória. O access token **nunca** é persistido (nem em

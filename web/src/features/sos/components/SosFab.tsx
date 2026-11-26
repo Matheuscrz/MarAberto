@@ -6,7 +6,7 @@ import { useOverlay } from "@/shared/lib/overlay";
 
 export function SosFab() {
   const [confirming, setConfirming] = useState(false);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDialogElement | null>(null);
   const close = () => setConfirming(false);
 
   useOverlay(confirming, panelRef, close);
@@ -30,12 +30,12 @@ export function SosFab() {
             onClick={close}
             className="absolute inset-0 cursor-default bg-ocean-950/50"
           />
-          <div
+          <dialog
             ref={panelRef}
-            role="dialog"
+            open
             aria-modal="true"
             aria-labelledby="sos-confirm-title"
-            className="relative w-full max-w-sm rounded-2xl border border-ocean-900/10 bg-white p-5 shadow-2xl outline-none"
+            className="relative m-0 w-full max-w-sm rounded-2xl border border-ocean-900/10 bg-white p-5 text-left shadow-2xl outline-none"
           >
             <button
               type="button"
@@ -88,7 +88,7 @@ export function SosFab() {
                 Ligar 193 agora
               </a>
             </div>
-          </div>
+          </dialog>
         </div>
       ) : null}
     </>

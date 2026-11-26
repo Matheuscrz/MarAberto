@@ -8,14 +8,30 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * <p>O access token fica só em memória no cliente; o refresh opaco vai no cookie
  * {@code __Secure-maraberto_rt} e nunca aparece no corpo.
  */
-@Schema(name = "AuthResponse", description = "Sessão emitida: access token em memória + operador")
+@Schema(name = "AuthResponse", description = "Sessão emitida: access token em memória + operador (ou desafio MFA)")
 public record AuthResponse(
-        @Schema(description = "JWT de acesso, válido por `expiresIn` segundos")
+        @Schema(description = "JWT de acesso, válido por `expiresIn` segundos (nulo quando `mfaRequired=true`)")
         String accessToken,
         @Schema(description = "Esquema do token", example = "Bearer")
         String tokenType,
         @Schema(description = "Validade do access token em segundos", example = "900")
         long expiresIn,
         @Schema(description = "Operador autenticado")
-        AuthenticatedUserResponse user) {
+        AuthenticatedUserResponse user,
+        @Schema(description = "Quando true, conclua o login em POST /api/v1/auth/mfa/verify com mfaChallengeToken")
+        boolean mfaRequired,
+        @Schema(description = "Token curto de desafio MFA, presente apenas quando mfaRequired=true")
+        String mfaChallengeToken) {
+
+    public AuthResponse(
+            String accessToken,
+            String tokenType,
+            long expiresIn,
+            AuthenticatedUserResponse user) {
+        this(accessToken, tokenType, expiresIn, user, false, null);
+    }
+
+    public static AuthResponse mfaChallenge(String challengeToken, AuthenticatedUserResponse user) {
+        return new AuthResponse(null, "Bearer", 0L, user, true, challengeToken);
+    }
 }

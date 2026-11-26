@@ -15,7 +15,7 @@ import {
   User,
 } from "lucide-react";
 import { ApiError } from "@/shared/lib/api-client";
-import { loginRequest } from "@/features/auth/api";
+import { loginRequest, verifyMfaRequest } from "@/features/auth/api";
 import {
   DEMO_ACCOUNTS,
   DEMO_AUTH_ENABLED,
@@ -34,6 +34,16 @@ import type { AuthSession } from "@/features/auth/types";
  * guarda-vidas → `/operador`, coordenação → `/gestao`, TI → `/admin`.
  * `next` só aceita caminho interno (evita redirecionamento aberto).
  */
+function resolveTarget(
+  user: AuthSession["user"],
+  next: string | null,
+): string {
+  if (user.mustChangePassword) {
+    return "/trocar-senha";
+  }
+  return isInternalPath(next) ? next : homePathForRole(user.role);
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -44,6 +54,10 @@ export function LoginPage() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(
+    null,
+  );
+  const [mfaCode, setMfaCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -52,28 +66,35 @@ export function LoginPage() {
 
   // Já autenticado: não faz sentido mostrar o formulário de novo.
   if (status === "authenticated" && user) {
-    return (
-      <Navigate
-        to={
-          user.mustChangePassword
-            ? "/trocar-senha"
-            : isInternalPath(next)
-              ? next
-              : homePathForRole(user.role)
-        }
-        replace
-      />
-    );
+    return <Navigate to={resolveTarget(user, next)} replace />;
   }
 
   const finishLogin = (session: AuthSession) => {
     setSession(session);
-    const target = session.user.mustChangePassword
-      ? "/trocar-senha"
-      : isInternalPath(next)
-        ? next
-        : homePathForRole(session.user.role);
-    navigate(target, { replace: true });
+    navigate(resolveTarget(session.user, next), { replace: true });
+  };
+
+  const authenticate = async () => {
+    if (mfaChallengeToken) {
+      finishLogin(
+        await verifyMfaRequest({
+          challengeToken: mfaChallengeToken,
+          code: mfaCode.trim(),
+        }),
+      );
+      return;
+    }
+    if (DEMO_AUTH_ENABLED) {
+      finishLogin(demoLogin({ identifier, password }));
+      return;
+    }
+    const outcome = await loginRequest({ identifier, password });
+    if (outcome.kind === "mfa_required") {
+      setMfaChallengeToken(outcome.challengeToken);
+      setMfaCode("");
+      return;
+    }
+    finishLogin(outcome.session);
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -84,11 +105,7 @@ export function LoginPage() {
     setSubmitting(true);
 
     try {
-      if (DEMO_AUTH_ENABLED) {
-        finishLogin(demoLogin({ identifier, password }));
-        return;
-      }
-      finishLogin(await loginRequest({ identifier, password }));
+      await authenticate();
     } catch (cause) {
       setError(loginErrorMessage(cause));
     } finally {
@@ -148,72 +165,26 @@ export function LoginPage() {
                 </output>
               ) : null}
 
-              <div>
-                <label
-                  htmlFor="login-identifier"
-                  className="block text-xs font-bold text-ocean-950"
-                >
-                  Matrícula, e-mail ou usuário
-                </label>
-                <div className="relative mt-1">
-                  <User
-                    aria-hidden="true"
-                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ocean-400"
-                  />
-                  <input
-                    id="login-identifier"
-                    type="text"
-                    required
-                    autoComplete="username"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    maxLength={120}
-                    value={identifier}
-                    onChange={(event) => setIdentifier(event.target.value)}
-                    placeholder="Ex.: operador@maraberto.dev"
-                    className="h-10 w-full rounded-xl border border-ocean-200 bg-white pl-9 pr-3 text-sm text-ocean-950 focus:border-ocean-600 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="login-password"
-                  className="block text-xs font-bold text-ocean-950"
-                >
-                  Senha
-                </label>
-                <div className="relative mt-1">
-                  <Lock
-                    aria-hidden="true"
-                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ocean-400"
-                  />
-                  <input
-                    id="login-password"
-                    type={showPassword ? "text" : "password"}
-                    required
-                    autoComplete="current-password"
-                    maxLength={200}
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="••••••••"
-                    className="h-10 w-full rounded-xl border border-ocean-200 bg-white pl-9 pr-10 text-sm text-ocean-950 focus:border-ocean-600 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((value) => !value)}
-                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-                    aria-pressed={showPassword}
-                    className="absolute right-1.5 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-ocean-500 hover:bg-ocean-50 hover:text-ocean-800"
-                  >
-                    {showPassword ? (
-                      <EyeOff aria-hidden="true" className="size-4" />
-                    ) : (
-                      <Eye aria-hidden="true" className="size-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
+              {mfaChallengeToken ? (
+                <MfaChallengeFields
+                  code={mfaCode}
+                  onChange={setMfaCode}
+                  onBack={() => {
+                    setMfaChallengeToken(null);
+                    setMfaCode("");
+                    setError(null);
+                  }}
+                />
+              ) : (
+                <CredentialsFields
+                  identifier={identifier}
+                  password={password}
+                  showPassword={showPassword}
+                  onIdentifierChange={setIdentifier}
+                  onPasswordChange={setPassword}
+                  onToggleShowPassword={() => setShowPassword((value) => !value)}
+                />
+              )}
 
               <button
                 type="submit"
@@ -269,6 +240,133 @@ export function LoginPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+function MfaChallengeFields({
+  code,
+  onChange,
+  onBack,
+}: {
+  readonly code: string;
+  readonly onChange: (value: string) => void;
+  readonly onBack: () => void;
+}) {
+  return (
+    <div>
+      <label
+        htmlFor="login-mfa-code"
+        className="block text-xs font-bold text-ocean-950"
+      >
+        Código do autenticador (6 dígitos) ou código de recuperação
+      </label>
+      <input
+        id="login-mfa-code"
+        type="text"
+        required
+        autoComplete="one-time-code"
+        inputMode="text"
+        maxLength={32}
+        value={code}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Ex.: 123456 ou ABCD-EFGH"
+        className="mt-1 h-10 w-full rounded-xl border border-ocean-200 bg-white px-3 font-mono text-sm tracking-wider text-ocean-950 focus:border-ocean-600 focus:outline-none"
+      />
+      <button
+        type="button"
+        onClick={onBack}
+        className="mt-2 text-xs font-semibold text-ocean-700 underline hover:text-ocean-950"
+      >
+        Voltar para usuário e senha
+      </button>
+    </div>
+  );
+}
+
+function CredentialsFields({
+  identifier,
+  password,
+  showPassword,
+  onIdentifierChange,
+  onPasswordChange,
+  onToggleShowPassword,
+}: {
+  readonly identifier: string;
+  readonly password: string;
+  readonly showPassword: boolean;
+  readonly onIdentifierChange: (value: string) => void;
+  readonly onPasswordChange: (value: string) => void;
+  readonly onToggleShowPassword: () => void;
+}) {
+  return (
+    <>
+      <div>
+        <label
+          htmlFor="login-identifier"
+          className="block text-xs font-bold text-ocean-950"
+        >
+          Matrícula, e-mail ou usuário
+        </label>
+        <div className="relative mt-1">
+          <User
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ocean-400"
+          />
+          <input
+            id="login-identifier"
+            type="text"
+            required
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            maxLength={120}
+            value={identifier}
+            onChange={(event) => onIdentifierChange(event.target.value)}
+            placeholder="Ex.: admin, matrícula ou e-mail"
+            className="h-10 w-full rounded-xl border border-ocean-200 bg-white pl-9 pr-3 text-sm text-ocean-950 focus:border-ocean-600 focus:outline-none"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label
+          htmlFor="login-password"
+          className="block text-xs font-bold text-ocean-950"
+        >
+          Senha
+        </label>
+        <div className="relative mt-1">
+          <Lock
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ocean-400"
+          />
+          <input
+            id="login-password"
+            type={showPassword ? "text" : "password"}
+            required
+            autoComplete="current-password"
+            maxLength={200}
+            value={password}
+            onChange={(event) => onPasswordChange(event.target.value)}
+            placeholder="••••••••"
+            className="h-10 w-full rounded-xl border border-ocean-200 bg-white pl-9 pr-10 text-sm text-ocean-950 focus:border-ocean-600 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={onToggleShowPassword}
+            aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+            aria-pressed={showPassword}
+            className="absolute right-1.5 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-ocean-500 hover:bg-ocean-50 hover:text-ocean-800"
+          >
+            {showPassword ? (
+              <EyeOff aria-hidden="true" className="size-4" />
+            ) : (
+              <Eye aria-hidden="true" className="size-4" />
+            )}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 

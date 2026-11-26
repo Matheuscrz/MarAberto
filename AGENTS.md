@@ -11,7 +11,7 @@
 
 ## Stack e Arquitetura
 
-- **Backend (`backend/`)**: Java 21, Spring Boot 3.3.4, **Spring Modulith 1.2.13** (ADR-011), Virtual Threads, Gradle, PostgreSQL 16 + PostGIS, Flyway (`ddl-auto: validate`, **próxima migration: `V26`**), Redis (opcional no boot, nunca fonte da verdade), RabbitMQ (opcional), S3 (Garage).
+- **Backend (`backend/`)**: Java 21, Spring Boot 3.3.4, **Spring Modulith 1.2.13** (ADR-011), Virtual Threads, Gradle, PostgreSQL 16 + PostGIS, Flyway (`ddl-auto: validate`, **próxima migration: `V29`**), Redis (opcional no boot, nunca fonte da verdade), RabbitMQ (opcional), S3 (Garage).
   - **Módulos (`com.maraberto.*`)**: `identity`, `region`, `beaches`, `operations`, `emergency`, `occurrences`, `safety`, `tides` (inativo), `content`, `occupancy`, `media`, `realtime`, `audit`, `analytics`, `shared`.
   - **Fronteira estrita**: Módulos importam apenas pacotes `api/` públicos de outros módulos (`ModularityTests`).
 - **Frontend (`web/`)**: Vite 8, React 19, TypeScript 6, Tailwind 4, MapLibre GL + PMTiles, STOMP/WebSocket.
@@ -47,14 +47,14 @@
 - **Frontend/MapLibre**: Nunca aplicar `transform`, `scale` ou `transition` no elemento raiz do marcador MapLibre (usar elemento filho). Overlays acessíveis via `useOverlay` (`<dialog open>`, `<output>`).
 - **Git & Qualidade**: Commits em **pt-BR** (Conventional Commits); classes em inglês; **nunca commitar sem aval explícito**. Manter `./gradlew clean check`, `npm run lint` e `npm run build` verdes e zero issues críticas no SonarQube.
 
-## Backlog Ativo (Fatias 12–15)
+## Backlog Ativo (Release v1 Concluída)
 
 | Fatia  | Escopo                                                                                                                                               | Migrations               |
 | :----- | :--------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------- |
-| **12** | ✅ Atualização dinâmica de bandeiras/postos no mapa público (entregue em 2026-11-25, sem migration). Pendente: módulo `content` (CMS Aprender na gestão + tela `/aprender`) | `V27` |
-| **13** | ✅ Usuários reais (senha temporária obrigatória) e trilha de auditoria consultável (ADR-027) — entregues em 2026-11-24 (`V24`, `V25`). Pendente: blacklist JWT Redis e MFA (TOTP) | `V26`                    |
-| **14** | Coleta anônima de amostras de ocupação no mapa público                                                                                               | —                        |
-| **15** | Revisão de dual write/idempotência, otimizações SQL, virtual threads, testes k6, SonarQube e docs (`backend/ARCHITECTURE.md`, `web/ARCHITECTURE.md`) | —                        |
+| **12** | ✅ Atualização dinâmica de bandeiras/postos no mapa público + módulo `content` (CMS Aprender na gestão + tela `/aprender`)                           | `V26`                    |
+| **13** | ✅ Usuários reais (senha temporária obrigatória), trilha de auditoria (ADR-027), bootstrap `admin`/`admin`, blacklist JWT + revalidação de `active`, AAD por coluna e MFA TOTP opcional | `V24`, `V25`, `V28`      |
+| **14** | ✅ Coleta anônima de amostras de ocupação no mapa público + perfil RabbitMQ e Web Push (VAPID/FCM)                                                   | `V27`                    |
+| **15** | ✅ Containers endurecidos (`nginx-unprivileged`, `HEALTHCHECK`, `limit_req`, HSTS), CI frontend, RNF18, ADR-030 (JWT HS256), testes k6 (`perf/k6/`) e docs (`backend/ARCHITECTURE.md`, `web/ARCHITECTURE.md`) | — |
 
 ## Onde Consultar Detalhes
 

@@ -646,11 +646,19 @@ public class OccurrenceRepository {
     }
 
     /**
-     * O nome do operador é cifrado pelo converter JPA; a leitura por SQL direto
-     * precisa decifrar com o mesmo AAD.
+     * O nome do operador é cifrado pelo converter JPA com AAD específico de
+     * coluna; a leitura por SQL direto usa o mesmo AAD, com fallback para o AAD
+     * legado em registros anteriores à migração por coluna.
      */
     private String decryptName(String value) {
-        return decrypt(value, SensitiveDataProtector.AAD_JPA_FIELD);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return protector.decryptOrPlaintext(value, SensitiveDataProtector.AAD_USER_NAME);
+        } catch (IllegalArgumentException exception) {
+            return protector.decryptOrPlaintext(value, SensitiveDataProtector.AAD_JPA_FIELD);
+        }
     }
 
     private String json(Map<String, Object> detail) {

@@ -14,6 +14,7 @@ import com.maraberto.identity.domain.Role;
 import com.maraberto.identity.domain.SelfAdminProtectionException;
 import com.maraberto.identity.domain.UserNotFoundException;
 import com.maraberto.identity.infra.OperationalUserRepository;
+import com.maraberto.identity.infra.security.TokenRevocationService;
 import com.maraberto.shared.security.CpfValidator;
 import com.maraberto.shared.security.crypto.BlindIndexer;
 import jakarta.persistence.criteria.Predicate;
@@ -55,6 +56,7 @@ public class AdminUserService {
     private final OperationalUserRepository users;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
+    private final TokenRevocationService tokenRevocationService;
     private final TemporaryPasswordGenerator temporaryPasswordGenerator;
     private final BlindIndexer blindIndexer;
     private final AuditTrail auditTrail;
@@ -65,6 +67,7 @@ public class AdminUserService {
             OperationalUserRepository users,
             PasswordEncoder passwordEncoder,
             RefreshTokenService refreshTokenService,
+            TokenRevocationService tokenRevocationService,
             TemporaryPasswordGenerator temporaryPasswordGenerator,
             BlindIndexer blindIndexer,
             AuditTrail auditTrail,
@@ -74,6 +77,7 @@ public class AdminUserService {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
+        this.tokenRevocationService = tokenRevocationService;
         this.temporaryPasswordGenerator = temporaryPasswordGenerator;
         this.blindIndexer = blindIndexer;
         this.auditTrail = auditTrail;
@@ -189,6 +193,7 @@ public class AdminUserService {
             Role previous = user.getRole();
             user.changeRole(request.role());
             refreshTokenService.revokeAllForUser(userId);
+            tokenRevocationService.revokeAllForUser(userId, Instant.now());
             auditTrail.record(AuditEvent.of(
                             actorId, AuditActions.USER_ROLE_CHANGED, "USER", userId,
                             Map.of("from", previous.name(), "to", request.role().name()))
@@ -202,6 +207,7 @@ public class AdminUserService {
             } else {
                 user.deactivate();
                 refreshTokenService.revokeAllForUser(userId);
+                tokenRevocationService.revokeAllForUser(userId, Instant.now());
             }
             auditTrail.record(AuditEvent.of(
                             actorId,
@@ -236,6 +242,7 @@ public class AdminUserService {
         user.assignTemporaryPassword(passwordEncoder.encode(temporaryPassword), expiresAt, now);
         users.save(user);
         refreshTokenService.revokeAllForUser(userId);
+        tokenRevocationService.revokeAllForUser(userId, now);
 
         auditTrail.record(AuditEvent.of(
                         actorId, AuditActions.USER_PASSWORD_RESET, "USER", userId,

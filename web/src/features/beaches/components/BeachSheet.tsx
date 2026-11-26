@@ -25,19 +25,19 @@ export function BeachSheet({
   currentSectorLabel?: string | null;
   onClose: () => void;
 }) {
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDialogElement | null>(null);
 
   // Foco inicial, Escape/Tab e retorno de foco quando a ficha fecha.
   useOverlay(true, panelRef, onClose);
 
   return (
     <div className="pointer-events-auto absolute inset-x-2 bottom-2 z-30 md:inset-x-auto md:bottom-4 md:right-4 md:w-96">
-      <div
+      <dialog
         ref={panelRef}
-        role="dialog"
+        open
         aria-modal="false"
         aria-label={`Ficha da praia ${sanitizeText(beach.name)}`}
-        className="max-h-[55%] overflow-y-auto rounded-2xl border border-ocean-900/10 bg-white/95 p-4 shadow-2xl backdrop-blur md:max-h-[70%]"
+        className="m-0 block max-h-[55%] w-full overflow-y-auto rounded-2xl border border-ocean-900/10 bg-white/95 p-4 text-left shadow-2xl backdrop-blur md:max-h-[70%]"
       >
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -100,7 +100,7 @@ export function BeachSheet({
         >
           Ver detalhes completos
         </Link>
-      </div>
+      </dialog>
     </div>
   );
 }

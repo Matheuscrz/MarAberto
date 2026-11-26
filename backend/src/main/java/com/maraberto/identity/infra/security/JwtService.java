@@ -30,6 +30,8 @@ public class JwtService {
     static final String DEV_SECRET = "dev-only-maraberto-jwt-secret-32bytes!!";
 
     private static final int MIN_SECRET_BYTES = 32;
+    private static final Duration MFA_CHALLENGE_TTL = Duration.ofMinutes(5);
+    static final String PURPOSE_MFA_CHALLENGE = "mfa_challenge";
 
     private final SecretKey key;
     private final String issuer;
@@ -77,6 +79,27 @@ public class JwtService {
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+    }
+
+    public String generateMfaChallengeToken(UUID userId) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .issuer(issuer)
+                .subject(userId.toString())
+                .claim("purpose", PURPOSE_MFA_CHALLENGE)
+                .id(UUID.randomUUID().toString())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plus(MFA_CHALLENGE_TTL)))
+                .signWith(key, Jwts.SIG.HS256)
+                .compact();
+    }
+
+    public UUID validateMfaChallengeToken(String token) {
+        Claims claims = validateAndExtractClaims(token);
+        if (!PURPOSE_MFA_CHALLENGE.equals(claims.get("purpose", String.class))) {
+            throw new IllegalArgumentException("Token não é um desafio MFA válido");
+        }
+        return UUID.fromString(claims.getSubject());
     }
 
     public Duration accessTokenTtl() {

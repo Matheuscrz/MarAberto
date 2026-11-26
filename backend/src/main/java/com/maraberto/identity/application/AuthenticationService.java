@@ -16,9 +16,13 @@ import com.maraberto.identity.domain.TemporaryPasswordExpiredException;
 import com.maraberto.identity.infra.OperationalUserRepository;
 import com.maraberto.identity.infra.security.JwtService;
 import com.maraberto.identity.infra.security.LoginProtectionProperties;
+import com.maraberto.identity.infra.security.TokenRevocationService;
 import com.maraberto.shared.security.CpfValidator;
 import com.maraberto.shared.security.crypto.BlindIndexer;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import java.time.Instant;
+import java.util.Date;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -46,6 +50,8 @@ public class AuthenticationService {
     private final LoginIpRateLimiter ipRateLimiter;
     private final PasswordPolicy passwordPolicy;
     private final AuditTrail auditTrail;
+    private final TokenRevocationService tokenRevocationService;
+    private final MfaService mfaService;
 
     /**
      * Hash descartável usado para gastar o mesmo tempo de Argon2 quando o
@@ -62,7 +68,9 @@ public class AuthenticationService {
             LoginProtectionProperties loginProtection,
             LoginIpRateLimiter ipRateLimiter,
             PasswordPolicy passwordPolicy,
-            AuditTrail auditTrail) {
+            AuditTrail auditTrail,
+            TokenRevocationService tokenRevocationService,
+            MfaService mfaService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
@@ -72,6 +80,8 @@ public class AuthenticationService {
         this.ipRateLimiter = ipRateLimiter;
         this.passwordPolicy = passwordPolicy;
         this.auditTrail = auditTrail;
+        this.tokenRevocationService = tokenRevocationService;
+        this.mfaService = mfaService;
         this.dummyPasswordHash = passwordEncoder.encode(UUID.randomUUID().toString());
     }
 
@@ -122,6 +132,38 @@ public class AuthenticationService {
     public LoginResult login(LoginCommand cmd, RequestMetadata metadata) {
         ipRateLimiter.check(metadata.ipAddress());
         OperationalUser user = authenticate(cmd);
+        if (user.isTotpEnabled()) {
+            String challenge = jwtService.generateMfaChallengeToken(user.getId());
+            return new LoginResult(
+                    AuthResponse.mfaChallenge(challenge, AuthenticatedUserResponse.from(user)),
+                    null,
+                    null);
+        }
+        RefreshTokenService.IssuedRefreshToken refresh =
+                refreshTokenService.issueForNewLogin(user, metadata);
+        return new LoginResult(
+                response(user), refresh.token(), refresh.expiresAt());
+    }
+
+    /**
+     * Conclui o login 2FA após validação do código TOTP ou código de recuperação.
+     */
+    public LoginResult verifyMfa(String challengeToken, String code, RequestMetadata metadata) {
+        ipRateLimiter.check(metadata.ipAddress());
+        UUID userId;
+        try {
+            userId = jwtService.validateMfaChallengeToken(challengeToken);
+        } catch (JwtException | IllegalArgumentException exception) {
+            throw new InvalidCredentialsException();
+        }
+        OperationalUser user = userRepository.findById(userId)
+                .orElseThrow(InvalidCredentialsException::new);
+        if (!user.isActive()) {
+            throw new AccountInactiveException();
+        }
+        if (!mfaService.verifyChallengeCode(user, code)) {
+            throw new InvalidCredentialsException();
+        }
         RefreshTokenService.IssuedRefreshToken refresh =
                 refreshTokenService.issueForNewLogin(user, metadata);
         return new LoginResult(
@@ -144,8 +186,18 @@ public class AuthenticationService {
     }
 
     @Transactional
-    public void logout(String rawRefreshToken) {
+    public void logout(String rawRefreshToken, String bearerToken) {
         refreshTokenService.revokeFamily(rawRefreshToken);
+        if (bearerToken != null && !bearerToken.isBlank()) {
+            try {
+                Claims claims = jwtService.validateAndExtractClaims(bearerToken.trim());
+                Date exp = claims.getExpiration();
+                tokenRevocationService.revokeToken(
+                        claims.getId(), exp == null ? null : exp.toInstant());
+            } catch (JwtException | IllegalArgumentException ignored) {
+                // Token já expirado ou inválido não precisa entrar na blacklist.
+            }
+        }
     }
 
     @Transactional(readOnly = true)
@@ -169,6 +221,16 @@ public class AuthenticationService {
             String currentPassword,
             String newPassword,
             RequestMetadata metadata) {
+        changePassword(userId, currentPassword, newPassword, metadata, null);
+    }
+
+    @Transactional
+    public void changePassword(
+            UUID userId,
+            String currentPassword,
+            String newPassword,
+            RequestMetadata metadata,
+            String bearerToken) {
         OperationalUser user = userRepository.findById(userId)
                 .filter(OperationalUser::isActive)
                 .orElseThrow(InvalidRefreshTokenException::new);
@@ -185,10 +247,26 @@ public class AuthenticationService {
         user.definePassword(passwordEncoder.encode(newPassword), now);
         userRepository.saveAndFlush(user);
         refreshTokenService.revokeAllForUser(userId);
+        tokenRevocationService.revokeAllForUser(userId, now);
+        revokeBearerIfPresent(bearerToken);
 
         auditTrail.record(AuditEvent.of(
                         userId, AuditActions.PASSWORD_CHANGED, "USER", userId, Map.of())
                 .withIpAddress(metadata == null ? null : metadata.ipAddress()));
+    }
+
+    private void revokeBearerIfPresent(String bearerToken) {
+        if (bearerToken == null || bearerToken.isBlank()) {
+            return;
+        }
+        try {
+            Claims claims = jwtService.validateAndExtractClaims(bearerToken.trim());
+            Date exp = claims.getExpiration();
+            tokenRevocationService.revokeToken(
+                    claims.getId(), exp == null ? null : exp.toInstant());
+        } catch (JwtException | IllegalArgumentException ignored) {
+            // Token já expirado ou inválido não precisa entrar na blacklist.
+        }
     }
 
     private OperationalUser authenticate(LoginCommand cmd) {

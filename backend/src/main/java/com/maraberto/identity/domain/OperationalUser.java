@@ -1,7 +1,6 @@
 package com.maraberto.identity.domain;
 
 import com.maraberto.shared.security.CpfValidator;
-import com.maraberto.shared.security.crypto.EncryptedStringConverter;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -34,7 +33,7 @@ public class OperationalUser {
     @Id
     private UUID id;
 
-    @Convert(converter = EncryptedStringConverter.class)
+    @Convert(converter = OperationalUserFieldConverters.NameConverter.class)
     @Column(nullable = false, length = 512)
     private String name;
 
@@ -42,14 +41,14 @@ public class OperationalUser {
     @Column(name = "badge_number", length = 32)
     private String badgeNumber;
 
-    @Convert(converter = EncryptedStringConverter.class)
+    @Convert(converter = OperationalUserFieldConverters.EmailConverter.class)
     @Column(nullable = false, length = 512)
     private String email;
 
     @Column(name = "email_bidx", nullable = false, length = 64, unique = true)
     private String emailBidx;
 
-    @Convert(converter = EncryptedStringConverter.class)
+    @Convert(converter = OperationalUserFieldConverters.CpfConverter.class)
     @Column(nullable = false, length = 512)
     private String cpf;
 
@@ -58,6 +57,16 @@ public class OperationalUser {
 
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
+
+    @Convert(converter = OperationalUserFieldConverters.TotpSecretConverter.class)
+    @Column(name = "totp_secret", length = 512)
+    private String totpSecret;
+
+    @Column(name = "totp_enabled", nullable = false)
+    private boolean totpEnabled;
+
+    @Column(name = "totp_enrolled_at")
+    private Instant totpEnrolledAt;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
@@ -179,6 +188,39 @@ public class OperationalUser {
         this.updatedAt = now;
         this.failedLoginAttempts = 0;
         this.lockedUntil = null;
+    }
+
+    /** Exige troca de senha no primeiro acesso (usado no bootstrap inicial, sem expiração). */
+    public void requirePasswordChangeOnFirstLogin(Instant now) {
+        this.mustChangePassword = true;
+        this.temporaryPasswordExpiresAt = null;
+        this.updatedAt = now;
+    }
+
+    /** Inicia o pareamento TOTP salvando um segredo pendente (ainda desativado). */
+    public void stageTotpSecret(String base32Secret, Instant now) {
+        this.totpSecret = Objects.requireNonNull(base32Secret, "Segredo TOTP não pode ser nulo");
+        this.totpEnabled = false;
+        this.totpEnrolledAt = null;
+        this.updatedAt = now;
+    }
+
+    /** Confirma e ativa o MFA TOTP após validação do primeiro código. */
+    public void enableTotp(Instant now) {
+        if (this.totpSecret == null || this.totpSecret.isBlank()) {
+            throw new IllegalStateException("Inicie a configuração do autenticador antes de confirmar");
+        }
+        this.totpEnabled = true;
+        this.totpEnrolledAt = now;
+        this.updatedAt = now;
+    }
+
+    /** Desativa o MFA TOTP e remove o segredo armazenado. */
+    public void disableTotp(Instant now) {
+        this.totpSecret = null;
+        this.totpEnabled = false;
+        this.totpEnrolledAt = null;
+        this.updatedAt = now;
     }
 
     /** Define a senha definitiva e encerra a validade da temporária. */
