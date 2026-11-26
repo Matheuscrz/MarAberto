@@ -16,7 +16,7 @@ export function SosFab() {
       <button
         type="button"
         onClick={() => setConfirming(true)}
-        className="fixed bottom-8 right-4 z-40 inline-flex size-16 items-center justify-center rounded-full bg-coral-600 text-white shadow-xl shadow-coral-700/30 ring-1 ring-coral-700 transition hover:bg-coral-500 focus-visible:outline-2"
+        className="fixed bottom-8 right-4 z-30 inline-flex size-16 items-center justify-center rounded-full bg-coral-600 text-white shadow-xl shadow-coral-700/30 ring-1 ring-coral-700 transition hover:bg-coral-500 focus-visible:outline-2"
         aria-label="Abrir SOS com confirmação"
       >
         <Siren aria-hidden="true" className="size-7" />
