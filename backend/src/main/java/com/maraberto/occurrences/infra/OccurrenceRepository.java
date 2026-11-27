@@ -319,6 +319,61 @@ public class OccurrenceRepository {
         return count != null && count > 0;
     }
 
+    public boolean isBeachInScope(UUID userId, UUID beachId) {
+        Boolean allowed = jdbc.query("""
+                        SELECT NOT EXISTS (
+                                   SELECT 1 FROM user_beach_scopes WHERE user_id = :userId
+                               )
+                            OR EXISTS (
+                                   SELECT 1
+                                     FROM user_beach_scopes
+                                    WHERE user_id = :userId
+                                      AND beach_id = :beachId
+                               )
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("userId", userId, Types.OTHER)
+                        .addValue("beachId", beachId, Types.OTHER),
+                rs -> rs.next() ? rs.getBoolean(1) : false);
+        return Boolean.TRUE.equals(allowed);
+    }
+
+    public Optional<UUID> resolveBeachIdForPoint(double latitude, double longitude) {
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("latitude", latitude, Types.DOUBLE)
+                .addValue("longitude", longitude, Types.DOUBLE);
+        return jdbc.query("""
+                        WITH point AS (
+                            SELECT ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326) AS geom
+                        ),
+                        sector AS (
+                            SELECT s.beach_id
+                            FROM beach_sectors s, point p
+                            WHERE s.active
+                              AND ST_Contains(s.geometry, p.geom)
+                            ORDER BY s.display_order, s.id
+                            LIMIT 1
+                        ),
+                        area AS (
+                            SELECT b.id
+                            FROM beaches b, point p
+                            WHERE b.active
+                              AND ST_Contains(b.boundary, p.geom)
+                            ORDER BY b.id
+                            LIMIT 1
+                        )
+                        SELECT COALESCE(sector.beach_id, area.id) AS beach_id
+                        FROM (SELECT 1) dummy
+                        LEFT JOIN sector ON TRUE
+                        LEFT JOIN area ON TRUE
+                        """,
+                params,
+                (rs, rowNum) -> rs.getObject("beach_id", UUID.class))
+                .stream()
+                .filter(java.util.Objects::nonNull)
+                .findFirst();
+    }
+
     /**
      * Registra uma ocorrência manual de forma idempotente via {@code client_request_id}.
      * Quando há coordenada e praia/setor não foram informados, resolve pelo PostGIS.
@@ -435,16 +490,20 @@ public class OccurrenceRepository {
     }
 
     /**
-     * Busca ocorrências ou chamados SOS próximos no espaço e no tempo (RN13).
+     * Busca ocorrências ou chamados SOS próximos no espaço e no tempo (RN13),
+     * respeitando o escopo do chamador (RN15/RN17).
      */
     public List<DuplicateCandidateView> findNearbyDuplicates(
+            UUID userId,
+            boolean allScopes,
+            boolean bypassTerritorialScope,
             UUID excludeOccurrenceId,
             double latitude,
             double longitude,
             Instant from,
             Instant to,
             double radiusMeters) {
-        MapSqlParameterSource params = new MapSqlParameterSource()
+        MapSqlParameterSource params = scopeParams(userId, allScopes, bypassTerritorialScope)
                 .addValue("excludeId", excludeOccurrenceId, Types.OTHER)
                 .addValue("latitude", latitude, Types.DOUBLE)
                 .addValue("longitude", longitude, Types.DOUBLE)
@@ -470,6 +529,7 @@ public class OccurrenceRepository {
                       AND o.location IS NOT NULL
                       AND o.occurred_at BETWEEN :from AND :to
                       AND ST_DWithin(o.location, ref.geog, :radiusMeters)
+                      AND """ + SCOPE_SQL + """
                     UNION ALL
                     SELECT 'EMERGENCY_CALL' AS kind,
                            c.id,
@@ -484,6 +544,28 @@ public class OccurrenceRepository {
                       AND ST_DWithin(c.location, ref.geog, :radiusMeters)
                       AND NOT EXISTS (
                           SELECT 1 FROM occurrences o2 WHERE o2.emergency_call_id = c.id
+                      )
+                      AND (
+                          (:allScopes = TRUE AND (
+                              :bypassTerritorialScope = TRUE
+                              OR NOT EXISTS (
+                                  SELECT 1 FROM user_beach_scopes ubs WHERE ubs.user_id = :userId
+                              )
+                              OR EXISTS (
+                                  SELECT 1
+                                  FROM beaches b
+                                  JOIN user_beach_scopes ubs ON ubs.beach_id = b.id
+                                  WHERE ubs.user_id = :userId
+                                    AND b.active
+                                    AND ST_Contains(b.boundary, CAST(c.location AS geometry))
+                              )
+                          ))
+                          OR EXISTS (
+                              SELECT 1
+                              FROM emergency_dispatches d
+                              WHERE d.emergency_call_id = c.id
+                                AND d.recipient_user_id = :userId
+                          )
                       )
                 ) candidates
                 ORDER BY distance_meters ASC, occurred_at DESC

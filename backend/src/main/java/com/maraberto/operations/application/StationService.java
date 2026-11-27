@@ -82,7 +82,16 @@ public class StationService {
     /** Estrutura única na visão do operador (inclusive desativada). */
     @Transactional(readOnly = true)
     public StationAdminView station(StationKind kind, UUID id) {
-        return findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
+        return station(null, true, kind, id);
+    }
+
+    @Transactional(readOnly = true)
+    public StationAdminView station(UUID requesterId, boolean unrestricted, StationKind kind, UUID id) {
+        StationAdminView found = findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
+        if (!unrestricted && found.beachId() != null && !isBeachInScope(requesterId, found.beachId())) {
+            throw new StationNotFoundException();
+        }
+        return found;
     }
 
     /**
@@ -96,7 +105,7 @@ public class StationService {
     @Transactional(readOnly = true)
     public StationPage adminStations(
             Boolean active, StationKind kind, String query, int limit, String cursor) {
-        return listStations(active, kind, query, limit, cursor);
+        return listStations(null, true, active, kind, query, limit, cursor);
     }
 
     /**
@@ -111,11 +120,29 @@ public class StationService {
     @Transactional(readOnly = true)
     public StationPage fieldStations(
             Boolean active, StationKind kind, String query, int limit, String cursor) {
-        return listStations(active, kind, query, limit, cursor);
+        return fieldStations(null, true, active, kind, query, limit, cursor);
+    }
+
+    @Transactional(readOnly = true)
+    public StationPage fieldStations(
+            UUID requesterId,
+            boolean unrestricted,
+            Boolean active,
+            StationKind kind,
+            String query,
+            int limit,
+            String cursor) {
+        return listStations(requesterId, unrestricted, active, kind, query, limit, cursor);
     }
 
     private StationPage listStations(
-            Boolean active, StationKind kind, String query, int limit, String cursor) {
+            UUID requesterId,
+            boolean unrestricted,
+            Boolean active,
+            StationKind kind,
+            String query,
+            int limit,
+            String cursor) {
         int size = clampLimit(limit);
         String term = normalizedQuery(query);
         StationCursor after = StationCursor.decode(cursor);
@@ -123,6 +150,8 @@ public class StationService {
                 .addValue("active", active, Types.BOOLEAN)
                 .addValue("kind", kind == null ? null : kind.name(), Types.VARCHAR)
                 .addValue("q", term == null ? null : "%" + term + "%", Types.VARCHAR)
+                .addValue("requesterId", requesterId, Types.OTHER)
+                .addValue("unrestricted", unrestricted, Types.BOOLEAN)
                 .addValue("limit", size + 1);
         StringBuilder sql = new StringBuilder("""
                         SELECT id,
@@ -143,6 +172,16 @@ public class StationService {
                          WHERE (:active IS NULL OR active = :active)
                            AND (:kind IS NULL OR kind = :kind)
                            AND (:q IS NULL OR name ILIKE :q)
+                           AND (
+                               :unrestricted = TRUE
+                               OR beach_id IS NULL
+                               OR NOT EXISTS (
+                                   SELECT 1 FROM user_beach_scopes ubs WHERE ubs.user_id = :requesterId
+                               )
+                               OR beach_id IN (
+                                   SELECT ubs.beach_id FROM user_beach_scopes ubs WHERE ubs.user_id = :requesterId
+                               )
+                           )
                         """);
         if (after != null) {
             // Keyset explícito (e não comparação de linha) para o driver
@@ -169,21 +208,35 @@ public class StationService {
             StationAdminView last = items.getLast();
             nextCursor = new StationCursor(last.kind(), last.name(), last.id()).encode();
         }
-        return new StationPage(items, nextCursor, hasMore, countStations(active, kind, term));
+        return new StationPage(
+                items, nextCursor, hasMore, countStations(requesterId, unrestricted, active, kind, term));
     }
 
-    private long countStations(Boolean active, StationKind kind, String term) {
+    private long countStations(
+            UUID requesterId, boolean unrestricted, Boolean active, StationKind kind, String term) {
         Long total = jdbc.queryForObject("""
                         SELECT COUNT(*)
                           FROM station_catalog
                          WHERE (:active IS NULL OR active = :active)
                            AND (:kind IS NULL OR kind = :kind)
                            AND (:q IS NULL OR name ILIKE :q)
+                           AND (
+                               :unrestricted = TRUE
+                               OR beach_id IS NULL
+                               OR NOT EXISTS (
+                                   SELECT 1 FROM user_beach_scopes ubs WHERE ubs.user_id = :requesterId
+                               )
+                               OR beach_id IN (
+                                   SELECT ubs.beach_id FROM user_beach_scopes ubs WHERE ubs.user_id = :requesterId
+                               )
+                           )
                         """,
                 new MapSqlParameterSource()
                         .addValue("active", active, Types.BOOLEAN)
                         .addValue("kind", kind == null ? null : kind.name(), Types.VARCHAR)
-                        .addValue("q", term == null ? null : "%" + term + "%", Types.VARCHAR),
+                        .addValue("q", term == null ? null : "%" + term + "%", Types.VARCHAR)
+                        .addValue("requesterId", requesterId, Types.OTHER)
+                        .addValue("unrestricted", unrestricted, Types.BOOLEAN),
                 Long.class);
         return total == null ? 0 : total;
     }
@@ -218,6 +271,12 @@ public class StationService {
      */
     @Transactional
     public StationAdminView createStation(UUID userId, CreateStationRequest request) {
+        return createStation(userId, true, request);
+    }
+
+    @Transactional
+    public StationAdminView createStation(
+            UUID userId, boolean unrestricted, CreateStationRequest request) {
         List<UUID> mediaIds = validatedMediaIds(userId, request.mediaIds());
         if (request.kind() == StationKind.FIXED) {
             if (request.beachId() == null) {
@@ -225,6 +284,9 @@ public class StationService {
                         "Posto fixo precisa pertencer a uma área de banho");
             }
             requireActiveBeach(request.beachId());
+            if (!unrestricted && !isBeachInScope(userId, request.beachId())) {
+                throw new StationOutsideShiftException();
+            }
             UUID createdId = jdbc.queryForObject("""
                             INSERT INTO lifeguard_posts
                                 (beach_id, name, location, active, position_source,
@@ -284,10 +346,19 @@ public class StationService {
             StationKind kind,
             UUID id,
             StationPositionRequest request) {
-        findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
-        if (!privileged && !ownedByOpenShift(actorId, kind, id)) {
-            throw new StationOutsideShiftException();
-        }
+        return moveStation(actorId, privileged, privileged, kind, id, request);
+    }
+
+    @Transactional
+    public StationAdminView moveStation(
+            UUID actorId,
+            boolean privileged,
+            boolean isAdmin,
+            StationKind kind,
+            UUID id,
+            StationPositionRequest request) {
+        StationAdminView current = findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
+        authorizeStationMutation(actorId, privileged, isAdmin, kind, id, current.beachId());
         String table = tableOf(kind);
         int updated = jdbc.update("""
                         UPDATE %s
@@ -333,11 +404,61 @@ public class StationService {
             UUID id,
             boolean active,
             String statusNote) {
-        findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
-        if (!privileged && !ownedByOpenShift(userId, kind, id)) {
+        return setActiveInField(userId, privileged, privileged, kind, id, active, statusNote);
+    }
+
+    @Transactional
+    public StationAdminView setActiveInField(
+            UUID userId,
+            boolean privileged,
+            boolean isAdmin,
+            StationKind kind,
+            UUID id,
+            boolean active,
+            String statusNote) {
+        StationAdminView current = findAdmin(kind, id).orElseThrow(StationNotFoundException::new);
+        authorizeStationMutation(userId, privileged, isAdmin, kind, id, current.beachId());
+        return setActive(userId, kind, id, active, statusNote);
+    }
+
+    private void authorizeStationMutation(
+            UUID actorId,
+            boolean privileged,
+            boolean isAdmin,
+            StationKind kind,
+            UUID stationId,
+            UUID beachId) {
+        if (isAdmin) {
+            return;
+        }
+        if (privileged) {
+            if (beachId != null && !isBeachInScope(actorId, beachId)) {
+                throw new StationOutsideShiftException();
+            }
+            return;
+        }
+        if (!ownedByOpenShift(actorId, kind, stationId)) {
             throw new StationOutsideShiftException();
         }
-        return setActive(userId, kind, id, active, statusNote);
+    }
+
+    private boolean isBeachInScope(UUID userId, UUID beachId) {
+        Boolean allowed = jdbc.query("""
+                        SELECT NOT EXISTS (
+                                   SELECT 1 FROM user_beach_scopes WHERE user_id = :userId
+                               )
+                            OR EXISTS (
+                                   SELECT 1
+                                     FROM user_beach_scopes
+                                    WHERE user_id = :userId
+                                      AND beach_id = :beachId
+                               )
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("userId", userId, Types.OTHER)
+                        .addValue("beachId", beachId, Types.OTHER),
+                rs -> rs.next() ? rs.getBoolean(1) : false);
+        return Boolean.TRUE.equals(allowed);
     }
 
     /**

@@ -75,8 +75,10 @@ public class OperationStationController {
             @Parameter(description = "Tamanho da página (1 a 100)", example = "50")
             @RequestParam(required = false, defaultValue = "50") int limit,
             @Parameter(description = "Cursor opaco devolvido em nextCursor")
-            @RequestParam(required = false) String cursor) {
-        return stationService.fieldStations(active, kind, q, limit, cursor);
+            @RequestParam(required = false) String cursor,
+            Authentication authentication) {
+        return stationService.fieldStations(
+                userId(authentication), isAdmin(authentication), active, kind, q, limit, cursor);
     }
 
     @PostMapping
@@ -99,7 +101,8 @@ public class OperationStationController {
     public StationAdminView create(
             @Valid @RequestBody CreateStationRequest request,
             Authentication authentication) {
-        return stationService.createStation(userId(authentication), request);
+        return stationService.createStation(
+                userId(authentication), isAdmin(authentication), request);
     }
 
     @GetMapping("/{kind}/{stationId}")
@@ -117,8 +120,10 @@ public class OperationStationController {
     public StationAdminView get(
             @Parameter(description = "Tipo da estrutura", example = "FIXED")
             @PathVariable StationKind kind,
-            @PathVariable UUID stationId) {
-        return stationService.station(kind, stationId);
+            @PathVariable UUID stationId,
+            Authentication authentication) {
+        return stationService.station(
+                userId(authentication), isAdmin(authentication), kind, stationId);
     }
 
     @PatchMapping("/{kind}/{stationId}")
@@ -149,6 +154,7 @@ public class OperationStationController {
         return stationService.setActiveInField(
                 userId(authentication),
                 isPrivileged(authentication),
+                isAdmin(authentication),
                 kind,
                 stationId,
                 Boolean.TRUE.equals(request.active()),
@@ -182,6 +188,7 @@ public class OperationStationController {
         return stationService.moveStation(
                 userId(authentication),
                 isPrivileged(authentication),
+                isAdmin(authentication),
                 kind,
                 stationId,
                 request);
@@ -191,11 +198,17 @@ public class OperationStationController {
         return UUID.fromString(authentication.getName());
     }
 
-    /** Coordenação e TI veem e alteram qualquer estrutura; o guarda-vidas, só a do plantão. */
+    /** Coordenação (no seu escopo) e TI alteram estruturas; o guarda-vidas, só a do plantão. */
     private static boolean isPrivileged(Authentication authentication) {
         return authentication.getAuthorities().stream()
                 .map(authority -> authority.getAuthority())
                 .anyMatch(authority -> authority.equals("ROLE_COORDINATOR")
                         || authority.equals("ROLE_ADMIN"));
+    }
+
+    private static boolean isAdmin(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .map(authority -> authority.getAuthority())
+                .anyMatch("ROLE_ADMIN"::equals);
     }
 }

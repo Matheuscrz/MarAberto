@@ -332,6 +332,112 @@ class SecurityAuditFixesIntegrationTests extends PostgisIntegrationTest {
                 objectMapper.readTree(response.getBody()).at("/detail/occurrence/id").asText());
     }
 
+    @Test
+    void scopedCoordinatorCannotMutateStationsFlagsOrCreateOccurrencesOutsideBeachScope()
+            throws Exception {
+        UUID beachA = insertBeach("Praia Escopo A", -10.710, -37.010);
+        UUID beachB = insertBeach("Praia Escopo B", -10.760, -37.060);
+        UUID postB = insertPost(beachB, "Posto B Escopo", -10.760, -37.060);
+
+        TestOperatorAuth.Session admin = TestOperatorAuth.registerAndLogin(
+                authenticationService, restTemplate, objectMapper, "ADMIN");
+        TestOperatorAuth.Session coordinator = TestOperatorAuth.registerAndLogin(
+                authenticationService, restTemplate, objectMapper, "COORDINATOR");
+        jdbcTemplate.update(
+                "INSERT INTO user_beach_scopes (user_id, beach_id) VALUES (?, ?)",
+                coordinator.userId(), beachA);
+
+        // F-03: Coordenador regional não pode reposicionar nem desativar posto da praia B
+        ResponseEntity<String> moveOutside = restTemplate.exchange(
+                "/api/v1/operations/stations/FIXED/" + postB + "/position",
+                HttpMethod.PATCH,
+                new HttpEntity<>(Map.of("latitude", -10.761, "longitude", -37.061),
+                        bearerJson(coordinator.accessToken())),
+                String.class);
+        assertThat(moveOutside.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        ResponseEntity<String> deactivateOutside = restTemplate.exchange(
+                "/api/v1/operations/stations/FIXED/" + postB,
+                HttpMethod.PATCH,
+                new HttpEntity<>(Map.of("active", false, "statusNote", "fora do escopo"),
+                        bearerJson(coordinator.accessToken())),
+                String.class);
+        assertThat(deactivateOutside.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // F-04: Coordenador regional não pode lançar nem encerrar bandeira da praia B
+        UUID flagB = launchFlag(admin.accessToken(), beachB);
+        ResponseEntity<String> launchOutside = restTemplate.postForEntity(
+                "/api/v1/operations/flags",
+                new HttpEntity<>(Map.of("beachId", beachB, "flag", "GREEN"),
+                        bearerJson(coordinator.accessToken())),
+                String.class);
+        assertThat(launchOutside.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        ResponseEntity<String> closeOutside = restTemplate.exchange(
+                "/api/v1/operations/flags/" + flagB + "/close",
+                HttpMethod.POST,
+                new HttpEntity<>(bearerJson(coordinator.accessToken())),
+                String.class);
+        assertThat(closeOutside.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+
+        // F-05: Coordenador regional não pode criar ocorrência manual na praia B
+        ResponseEntity<String> occurrenceOutside = restTemplate.postForEntity(
+                "/api/v1/occurrences",
+                new HttpEntity<>(Map.of(
+                        "clientRequestId", UUID.randomUUID(),
+                        "origin", "FIELD_ATTENDED",
+                        "nature", "RESCUE",
+                        "occurredAt", Instant.now().toString(),
+                        "beachId", beachB,
+                        "referenceText", "Posto B",
+                        "summary", "Tentativa fora do escopo"),
+                        bearerJson(coordinator.accessToken())),
+                String.class);
+        assertThat(occurrenceOutside.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void findNearbyDuplicatesDoesNotLeakOtherGuardsOccurrences() throws Exception {
+        UUID beach = insertBeach("Praia Duplicata Isolada", -10.810, -37.090);
+        TestOperatorAuth.Session guardA = TestOperatorAuth.registerAndLogin(
+                authenticationService, restTemplate, objectMapper, "LIFEGUARD");
+        TestOperatorAuth.Session guardB = TestOperatorAuth.registerAndLogin(
+                authenticationService, restTemplate, objectMapper, "LIFEGUARD");
+
+        ResponseEntity<String> createdByA = restTemplate.postForEntity(
+                "/api/v1/occurrences",
+                new HttpEntity<>(Map.of(
+                        "clientRequestId", UUID.randomUUID(),
+                        "origin", "FIELD_ATTENDED",
+                        "nature", "RESCUE",
+                        "occurredAt", Instant.now().toString(),
+                        "latitude", -10.810,
+                        "longitude", -37.090,
+                        "beachId", beach,
+                        "summary", "Atendimento do guarda A"),
+                        bearerJson(guardA.accessToken())),
+                String.class);
+        assertThat(createdByA.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        // F-02: Guarda B cria ocorrência no mesmo ponto e não pode ver a ocorrência do Guarda A
+        ResponseEntity<String> createdByB = restTemplate.postForEntity(
+                "/api/v1/occurrences",
+                new HttpEntity<>(Map.of(
+                        "clientRequestId", UUID.randomUUID(),
+                        "origin", "FIELD_ATTENDED",
+                        "nature", "RESCUE",
+                        "occurredAt", Instant.now().toString(),
+                        "latitude", -10.8101,
+                        "longitude", -37.0901,
+                        "beachId", beach,
+                        "summary", "Atendimento do guarda B"),
+                        bearerJson(guardB.accessToken())),
+                String.class);
+        assertThat(createdByB.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(objectMapper.readTree(createdByB.getBody()).get("possibleDuplicates"))
+                .isEmpty();
+    }
+
     private static HttpHeaders bearerJson(String token) {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
