@@ -1,4 +1,5 @@
 import http from "k6/http";
+import { randomBytes } from "k6/crypto";
 import { check, group, sleep } from "k6";
 import { Rate, Trend } from "k6/metrics";
 
@@ -119,12 +120,21 @@ export const options = {
   },
 };
 
+function randomUnit() {
+  const bytes = new Uint32Array(randomBytes(4));
+  return bytes[0] / 0x100000000;
+}
+
+function jitterCoord(base, spread) {
+  return base + (randomUnit() - 0.5) * spread;
+}
+
 function uuid() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  const bytes = new Uint8Array(randomBytes(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function authHeaders(token) {
@@ -150,6 +160,46 @@ function track(res, kind) {
   return ok;
 }
 
+function findFirstBeachId() {
+  const beaches = http.get(
+    `${BASE_URL}/api/v1/beaches?lat=${LAT}&lon=${LON}&radiusM=30000`,
+  );
+  if (beaches.status !== 200) {
+    return null;
+  }
+  const list = beaches.json()?.beaches;
+  return Array.isArray(list) && list.length > 0 ? list[0].id : null;
+}
+
+function findPreferredTarget(token) {
+  const targetsRes = http.get(
+    `${BASE_URL}/api/v1/dispatch/shifts/targets`,
+    authHeaders(token),
+  );
+  if (targetsRes.status !== 200) {
+    return null;
+  }
+  const targets = targetsRes.json();
+  if (!Array.isArray(targets)) {
+    return null;
+  }
+  return (
+    targets.find((t) => t.kind === "POST") ||
+    targets.find((t) => t.kind === "MOBILE_BASE") ||
+    null
+  );
+}
+
+function buildShiftBody(target) {
+  if (!target) {
+    return { latitude: LAT, longitude: LON, accuracyMeters: 10 };
+  }
+  if (target.kind === "POST") {
+    return { postId: target.id };
+  }
+  return { mobileBaseId: target.id };
+}
+
 export function setup() {
   const login = http.post(
     `${BASE_URL}/api/v1/auth/login`,
@@ -166,38 +216,10 @@ export function setup() {
     throw new Error("login sem accessToken (MFA habilitado?)");
   }
 
-  const beaches = http.get(
-    `${BASE_URL}/api/v1/beaches?lat=${LAT}&lon=${LON}&radiusM=30000`,
-  );
-  let beachId = null;
-  if (beaches.status === 200) {
-    const nearby = beaches.json();
-    const list = nearby && nearby.beaches ? nearby.beaches : [];
-    if (Array.isArray(list) && list.length > 0) {
-      beachId = list[0].id;
-    }
-  }
-
+  const beachId = findFirstBeachId();
   // Prefere um posto fixo ativo; sem estrutura, abre plantão livre com a posição.
-  const targetsRes = http.get(
-    `${BASE_URL}/api/v1/dispatch/shifts/targets`,
-    authHeaders(token),
-  );
-  let target = null;
-  if (targetsRes.status === 200) {
-    const targets = targetsRes.json();
-    if (Array.isArray(targets)) {
-      target =
-        targets.find((t) => t.kind === "POST") ||
-        targets.find((t) => t.kind === "MOBILE_BASE") ||
-        null;
-    }
-  }
-  const shiftBody = target
-    ? target.kind === "POST"
-      ? { postId: target.id }
-      : { mobileBaseId: target.id }
-    : { latitude: LAT, longitude: LON, accuracyMeters: 10 };
+  const target = findPreferredTarget(token);
+  const shiftBody = buildShiftBody(target);
 
   const open = http.post(
     `${BASE_URL}/api/v1/dispatch/shifts`,
@@ -226,9 +248,11 @@ export function publicMapFlow(data) {
       "/api/v1/risk-zones",
     ];
     if (data.beachId) {
-      paths.push(`/api/v1/beaches/${data.beachId}`);
-      paths.push(`/api/v1/beaches/${data.beachId}/map`);
-      paths.push(`/api/v1/occupancy/beaches/${data.beachId}`);
+      paths.push(
+        `/api/v1/beaches/${data.beachId}`,
+        `/api/v1/beaches/${data.beachId}/map`,
+        `/api/v1/occupancy/beaches/${data.beachId}`,
+      );
     }
     const responses = http.batch(paths.map((p) => ["GET", `${BASE_URL}${p}`]));
     for (const res of responses) {
@@ -236,7 +260,7 @@ export function publicMapFlow(data) {
       track(res, "read");
     }
   });
-  sleep(2 + Math.random() * 2);
+  sleep(2 + randomUnit() * 2);
 }
 
 export function authReadFlow(data) {
@@ -256,7 +280,7 @@ export function authReadFlow(data) {
     check(res, { "autenticado 2xx": (r) => r.status >= 200 && r.status < 300 });
     track(res, "read");
   }
-  sleep(2 + Math.random() * 2);
+  sleep(2 + randomUnit() * 2);
 }
 
 export function operatorWriteFlow(data) {
@@ -275,9 +299,9 @@ export function operatorWriteFlow(data) {
   const move = http.put(
     `${BASE_URL}/api/v1/dispatch/shifts/current/position`,
     JSON.stringify({
-      latitude: LAT + (Math.random() - 0.5) * 0.002,
-      longitude: LON + (Math.random() - 0.5) * 0.002,
-      accuracyMeters: 5 + Math.random() * 20,
+      latitude: jitterCoord(LAT, 0.002),
+      longitude: jitterCoord(LON, 0.002),
+      accuracyMeters: 5 + randomUnit() * 20,
     }),
     jsonHeaders(data.token),
   );
@@ -291,8 +315,8 @@ export function sosFlow() {
     `${BASE_URL}/api/v1/emergency-calls`,
     JSON.stringify({
       clientRequestId: uuid(),
-      latitude: LAT + (Math.random() - 0.5) * 0.01,
-      longitude: LON + (Math.random() - 0.5) * 0.01,
+      latitude: jitterCoord(LAT, 0.01),
+      longitude: jitterCoord(LON, 0.01),
       accuracyMeters: 10,
     }),
     {
@@ -316,8 +340,8 @@ export function occurrenceFlow(data) {
       origin: "FIELD_ATTENDED",
       nature: "RESCUE",
       occurredAt: new Date().toISOString(),
-      latitude: LAT + (Math.random() - 0.5) * 0.01,
-      longitude: LON + (Math.random() - 0.5) * 0.01,
+      latitude: jitterCoord(LAT, 0.01),
+      longitude: jitterCoord(LON, 0.01),
       accuracyMeters: 10,
       summary: "Atendimento simulado pelo teste de carga",
     }),
@@ -358,9 +382,9 @@ export function occupancyFlow() {
   const res = http.post(
     `${BASE_URL}/api/v1/occupancy/samples`,
     JSON.stringify({
-      latitude: LAT + (Math.random() - 0.5) * 0.002,
-      longitude: LON + (Math.random() - 0.5) * 0.002,
-      token: uuid().replace(/-/g, "").slice(0, 24),
+      latitude: jitterCoord(LAT, 0.002),
+      longitude: jitterCoord(LON, 0.002),
+      token: uuid().replaceAll("-", "").slice(0, 24),
     }),
     jsonHeaders(),
   );
