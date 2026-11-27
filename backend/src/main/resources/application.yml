@@ -36,14 +36,31 @@ spring:
 
   # Redis é opcional para os fluxos que ainda não dependem dele. A conexão é
   # criada de forma preguiçosa pelo Lettuce; sem Redis, a aplicação sobe e
-  # apenas os recursos que usam cache/rate limit ficam degradados.
+  # apenas os recursos que usam cache/rate limit caem no fallback local com
+  # circuit breaker (RedisAvailabilityGuard).
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
-      timeout: 2s
-      connect-timeout: 2s
+      timeout: ${REDIS_TIMEOUT:300ms}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:300ms}
+
+  # RabbitMQ ativo por padrão para desacoplar STOMP e Web Push/FCM com confirms
+  # e DLQ (ADR-004, ADR-018). Se o broker ficar indisponível, o Transactional
+  # Outbox no PostgreSQL retém os eventos PENDING e o sweeper republica assim
+  # que o broker voltar — sem bloquear a API nem derrubar /actuator/health.
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_AMQP_PORT:5672}
+    username: ${RABBITMQ_USER:maraberto}
+    password: ${RABBITMQ_PASSWORD:maraberto}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: ${RABBITMQ_CONNECTION_TIMEOUT:1s}
+    listener:
+      simple:
+        missing-queues-fatal: false
 
 maraberto:
   storage:
@@ -59,10 +76,21 @@ maraberto:
       # Garage e MinIO não resolvem o bucket por DNS: o caminho é
       # `endpoint/bucket/chave`.
       path-style: ${STORAGE_S3_PATH_STYLE:true}
+  redis:
+    circuit-breaker:
+      # Janela em que o fallback local assume após falha do Redis, evitando
+      # pagar timeout de rede em cada requisição sob queda do cache.
+      cooldown: ${REDIS_CIRCUIT_BREAKER_COOLDOWN:PT15S}
   realtime:
     # Origens aceitas no handshake do WebSocket. Inclui localhost e 127.0.0.1
     # porque o navegador trata os dois como origens distintas no dev local.
     allowed-origins: ${REALTIME_ALLOWED_ORIGINS:http://localhost,http://127.0.0.1,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000}
+    rabbit:
+      # RabbitMQ ativo por padrão (desligue apenas com RABBITMQ_ENABLED=false).
+      enabled: ${RABBITMQ_ENABLED:true}
+      confirm-timeout-ms: ${RABBITMQ_CONFIRM_TIMEOUT_MS:2000}
+      retry-ttl-ms: ${RABBITMQ_RETRY_TTL_MS:5000}
+      max-retries: ${RABBITMQ_MAX_RETRIES:3}
   push:
     vapid:
       # Chaves VAPID para Web Push (PWA). Em desenvolvimento/teste sem chaves
@@ -129,10 +157,15 @@ maraberto:
       sweep-interval: ${EMERGENCY_OUTBOX_SWEEP_INTERVAL:PT5S}
       sweep-initial-delay: ${EMERGENCY_OUTBOX_SWEEP_INITIAL_DELAY:PT10S}
       batch-size: ${EMERGENCY_OUTBOX_BATCH_SIZE:50}
-      max-attempts: ${EMERGENCY_OUTBOX_MAX_ATTEMPTS:10}
+      # 120 tentativas x 5 s ≈ 10 min de tolerância a queda do RabbitMQ antes
+      # de desistir de um evento.
+      max-attempts: ${EMERGENCY_OUTBOX_MAX_ATTEMPTS:120}
       # Tempo de posse de um evento reivindicado. Passado o prazo, outra
       # instância (ou o sweep) pode reassumir a publicação.
       claim-lease: ${EMERGENCY_OUTBOX_CLAIM_LEASE:PT30S}
+      # Publicação imediata pós-commit em Virtual Thread para não adicionar
+      # latência de broker à resposta HTTP do SOS quando o RabbitMQ está fora.
+      async-dispatch: ${EMERGENCY_OUTBOX_ASYNC_DISPATCH:true}
   security:
     cookie:
       # `true` exige HTTPS e é o único valor aceito no perfil `prod`. Em dev
@@ -258,8 +291,13 @@ server:
 
 management:
   health:
+    redis:
+      # Redis é opcional/degradável (fallback local + circuit breaker): não pode
+      # derrubar /actuator/health nem reiniciar o container.
+      enabled: false
     rabbit:
-      # RabbitMQ é perfil opcional (`rabbit`, ADR-004): não pode derrubar /actuator/health no perfil mínimo.
+      # RabbitMQ degrada para a Transactional Outbox no PostgreSQL: não pode
+      # derrubar /actuator/health nem reiniciar o container.
       enabled: false
   endpoints:
     web:

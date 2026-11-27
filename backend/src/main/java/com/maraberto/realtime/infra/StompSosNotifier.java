@@ -3,20 +3,24 @@ package com.maraberto.realtime.infra;
 import com.maraberto.realtime.api.SosDestinations;
 import com.maraberto.realtime.api.SosNotifierPort;
 import java.util.UUID;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
 /**
  * Entrega o SOS na fila pessoal do operador pelo broker STOMP em memória
- * (perfil mínimo sem RabbitMQ), com envio best-effort de Web Push/FCM.
+ * (usado apenas quando {@code maraberto.realtime.rabbit.enabled=false}), com
+ * envio best-effort de Web Push/FCM.
  *
  * <p>Sem sessão conectada a mensagem STOMP é descartada. Por isso o console
  * reconcilia por HTTP ({@code GET /api/v1/dispatch/calls}) e a outbox mantém
  * o evento até a publicação ser confirmada pelo adaptador.
  */
 @Component
-@Profile("!rabbit")
+@ConditionalOnProperty(
+        prefix = "maraberto.realtime.rabbit",
+        name = "enabled",
+        havingValue = "false")
 public class StompSosNotifier implements SosNotifierPort {
 
     private final SimpMessagingTemplate messagingTemplate;

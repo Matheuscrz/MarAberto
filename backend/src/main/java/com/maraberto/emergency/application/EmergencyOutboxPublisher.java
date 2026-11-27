@@ -4,12 +4,16 @@ import com.maraberto.emergency.api.EmergencyCallDispatched;
 import com.maraberto.emergency.api.EmergencyCallNotification;
 import com.maraberto.realtime.api.SosNotifierPort;
 import com.maraberto.shared.security.crypto.SensitiveDataProtector;
+import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -108,6 +112,8 @@ public class EmergencyOutboxPublisher {
     private final int batchSize;
     private final int maxAttempts;
     private final int leaseSeconds;
+    private final boolean asyncDispatch;
+    private final ExecutorService immediatePublishExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public EmergencyOutboxPublisher(
             NamedParameterJdbcTemplate jdbc,
@@ -116,8 +122,9 @@ public class EmergencyOutboxPublisher {
             SensitiveDataProtector sensitiveDataProtector,
             PlatformTransactionManager transactionManager,
             @Value("${maraberto.emergency.outbox.batch-size:50}") int batchSize,
-            @Value("${maraberto.emergency.outbox.max-attempts:10}") int maxAttempts,
-            @Value("${maraberto.emergency.outbox.claim-lease:PT30S}") Duration claimLease) {
+            @Value("${maraberto.emergency.outbox.max-attempts:120}") int maxAttempts,
+            @Value("${maraberto.emergency.outbox.claim-lease:PT30S}") Duration claimLease,
+            @Value("${maraberto.emergency.outbox.async-dispatch:true}") boolean asyncDispatch) {
         this.jdbc = jdbc;
         this.sosNotifier = sosNotifier;
         this.serializer = serializer;
@@ -129,6 +136,12 @@ public class EmergencyOutboxPublisher {
         this.batchSize = batchSize;
         this.maxAttempts = maxAttempts;
         this.leaseSeconds = Math.max(1, Math.toIntExact(claimLease.toSeconds()));
+        this.asyncDispatch = asyncDispatch;
+    }
+
+    @PreDestroy
+    void shutdown() {
+        immediatePublishExecutor.shutdownNow();
     }
 
     /**
@@ -147,16 +160,30 @@ public class EmergencyOutboxPublisher {
     }
 
     /**
-     * Reação imediata ao commit do SOS. Roda fora da transação original, então
-     * abre uma transação própria para reivindicar e outra para marcar o
-     * resultado.
+     * Reação imediata ao commit do SOS. Por padrão executa em Virtual Thread
+     * para nunca adicionar latência de broker à resposta HTTP do SOS quando o
+     * RabbitMQ está lento ou indisponível; em caso de falha, o evento continua
+     * {@code PENDING} no banco e o sweep reenvia.
      */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onOutboxEventQueued(EmergencyOutboxEventQueued queued) {
+        if (!asyncDispatch) {
+            claimAndPublish(queued.outboxEventId());
+            return;
+        }
+        try {
+            immediatePublishExecutor.execute(() -> claimAndPublish(queued.outboxEventId()));
+        } catch (RejectedExecutionException exception) {
+            log.debug("Executor de publicação imediata encerrado para evento {}; sweep assumirá",
+                    queued.outboxEventId());
+        }
+    }
+
+    private void claimAndPublish(UUID outboxEventId) {
         try {
             List<PendingEvent> claimed = transactionTemplate.execute(
                     status -> claim(CLAIM_ONE_SQL, new MapSqlParameterSource()
-                            .addValue("id", queued.outboxEventId())
+                            .addValue("id", outboxEventId)
                             .addValue("leaseSeconds", leaseSeconds)));
             if (claimed != null) {
                 claimed.forEach(this::publishOutsideTransaction);
@@ -165,7 +192,7 @@ public class EmergencyOutboxPublisher {
             // O evento continua PENDING até o lease expirar; o sweep repete.
             // Nada de PII no log.
             log.warn("Publicação imediata do evento {} falhou; o sweep da outbox vai repetir: {}",
-                    queued.outboxEventId(), exception.getClass().getSimpleName());
+                    outboxEventId, exception.getClass().getSimpleName());
         }
     }
 

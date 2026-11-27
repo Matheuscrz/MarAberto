@@ -1,9 +1,11 @@
 package com.maraberto.shared.ratelimit;
 
+import com.maraberto.shared.redis.RedisAvailabilityGuard;
 import java.time.Duration;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
@@ -70,13 +72,25 @@ public class TokenBucketRateLimiter {
             """, Long.class);
 
     private final StringRedisTemplate redis;
+    private final RedisAvailabilityGuard redisGuard;
+
+    @Autowired
+    public TokenBucketRateLimiter(
+            StringRedisTemplate redis,
+            RedisAvailabilityGuard redisGuard) {
+        this.redis = redis;
+        this.redisGuard = redisGuard;
+    }
 
     public TokenBucketRateLimiter(StringRedisTemplate redis) {
-        this.redis = redis;
+        this(redis, new RedisAvailabilityGuard(Duration.ofSeconds(15)));
     }
 
     public RateLimitResult tryConsume(String key, int capacity, Duration window) {
         if (capacity <= 0 || window == null || window.isZero() || window.isNegative()) {
+            return RateLimitResult.permit();
+        }
+        if (!redisGuard.allowAttempt()) {
             return RateLimitResult.permit();
         }
         long now = System.currentTimeMillis();
@@ -90,6 +104,7 @@ public class TokenBucketRateLimiter {
                     Double.toString(refillPerMs),
                     Long.toString(now),
                     Long.toString(windowMs * 2));
+            redisGuard.recordSuccess();
             if (allowed == null) {
                 return RateLimitResult.permit();
             }
@@ -98,7 +113,8 @@ public class TokenBucketRateLimiter {
                     : RateLimitResult.reject(retryAfterSeconds(windowMs, capacity));
         } catch (RuntimeException exception) {
             // Falha aberta: o SOS não pode depender do Redis (ADR-001).
-            log.warn("limitador indisponível no Redis ({}); seguindo sem limitar",
+            redisGuard.recordFailure(exception);
+            log.debug("limitador indisponível no Redis ({}); seguindo sem limitar",
                     exception.getClass().getSimpleName());
             return RateLimitResult.permit();
         }

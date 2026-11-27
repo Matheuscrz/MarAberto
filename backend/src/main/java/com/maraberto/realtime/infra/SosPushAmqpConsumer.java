@@ -5,7 +5,7 @@ import java.io.IOException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.support.AmqpHeaders;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.messaging.handler.annotation.Header;
 
@@ -13,7 +13,11 @@ import org.springframework.messaging.handler.annotation.Header;
  * Consumidor AMQP isolado para envio de notificações push (Web Push VAPID e FCM).
  */
 @Component
-@Profile("rabbit")
+@ConditionalOnProperty(
+        prefix = "maraberto.realtime.rabbit",
+        name = "enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 public class SosPushAmqpConsumer {
 
     private final SosPushDispatcher pushDispatcher;
