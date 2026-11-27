@@ -32,3 +32,53 @@ docker run --rm -i --network=host -e BASE_URL=http://localhost:8080 grafana/k6 r
 - `http_req_duration p(95) < 500 ms` e `p(99) < 1200 ms` nas consultas públicas do mapa (`/api/v1/beaches`, `/api/v1/flags`, `/api/v1/stations`, `/api/v1/unmapped-signals`, `/api/v1/content`).
 - `http_req_failed < 1%`.
 - Ao testar contra o Nginx (`localhost:3000`), rajadas acima de `30 req/s` (burst 60) por IP retornam `429 Too Many Requests` conforme configurado em `web/nginx.conf`.
+
+## Teste misto de capacidade (`mixed-capacity.js`)
+
+Simula o uso real: leitura do mapa público, leituras autenticadas (equipe,
+chamados, ocorrências), heartbeat/posição de plantão, SOS anônimo, ocorrência
+manual + encerramento e amostra de ocupação. É o teste indicado para medir
+capacidade e deixar pronto para produção.
+
+```bash
+# Capacidade bruta (backend direto, sem limit_req do Nginx)
+docker run --rm -i --network=host \
+  -e BASE_URL=http://localhost:8080 \
+  -e K6_USER=admin@maraberto.dev -e K6_PASS=demo1234 \
+  grafana/k6 run - < perf/k6/mixed-capacity.js
+
+# Borda completa (Nginx + rate limit por IP)
+docker run --rm -i --network=host \
+  -e BASE_URL=http://localhost \
+  -e K6_USER=admin@maraberto.dev -e K6_PASS=demo1234 \
+  grafana/k6 run - < perf/k6/mixed-capacity.js
+```
+
+### Variáveis
+
+| Variável | Padrão | Efeito |
+|---|---|---|
+| `BASE_URL` | `http://localhost:8080` | Alvo (backend direto ou URL pública) |
+| `K6_USER` / `K6_PASS` | `admin@maraberto.dev` / `demo1234` | Conta de teste (precisa existir e não ter `mustChangePassword`) |
+| `READ_PEAK` | `100` | Pico de VUs do mapa público |
+| `AUTH_VUS` | `20` | VUs de leitura autenticada |
+| `WRITE_VUS` | `5` | VUs de heartbeat/posição |
+| `SOS_RATE` | `6` | SOS por minuto |
+| `OCC_RATE` | `4` | Ocorrências por minuto |
+| `DURATION` | `2m` | Platô de cada cenário |
+| `P95` / `P99` | `500` / `1200` | Limites de latência (ms) |
+
+### Cuidados ao rodar contra produção
+
+- **Rate limits por IP:** todos os VUs saem do mesmo IP. O login aceita
+  `30/5min` e o SOS `3/10min`; para medir capacidade (e não o limitador),
+  rode com `LOGIN_IP_LIMIT_ENABLED=false` e `SOS_RATE_LIMIT_ENABLED=false`
+  em uma janela de QA, ou libere o IP do gerador. O script tolera `429` no
+  SOS, mas o volume real de escrita fica subestimado.
+- **Dados:** o cenário de ocorrências cria e encerra fichas reais, e o SOS
+  cria chamados reais. Use um ambiente de QA ou uma conta/beach descartável.
+- **Conta:** use uma conta dedicada de carga, sem `mustChangePassword` e com
+  escopo administrativo (o script cria ocorrência e abre plantão).
+- **Nginx:** acima de `30 req/s` por IP o `limit_req` responde `429`. Para
+  capacidade da JVM/PostgreSQL, meça no `:8080`; para a borda, meça no `:80`.
+
