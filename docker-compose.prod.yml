@@ -16,7 +16,7 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}
       STORAGE_PROVIDER: s3
       STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:-http://garage:3900}
       STORAGE_S3_REGION: ${STORAGE_S3_REGION:-garage}
@@ -79,10 +79,11 @@ services:
   redis:
     image: redis:7
     container_name: maraberto-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}"]
     volumes:
       - maraberto_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}\" redis-cli ping"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -93,11 +94,14 @@ services:
     container_name: maraberto-garage
     command: /garage server --single-node --default-bucket
     environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?defina GARAGE_RPC_SECRET (64 hex chars) no .env}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?defina GARAGE_ADMIN_TOKEN no .env}
+      GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN:?defina GARAGE_METRICS_TOKEN no .env}
       GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_ACCESS_KEY:?defina GARAGE_ACCESS_KEY no .env}
       GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_SECRET_KEY:?defina GARAGE_SECRET_KEY no .env}
       GARAGE_DEFAULT_BUCKET: ${GARAGE_BUCKET:-media-public}
     volumes:
-      - ./deploy/garage/garage.toml:/etc/garage.toml:ro
+      - ./deploy/garage/garage.prod.toml:/etc/garage.toml:ro
       - maraberto_garage_data:/var/lib/garage
     restart: unless-stopped
 

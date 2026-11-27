@@ -66,6 +66,12 @@ public class SecuritySettingsConfiguration {
                     "ADMIN_BOOTSTRAP_PASSWORD padrão ('admin') não é aceita em produção; "
                             + "defina uma senha inicial forte ou desative ADMIN_BOOTSTRAP_ENABLED");
         }
+        String redisPassword = environment.getProperty("spring.data.redis.password");
+        if (redisPassword == null || redisPassword.isBlank()) {
+            throw new IllegalStateException(
+                    "spring.data.redis.password não pode ficar vazia em produção; "
+                            + "defina REDIS_PASSWORD no ambiente");
+        }
     }
 
     private static void requireProductionOrigins(List<String> allowedOrigins) {

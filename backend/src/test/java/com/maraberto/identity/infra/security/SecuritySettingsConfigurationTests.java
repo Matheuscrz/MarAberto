@@ -80,10 +80,20 @@ class SecuritySettingsConfigurationTests {
     }
 
     @Test
+    void rejectsEmptyRedisPasswordInProduction() {
+        MockEnvironment environment = prodEnvironment();
+        environment.setProperty("spring.data.redis.password", "");
+        assertThatThrownBy(() -> validateWithEnvironment(environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("spring.data.redis.password");
+    }
+
+    @Test
     void acceptsCustomCredentialsInProduction() {
         MockEnvironment environment = prodEnvironment();
         environment.setProperty("spring.datasource.password", "s3nha-db-forte!");
         environment.setProperty("spring.rabbitmq.password", "s3nha-rabbit-forte!");
+        environment.setProperty("spring.data.redis.password", "s3nha-redis-forte!");
         environment.setProperty("maraberto.identity.bootstrap-admin.enabled", "true");
         environment.setProperty("maraberto.identity.bootstrap-admin.password", "s3nha-admin-forte!");
         assertThatCode(() -> validateWithEnvironment(environment))
@@ -93,6 +103,7 @@ class SecuritySettingsConfigurationTests {
     private MockEnvironment prodEnvironment() {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("prod");
+        environment.setProperty("spring.data.redis.password", "s3nha-redis-forte!");
         return environment;
     }
 
@@ -109,6 +120,9 @@ class SecuritySettingsConfigurationTests {
         properties.setAllowedOrigins(allowedOrigins);
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles(profile);
+        if ("prod".equals(profile)) {
+            environment.setProperty("spring.data.redis.password", "s3nha-redis-forte!");
+        }
         new SecuritySettingsConfiguration(properties, environment).validate();
     }
 }

@@ -63,7 +63,11 @@ public class FlagController {
     public FlagLaunchResponse launch(
             @Valid @RequestBody LaunchFlagRequest request,
             Authentication authentication) {
-        return flagService.launch(userId(authentication), request);
+        return flagService.launch(
+                userId(authentication),
+                isPrivileged(authentication),
+                isAdmin(authentication),
+                request);
     }
 
     @PostMapping("/{flagId}/close")
@@ -87,7 +91,11 @@ public class FlagController {
             @Parameter(description = "Identificador do lançamento")
             @PathVariable UUID flagId,
             Authentication authentication) {
-        return flagService.close(userId(authentication), isPrivileged(authentication), flagId);
+        return flagService.close(
+                userId(authentication),
+                isPrivileged(authentication),
+                isAdmin(authentication),
+                flagId);
     }
 
     private static UUID userId(Authentication authentication) {
@@ -99,5 +107,11 @@ public class FlagController {
                 .map(authority -> authority.getAuthority())
                 .anyMatch(authority -> authority.equals("ROLE_COORDINATOR")
                         || authority.equals("ROLE_ADMIN"));
+    }
+
+    private static boolean isAdmin(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .map(authority -> authority.getAuthority())
+                .anyMatch("ROLE_ADMIN"::equals);
     }
 }

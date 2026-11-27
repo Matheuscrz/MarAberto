@@ -2,6 +2,7 @@ package com.maraberto.occurrences.api;
 
 import com.maraberto.occurrences.domain.OccurrenceAlreadyClosedException;
 import com.maraberto.occurrences.domain.OccurrenceNotFoundException;
+import com.maraberto.occurrences.domain.OccurrenceOutsideScopeException;
 import com.maraberto.occurrences.domain.OccurrenceTransitionException;
 import com.maraberto.occurrences.domain.OccurrenceVictimNotFoundException;
 import com.maraberto.shared.api.FieldValidationError;
@@ -79,6 +80,17 @@ public class OccurrenceApiExceptionHandler extends ResponseEntityExceptionHandle
                 HttpStatus.NOT_FOUND,
                 "https://maraberto.org/problems/occurrence-victim-not-found",
                 "Sem dados de vítima",
+                exception.getMessage(),
+                request), new HttpHeaders());
+    }
+
+    @ExceptionHandler(OccurrenceOutsideScopeException.class)
+    public ResponseEntity<Object> handleOutsideScope(
+            OccurrenceOutsideScopeException exception, WebRequest request) {
+        return response(problem(
+                HttpStatus.FORBIDDEN,
+                "https://maraberto.org/problems/occurrence-outside-scope",
+                "Ocorrência fora do seu escopo",
                 exception.getMessage(),
                 request), new HttpHeaders());
     }

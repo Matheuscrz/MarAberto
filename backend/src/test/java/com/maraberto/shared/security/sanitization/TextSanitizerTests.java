@@ -28,6 +28,20 @@ class TextSanitizerTests {
     }
 
     @Test
+    void preventsEntityEncodedHtmlReintroductionInPlainText() {
+        String singleEncoded = TextSanitizer.sanitize(
+                "&lt;script&gt;alert(1)&lt;/script&gt;Praia", SanitizationPolicy.PLAIN_TEXT);
+        String doubleEncoded = TextSanitizer.sanitize(
+                "&amp;lt;img src=x onerror=alert(1)&amp;gt;Ok", SanitizationPolicy.PLAIN_TEXT);
+        String numericEncoded = TextSanitizer.sanitize(
+                "&#60;script&#62;alert(1)&#x3c;/script&#x3e;Seguro", SanitizationPolicy.PLAIN_TEXT);
+
+        assertThat(singleEncoded).doesNotContain("<script").doesNotContain("<").contains("Praia");
+        assertThat(doubleEncoded).doesNotContain("<img").doesNotContain("<").contains("Ok");
+        assertThat(numericEncoded).doesNotContain("<script").doesNotContain("<").contains("Seguro");
+    }
+
+    @Test
     void enforcesMaximumLength() {
         assertThatThrownBy(() -> TextSanitizer.sanitize(
                 "abcdef", SanitizationPolicy.PLAIN_TEXT, 3))

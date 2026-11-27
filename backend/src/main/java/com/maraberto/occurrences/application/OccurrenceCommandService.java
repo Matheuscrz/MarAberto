@@ -17,6 +17,7 @@ import com.maraberto.occurrences.domain.CiospStatus;
 import com.maraberto.occurrences.domain.OccurrenceAlreadyClosedException;
 import com.maraberto.occurrences.domain.OccurrenceNotFoundException;
 import com.maraberto.occurrences.domain.OccurrenceOrigin;
+import com.maraberto.occurrences.domain.OccurrenceOutsideScopeException;
 import com.maraberto.occurrences.domain.OccurrenceStatus;
 import com.maraberto.occurrences.domain.OccurrenceTransitionException;
 import com.maraberto.occurrences.domain.OccurrenceVictimNotFoundException;
@@ -79,13 +80,26 @@ public class OccurrenceCommandService {
             boolean bypassTerritorialScope,
             CreateOccurrenceRequest request) {
         validateManualCreate(request);
+        if (!bypassTerritorialScope) {
+            UUID targetBeachId = request.beachId() != null
+                    ? request.beachId()
+                    : (request.latitude() != null && request.longitude() != null
+                            ? occurrenceRepository.resolveBeachIdForPoint(
+                                    request.latitude(), request.longitude()).orElse(null)
+                            : null);
+            if (targetBeachId != null && !occurrenceRepository.isBeachInScope(userId, targetBeachId)) {
+                throw new OccurrenceOutsideScopeException();
+            }
+        }
 
         Optional<UUID> existingId = occurrenceRepository.findIdByClientRequestId(
                 request.clientRequestId());
         if (existingId.isPresent()) {
             OccurrenceDetailView existing = detail(
                     existingId.get(), userId, allScopes, bypassTerritorialScope);
-            return new CreateOccurrenceResponse(existing, findDuplicates(existing.occurrence()));
+            return new CreateOccurrenceResponse(
+                    existing,
+                    findDuplicates(existing.occurrence(), userId, allScopes, bypassTerritorialScope));
         }
 
         String referenceText = clean(request.referenceText());
@@ -130,7 +144,9 @@ public class OccurrenceCommandService {
                     .orElseThrow(() -> new IllegalStateException(
                             "Conflito de clientRequestId sem registro correspondente."));
             OccurrenceDetailView existing = detail(id, userId, allScopes, bypassTerritorialScope);
-            return new CreateOccurrenceResponse(existing, findDuplicates(existing.occurrence()));
+            return new CreateOccurrenceResponse(
+                    existing,
+                    findDuplicates(existing.occurrence(), userId, allScopes, bypassTerritorialScope));
         }
 
         UUID occurrenceId = insertedId.get();
@@ -170,7 +186,9 @@ public class OccurrenceCommandService {
 
         OccurrenceDetailView created = detail(
                 occurrenceId, userId, allScopes, bypassTerritorialScope);
-        return new CreateOccurrenceResponse(created, findDuplicates(created.occurrence()));
+        return new CreateOccurrenceResponse(
+                created,
+                findDuplicates(created.occurrence(), userId, allScopes, bypassTerritorialScope));
     }
 
     @Transactional
@@ -401,13 +419,19 @@ public class OccurrenceCommandService {
     }
 
     private List<DuplicateCandidateView> findDuplicates(
-            com.maraberto.occurrences.api.OccurrenceView occurrence) {
+            com.maraberto.occurrences.api.OccurrenceView occurrence,
+            UUID userId,
+            boolean allScopes,
+            boolean bypassTerritorialScope) {
         if (occurrence.latitude() == null || occurrence.longitude() == null) {
             return List.of();
         }
         Instant from = occurrence.occurredAt().minus(properties.duplicateWindow());
         Instant to = occurrence.occurredAt().plus(properties.duplicateWindow());
         return occurrenceRepository.findNearbyDuplicates(
+                userId,
+                allScopes,
+                bypassTerritorialScope,
                 occurrence.id(),
                 occurrence.latitude(),
                 occurrence.longitude(),

@@ -11,11 +11,10 @@ services:
       FORWARD_HEADERS_STRATEGY: native
       # Permite WebSocket STOMP e requisições vindas da URL pública do túnel
       REALTIME_ALLOWED_ORIGINS: ${REALTIME_ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
-      # Ativa usuários e postos de demonstração para o QA conseguir logar e testar.
-      # O túnel é público: com `true`, as contas `@maraberto.dev` (senha `demo1234`)
-      # e os postos demo ficam acessíveis para quem tiver a URL.
-      IDENTITY_DEV_SEED: ${IDENTITY_DEV_SEED:-true}
-      OPERATIONS_DEV_SEED: ${OPERATIONS_DEV_SEED:-true}
+      # O túnel é público: contas `@maraberto.dev` (senha `demo1234`) e postos
+      # demo ficam desativados por padrão (opt-in explícito via .env).
+      IDENTITY_DEV_SEED: ${IDENTITY_DEV_SEED:-false}
+      OPERATIONS_DEV_SEED: ${OPERATIONS_DEV_SEED:-false}
 
   web:
     volumes:

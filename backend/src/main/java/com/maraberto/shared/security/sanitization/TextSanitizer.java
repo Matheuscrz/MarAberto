@@ -96,7 +96,21 @@ public final class TextSanitizer {
     }
 
     private static String normalizePlain(String value) {
-        String sanitized = decodeEntities(PLAIN_HTML.sanitize(value));
+        String current = value;
+        // Aplica sanitização + decodificação até estabilizar (máx. 3 passos)
+        // para impedir que entidades HTML (&lt;script&gt;, &#60;script&#62;,
+        // &amp;lt;script&amp;gt;) reintroduzam markup bruto após PLAIN_HTML.
+        for (int pass = 0; pass < 3; pass++) {
+            String stripped = PLAIN_HTML.sanitize(current);
+            String decoded = decodeEntities(stripped);
+            if (decoded.equals(current)) {
+                break;
+            }
+            current = decoded;
+        }
+        String sanitized = decodeEntities(PLAIN_HTML.sanitize(current))
+                .replace("<", "")
+                .replace(">", "");
         return Normalizer.normalize(sanitized, Normalizer.Form.NFKC)
                 .replaceAll("[\\p{Cntrl}&&[^\\n\\t]]", "")
                 .replaceAll("\\s+", " ")

@@ -84,6 +84,12 @@ public class FlagService {
      */
     @Transactional
     public FlagLaunchResponse launch(UUID userId, LaunchFlagRequest request) {
+        return launch(userId, false, true, request);
+    }
+
+    @Transactional
+    public FlagLaunchResponse launch(
+            UUID userId, boolean privileged, boolean isAdmin, LaunchFlagRequest request) {
         // A foto é validada antes do desfecho: id inexistente ou de outro
         // operador é erro de pedido, não uma sinalização pendente.
         List<UUID> mediaIds = distinctMediaIds(userId, request.mediaIds());
@@ -98,6 +104,14 @@ public class FlagService {
         }
 
         Scope scope = resolved.get();
+        if (!isAdmin) {
+            if (!isBeachInScope(userId, scope.beachId())) {
+                throw new FlagOutsideScopeException();
+            }
+            if (!privileged && hasOpenShiftOutsideBeach(userId, scope.beachId())) {
+                throw new FlagOutsideScopeException();
+            }
+        }
 
         flags.lockScope(scope.beachId(), scope.sectorId());
         flags.closeScope(scope.beachId(), scope.sectorId(), userId, now);
@@ -146,11 +160,22 @@ public class FlagService {
      */
     @Transactional
     public FlagResponse close(UUID userId, boolean privileged, UUID flagId) {
+        return close(userId, privileged, privileged, flagId);
+    }
+
+    @Transactional
+    public FlagResponse close(UUID userId, boolean privileged, boolean isAdmin, UUID flagId) {
         FlagResponse current = flags.findById(flagId)
                 .filter(flag -> flag.closedAt() == null)
                 .orElseThrow(FlagNotFoundException::new);
-        if (!privileged && !canCloseFlag(userId, flagId, current.beachId())) {
-            throw new FlagOutsideScopeException();
+        if (!isAdmin) {
+            if (privileged) {
+                if (!isBeachInScope(userId, current.beachId())) {
+                    throw new FlagOutsideScopeException();
+                }
+            } else if (!canCloseFlag(userId, flagId, current.beachId())) {
+                throw new FlagOutsideScopeException();
+            }
         }
         Instant now = Instant.now();
         flags.close(flagId, userId, now);
@@ -165,6 +190,46 @@ public class FlagService {
                 current.validUntil(),
                 now,
                 current.photoUrls());
+    }
+
+    private boolean isBeachInScope(UUID userId, UUID beachId) {
+        Boolean allowed = jdbc.query("""
+                        SELECT NOT EXISTS (
+                                   SELECT 1 FROM user_beach_scopes WHERE user_id = :userId
+                               )
+                            OR EXISTS (
+                                   SELECT 1
+                                     FROM user_beach_scopes
+                                    WHERE user_id = :userId
+                                      AND beach_id = :beachId
+                               )
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("userId", userId)
+                        .addValue("beachId", beachId),
+                rs -> rs.next() ? rs.getBoolean(1) : false);
+        return Boolean.TRUE.equals(allowed);
+    }
+
+    private boolean hasOpenShiftOutsideBeach(UUID userId, UUID targetBeachId) {
+        Boolean outside = jdbc.query("""
+                        SELECT EXISTS (
+                            SELECT 1
+                              FROM shift_sessions s
+                              JOIN lifeguard_posts p ON p.id = s.post_id
+                             WHERE s.user_id = :userId
+                               AND s.ended_at IS NULL
+                               AND s.last_seen_at >= NOW() - make_interval(secs => :idleSeconds)
+                               AND p.beach_id IS NOT NULL
+                               AND p.beach_id <> :beachId
+                        )
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("userId", userId)
+                        .addValue("beachId", targetBeachId)
+                        .addValue("idleSeconds", idleTimeout.toSeconds()),
+                rs -> rs.next() ? rs.getBoolean(1) : false);
+        return Boolean.TRUE.equals(outside);
     }
 
     private boolean canCloseFlag(UUID userId, UUID flagId, UUID beachId) {
