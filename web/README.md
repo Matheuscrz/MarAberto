@@ -15,6 +15,60 @@ reutilizável e `features/` tem um domínio por pasta. As fronteiras são verifi
 ESLint (`eslint.config.js`), então não importe `features/x` de dentro de `features/y` fora
 das exceções documentadas.
 
+## Estrutura do código (`src/`)
+
+```text
+web/
+├── Dockerfile                 # Build estático + Nginx não-root (nginx-unprivileged)
+├── nginx.conf                 # CSP restritiva, rate limiting, HSTS condicional e proxy /api + /ws
+├── capacitor.config.ts        # Empacotamento WebView Android/iOS (ADR-019)
+├── eslint.config.js           # Lint + regras de fronteira entre features
+├── ARCHITECTURE.md            # Detalhes de arquitetura, estado, mapa e build
+├── public/                    # sw.js (service worker manual), manifest.webmanifest, offline.html
+└── src/
+    ├── app/                   # Casca da aplicação: composição de rotas, layouts e páginas raiz
+    │   ├── routes.tsx         # Definição de rotas públicas e guardas RequireRole (UX)
+    │   ├── layout/            # RootLayout, OperatorLayout, ManagementLayout, AdminLayout, ProfileLayout
+    │   ├── pages/             # HomePage (mapa público), AboutPage, NotFoundPage
+    │   └── store/             # Preferências não sensíveis de interface
+    ├── shared/                # Código reutilizável sem dependência de features
+    │   ├── components/        # Card, Badges, PhotoGallery, DemoNotice, NotFoundCard
+    │   ├── lib/               # api-client, sanitize (DOMPurify), geo, media, push, native, overlay
+    │   └── types/             # Contratos TypeScript compartilhados (API, geo, flags, content)
+    └── features/              # Módulos de domínio isolados (importação externa apenas via index.ts)
+        ├── auth/              # Login único, sessão em memória, refresh, troca de senha, perfil e MFA
+        ├── map/               # MapLibre GL, PMTiles, camadas e marcadores acessíveis
+        ├── beaches/           # Mapa/lista de áreas de banho, ficha da praia, zonas de risco e ocupação
+        ├── signals/           # Bandeiras vigentes, fotos e alertas em área não mapeada
+        ├── stations/          # Postos fixos e bases móveis (público, campo e administração)
+        ├── sos/               # Acionamento de SOS pelo banhista (idempotência + validação)
+        ├── operator/          # Console do guarda-vidas (/operador): plantão, fila SOS, STOMP e alarme
+        ├── occurrences/       # Listagem paginada por cursor, filtros, ficha e encerramento
+        ├── management/        # Painel da Coordenação (/gestao): mapa de situação, equipe, KML, CMS e triagem
+        ├── admin/             # Painel da TI (/admin): usuários, postos e trilha de auditoria
+        ├── learn/             # Central Aprender (/aprender) com facade youtube-nocookie.com
+        └── tides/             # Inativo na v1 (rota /mares redireciona para /)
+```
+
+### Anatomia padrão de uma feature
+
+Dentro de `src/features/<nome>/`:
+- `index.ts` — **barril público** (único ponto de entrada permitido para importações externas).
+- `api/` — chamadas tipadas usando `shared/lib/api-client.ts`.
+- `hooks/` — estado assíncrono, polling e sincronização.
+- `components/` — componentes visuais e fichas (`*Sheet.tsx`).
+- `pages/` — telas roteadas por `app/routes.tsx`.
+- `lib/` — funções puras e testes unitários (`*.test.ts`).
+- `types.ts` — tipos específicos da feature.
+
+### Guia rápido para contribuir
+
+1. **Nova tela ou fluxo:** adicione a página na feature correspondente, exporte em `features/<nome>/index.ts` e registre a rota em `src/app/routes.tsx` com `lazy(...)` e `RequireRole` adequado.
+2. **Importações cross-feature:** sempre importe do barril (`@/features/<nome>`), nunca de caminhos internos de outra feature. Rode `npm run lint` para validar as fronteiras.
+3. **Marcadores MapLibre:** nunca aplique `transform`, `scale` ou `transition` no elemento raiz do marcador — use o filho interno (`.mld-marker-inner` em `features/map/lib/marker-element.ts`).
+4. **Overlays acessíveis:** use `useOverlay` (`shared/lib/overlay.ts`) com `<dialog open>` / `<output>`.
+5. **Verificação antes do PR:** `npm run lint && npm run build` devem passar sem erros ou warnings bloqueantes.
+
 ## Requisitos
 
 - **Node.js ≥ 22** (o CLI do Capacitor 8 exige; o projeto foi validado com Node 24)
