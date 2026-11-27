@@ -1,20 +1,7 @@
-spring:
-  rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_AMQP_PORT:5672}
-    username: ${RABBITMQ_USER:maraberto}
-    password: ${RABBITMQ_PASSWORD:maraberto}
-    publisher-confirm-type: correlated
-    publisher-returns: true
-
-management:
-  health:
-    rabbit:
-      enabled: true
-
+# Perfil de compatibilidade: o RabbitMQ já vem habilitado por padrão em
+# `application.yml` com fallback durável na Transactional Outbox (PostgreSQL)
+# e sem derrubar `/actuator/health` caso o broker fique indisponível.
 maraberto:
   realtime:
     rabbit:
-      confirm-timeout-ms: ${RABBITMQ_CONFIRM_TIMEOUT_MS:5000}
-      retry-ttl-ms: ${RABBITMQ_RETRY_TTL_MS:5000}
-      max-retries: ${RABBITMQ_MAX_RETRIES:3}
+      enabled: true

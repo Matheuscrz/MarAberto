@@ -10,16 +10,20 @@ import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
 
 /**
  * Topologia RabbitMQ para entrega isolada de SOS (STOMP + Push) com retry via
  * TTL e DLQ (ADR-004, ADR-018, Architecture.md §11.3).
  */
 @Configuration
-@Profile("rabbit")
+@ConditionalOnProperty(
+        prefix = "maraberto.realtime.rabbit",
+        name = "enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 public class RabbitSosTopologyConfig {
 
     public static final String EXCHANGE_EMERGENCY = "maraberto.emergency";

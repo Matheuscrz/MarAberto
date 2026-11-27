@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -17,7 +17,11 @@ import org.springframework.stereotype.Component;
  * (com TTL) até {@code maxRetries} e, esgotadas as tentativas, envia para a DLQ.
  */
 @Component
-@Profile("rabbit")
+@ConditionalOnProperty(
+        prefix = "maraberto.realtime.rabbit",
+        name = "enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 public class SosAmqpRetryHelper {
 
     private static final Logger log = LoggerFactory.getLogger(SosAmqpRetryHelper.class);

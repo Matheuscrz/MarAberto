@@ -37,7 +37,7 @@ export const options = {
 export function publicMapFlow() {
   group("Mapa público (banhista)", () => {
     const responses = http.batch([
-      ["GET", `${BASE_URL}/api/v1/beaches`],
+      ["GET", `${BASE_URL}/api/v1/beaches?lat=-9.6658&lon=-35.7089&radiusM=30000`],
       ["GET", `${BASE_URL}/api/v1/flags`],
       ["GET", `${BASE_URL}/api/v1/stations`],
       ["GET", `${BASE_URL}/api/v1/unmapped-signals`],

@@ -14,6 +14,10 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-maraberto}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_AMQP_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-maraberto}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-maraberto}
       # Garage da própria stack: S3 na 3900 (a 9000 é o mapeamento do host).
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-s3}
       STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT:-http://garage:3900}
@@ -43,12 +47,17 @@ services:
       # Posto fixo e base móvel de demonstração para abrir plantão no console.
       # Mantenha `false` fora do ambiente local.
       OPERATIONS_DEV_SEED: ${OPERATIONS_DEV_SEED:-false}
+      # Rate limits de borda: desligue apenas em janela de teste de carga.
+      SOS_RATE_LIMIT_ENABLED: ${SOS_RATE_LIMIT_ENABLED:-true}
+      LOGIN_IP_LIMIT_ENABLED: ${LOGIN_IP_LIMIT_ENABLED:-true}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
       garage:
         condition: service_started

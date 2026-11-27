@@ -48,7 +48,10 @@ import org.springframework.web.socket.WebSocketHttpHeaders;
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "maraberto.emergency.outbox.sweep-initial-delay=PT1H")
+        properties = {
+                "maraberto.emergency.outbox.sweep-initial-delay=PT1H",
+                "spring.rabbitmq.listener.simple.auto-startup=true"
+        })
 class EmergencyRealtimePublicationTests extends PostgisIntegrationTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);

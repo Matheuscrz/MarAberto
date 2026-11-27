@@ -13,19 +13,25 @@ import org.springframework.amqp.core.ReturnedMessage;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * Adaptador AMQP (perfil {@code rabbit}) para publicação confiável do SOS com
- * publisher confirms + {@code mandatory} returns (ADR-004, ADR-018).
+ * Adaptador AMQP (padrão quando {@code maraberto.realtime.rabbit.enabled=true})
+ * para publicação confiável do SOS com publisher confirms + {@code mandatory}
+ * returns (ADR-004, ADR-018).
  *
- * <p>Se o broker retornar NACK, devolver a mensagem como não roteável ou
- * estourar o timeout do confirm, lança exceção para que a Transactional Outbox
- * mantenha o evento {@code PENDING} e o sweep reenvie.
+ * <p>Se o broker estiver fora, retornar NACK, devolver a mensagem como não
+ * roteável ou estourar o timeout do confirm, lança exceção para que a
+ * Transactional Outbox mantenha o evento {@code PENDING} no banco e o sweep
+ * reenvie assim que o broker voltar.
  */
 @Component
-@Profile("rabbit")
+@ConditionalOnProperty(
+        prefix = "maraberto.realtime.rabbit",
+        name = "enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 public class AmqpSosNotifier implements SosNotifierPort {
 
     private final RabbitTemplate rabbitTemplate;

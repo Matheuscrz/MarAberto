@@ -13,8 +13,8 @@ import com.maraberto.realtime.infra.AmqpSosNotifier;
 import com.maraberto.realtime.infra.PushSubscriptionRepository;
 import com.maraberto.realtime.infra.RabbitSosTopologyConfig;
 import com.maraberto.realtime.infra.SosAmqpMessage;
+import com.maraberto.support.AbstractPostgisTest;
 import com.maraberto.support.EmergencyTestData;
-import com.maraberto.support.PostgisIntegrationTest;
 import com.maraberto.support.TestOperatorAuth;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -47,7 +47,6 @@ import org.springframework.messaging.simp.stomp.StompFrameHandler;
 import org.springframework.messaging.simp.stomp.StompHeaders;
 import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.socket.WebSocketHttpHeaders;
@@ -57,22 +56,22 @@ import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Prova o perfil {@code rabbit} de ponta a ponta com Testcontainers RabbitMQ:
- * publisher confirms + {@code mandatory}, entrega isolada em
- * {@code q.sos.realtime} (STOMP) e {@code q.sos.push} (FCM), retry com TTL e
- * envio à DLQ após esgotar as tentativas.
+ * Prova a integração RabbitMQ de ponta a ponta (ativa por padrão, sem perfil
+ * opt-in) com Testcontainers RabbitMQ: publisher confirms + {@code mandatory},
+ * entrega isolada em {@code q.sos.realtime} (STOMP) e {@code q.sos.push} (FCM),
+ * retry com TTL e envio à DLQ após esgotar as tentativas.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "maraberto.emergency.outbox.sweep-initial-delay=PT1H",
+                "spring.rabbitmq.listener.simple.auto-startup=true",
                 "maraberto.realtime.rabbit.retry-ttl-ms=200",
                 "maraberto.realtime.rabbit.max-retries=2",
                 "maraberto.realtime.rabbit.confirm-timeout-ms=3000",
                 "maraberto.push.fcm.enabled=true"
         })
-@ActiveProfiles("rabbit")
-class RabbitSosIntegrationTests extends PostgisIntegrationTest {
+class RabbitSosIntegrationTests extends AbstractPostgisTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 

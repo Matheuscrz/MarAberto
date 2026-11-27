@@ -1,5 +1,6 @@
 package com.maraberto.identity.infra.security;
 
+import com.maraberto.shared.redis.RedisAvailabilityGuard;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -9,6 +10,7 @@ import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -29,14 +31,24 @@ public class TokenRevocationService {
 
     private final ObjectProvider<StringRedisTemplate> redisProvider;
     private final Duration accessTokenTtl;
+    private final RedisAvailabilityGuard redisGuard;
     private final ConcurrentMap<String, Instant> localRevokedJtis = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, Instant> localUserCutoff = new ConcurrentHashMap<>();
+
+    @Autowired
+    public TokenRevocationService(
+            ObjectProvider<StringRedisTemplate> redisProvider,
+            JwtProperties jwtProperties,
+            RedisAvailabilityGuard redisGuard) {
+        this.redisProvider = redisProvider;
+        this.accessTokenTtl = jwtProperties.getAccessTokenTtl();
+        this.redisGuard = redisGuard;
+    }
 
     public TokenRevocationService(
             ObjectProvider<StringRedisTemplate> redisProvider,
             JwtProperties jwtProperties) {
-        this.redisProvider = redisProvider;
-        this.accessTokenTtl = jwtProperties.getAccessTokenTtl();
+        this(redisProvider, jwtProperties, new RedisAvailabilityGuard(Duration.ofSeconds(15)));
     }
 
     /** Revoga um único access token (ex.: logout). */
@@ -57,10 +69,12 @@ public class TokenRevocationService {
         pruneLocalJtis(now);
 
         StringRedisTemplate redis = redisProvider.getIfAvailable();
-        if (redis != null) {
+        if (redis != null && redisGuard.allowAttempt()) {
             try {
                 redis.opsForValue().set(JTI_PREFIX + jti, "1", ttl);
+                redisGuard.recordSuccess();
             } catch (RuntimeException exception) {
+                redisGuard.recordFailure(exception);
                 log.debug("Redis indisponível ao registrar blacklist de jti; usando fallback local", exception);
             }
         }
@@ -80,13 +94,15 @@ public class TokenRevocationService {
         localUserCutoff.put(userId, cutoff);
 
         StringRedisTemplate redis = redisProvider.getIfAvailable();
-        if (redis != null) {
+        if (redis != null && redisGuard.allowAttempt()) {
             try {
                 redis.opsForValue().set(
                         USER_PREFIX + userId,
                         Long.toString(cutoff.toEpochMilli()),
                         accessTokenTtl.plusSeconds(30));
+                redisGuard.recordSuccess();
             } catch (RuntimeException exception) {
+                redisGuard.recordFailure(exception);
                 log.debug("Redis indisponível ao registrar revogação por usuário; usando fallback local", exception);
             }
         }
@@ -112,9 +128,10 @@ public class TokenRevocationService {
         }
 
         StringRedisTemplate redis = redisProvider.getIfAvailable();
-        if (redis != null) {
+        if (redis != null && redisGuard.allowAttempt()) {
             try {
                 if (jti != null && !jti.isBlank() && Boolean.TRUE.equals(redis.hasKey(JTI_PREFIX + jti))) {
+                    redisGuard.recordSuccess();
                     return true;
                 }
                 if (userId != null && issuedAt != null) {
@@ -122,11 +139,14 @@ public class TokenRevocationService {
                     if (rawCutoff != null) {
                         long cutoffMillis = Long.parseLong(rawCutoff);
                         if (issuedAt.toEpochMilli() < cutoffMillis) {
+                            redisGuard.recordSuccess();
                             return true;
                         }
                     }
                 }
+                redisGuard.recordSuccess();
             } catch (RuntimeException exception) {
+                redisGuard.recordFailure(exception);
                 log.debug("Redis indisponível ao consultar blacklist JWT; seguindo com estado local", exception);
             }
         }
