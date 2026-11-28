@@ -62,6 +62,14 @@ spring:
       simple:
         missing-queues-fatal: false
 
+# Documentação OpenAPI/Swagger desligada por padrão (F-03): habilite apenas
+# explicitamente em desenvolvimento local via env ou perfil `dev`/`local`.
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:false}
+
 maraberto:
   storage:
     # `stub` guarda só metadados em memória; `s3` fala com o Garage local
