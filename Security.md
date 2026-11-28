@@ -118,11 +118,20 @@ Esta seção descreve o modelo adotado para **todos** os dados vindos da web e p
 
 ### Frontend e borda
 
-- CSP restritiva no Nginx: `default-src 'self'`, sem script inline/eval, `frame-src` apenas `https://www.youtube-nocookie.com`. Somados a isso: `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP e CORP.
+- CSP restritiva no Nginx: `default-src 'self'`, sem script inline/eval, `frame-src` apenas `https://www.youtube-nocookie.com`. Somados a isso: `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, COOP e CORP. Nas rotas `/api/`, o Nginx oculta os cabeçalhos do upstream (`proxy_hide_header`) e aplica a política estrita da API (`default-src 'none'`, `Referrer-Policy: no-referrer`) uma única vez, evitando cabeçalhos duplicados ou divergentes.
 - O service worker **nunca** cacheia `/api/**`, requisições não-GET ou respostas com `Range`. O shell é network-first para permitir atualização.
 - Vídeos só carregam após o toque, em `youtube-nocookie.com`.
 - O SOS é honesto: timeout de 5 s, `clientRequestId` (UUID) reutilizado em retries, confirmação **somente** após a resposta do servidor e “Ligar 193” sempre visível. Não há promessa de envio offline.
 - Dados de demonstração são sinalizados na interface até existirem endpoints públicos.
+
+### Sessão e verificação de origem (`OriginVerifier`)
+
+- Os endpoints `POST /api/v1/auth/refresh` e `POST /api/v1/auth/logout` validam o cabeçalho `Origin` contra a allowlist configurada (`OriginVerifier`), bloqueando origens não autorizadas com `403`.
+- **Decisão de design (F-04):** requisições sem cabeçalho `Origin` são aceitas propositalmente para suportar clientes nativos (app mobile Capacitor) e ferramentas CLI.
+- **Mitigações compensatórias:**
+  1. O refresh token trafega exclusivamente no cookie `__Secure-maraberto_rt` (`HttpOnly`, `SameSite=Strict`, `Path=/api/v1/auth`, `Secure=true` obrigatório no perfil `prod`), impedindo que navegadores enviem o cookie em requisições cross-site.
+  2. **Rotação e binding de sessão:** cada `/refresh` rotaciona o token opaco na família de sessão e detecta reuso indevido (revogando toda a família em caso de replay).
+  3. O access token JWT (HS256) tem vida curta (`PT15M`), fica apenas em memória no cliente e passa por blacklist/revogação (`TokenRevocationService`) e revalidação de usuário ativo no banco (`JwtAuthenticationFilter`).
 
 ### Regras para novos dados
 
@@ -144,11 +153,15 @@ O projeto fornece uma base; a operação segura é responsabilidade de quem impl
 - Guarde a chave mestra em gerenciador de segredos com backup seguro: **perdê-la significa perder os dados cifrados**. Defina um plano de **rotação** das chaves de assinatura de tokens e de cifragem (use `previous-keys` durante a transição).
 - Restrinja quem consegue ler as variáveis de ambiente do backend e os backups do banco.
 
-**Rede e borda**
+**Rede, borda e WAF opcional**
 
 - Sirva tudo via **HTTPS (TLS 1.2+)**; habilite HSTS e cabeçalhos de segurança (CSP, `X-Content-Type-Options`, etc.).
-- **Não exponha** banco, Redis e armazenamento de objetos à internet; restrinja por rede/firewall.
+- **Não exponha** banco, Redis, armazenamento de objetos nem a porta `8080` do backend diretamente à internet; restrinja por rede/firewall.
 - Aplique _rate limiting_ na borda (Nginx) e limites de tamanho nas requisições e uploads.
+- **WAF perimetral opcional (on-premises sem Cloudflare):** para servidores públicos sem WAF externo, suba a stack com o overlay `docker-compose.waf.yml` (`owasp/modsecurity-crs:nginx`, `PARANOIA=1`, `ANOMALY_INBOUND=5`), que já inclui exclusões cirúrgicas em `web/modsecurity/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf` para importação KML (`/api/v1/management/bathing-areas/import`), upload de mídia (`/api/v1/media`) e handshake WebSocket (`/ws`):
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.waf.yml up -d --build
+  ```
 
 **Contas e acesso**
 

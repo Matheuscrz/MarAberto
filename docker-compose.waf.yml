@@ -1,0 +1,30 @@
+# Overlay opcional de WAF perimetral (OWASP ModSecurity CRS) para ambientes
+# on-premises sem Cloudflare/WAF externo.
+# Uso: docker compose -f docker-compose.yml -f docker-compose.waf.yml up -d --build
+
+services:
+  web:
+    # Mantém o container web acessível apenas na rede interna Docker quando o WAF está ativo.
+    ports: !reset []
+
+  waf:
+    image: owasp/modsecurity-crs:nginx
+    container_name: maraberto-waf
+    environment:
+      BACKEND: http://web:8080
+      PARANOIA: ${WAF_PARANOIA:-1}
+      ANOMALY_INBOUND: ${WAF_ANOMALY_INBOUND:-5}
+      ANOMALY_OUTBOUND: ${WAF_ANOMALY_OUTBOUND:-4}
+      MODSEC_RULE_ENGINE: ${WAF_RULE_ENGINE:-On}
+      ALLOWED_METHODS: "GET HEAD POST OPTIONS PUT PATCH DELETE"
+      ALLOWED_REQUEST_CONTENT_TYPE: "|application/json| |multipart/form-data| |text/plain| |application/x-www-form-urlencoded|"
+      MODSEC_REQ_BODY_LIMIT: "15728640"
+      MODSEC_REQ_BODY_NOFILES_LIMIT: "131072"
+      PROXY_TIMEOUT: "3600s"
+    ports:
+      - "${WEB_PORT:-80}:8080"
+    volumes:
+      - ./web/modsecurity/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
+    depends_on:
+      - web
+    restart: unless-stopped

@@ -171,16 +171,36 @@ openssl rand -base64 48   # -> JWT_SECRET
 
 ### Passo 2 — Subir toda a stack com Docker Compose
 
-```bash
-docker compose up -d --build
-```
+#### Opção A — Sem WAF (padrão leve / atrás de Cloudflare ou proxy corporativo)
+
+- **QA / Desenvolvimento local:**
+  ```bash
+  docker compose up -d --build
+  ```
+- **Produção (`prod`):**
+  ```bash
+  docker compose -f docker-compose.prod.yml up -d --build
+  ```
+
+#### Opção B — Com WAF perimetral (OWASP ModSecurity CRS, para deploy *on-premises* sem WAF externo)
+
+Adiciona o serviço `waf` (`owasp/modsecurity-crs:nginx`, `PARANOIA=1`, `ANOMALY_INBOUND=5`) na frente do Nginx, mantendo o `web` isolado na rede interna Docker e aplicando exclusões cirúrgicas em [`web/modsecurity/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf`](web/modsecurity/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf) para importação de KML, upload de mídia e handshake WebSocket (`/ws`):
+
+- **QA / Desenvolvimento local com WAF:**
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.waf.yml up -d --build
+  ```
+- **Produção (`prod`) com WAF:**
+  ```bash
+  docker compose -f docker-compose.prod.yml -f docker-compose.waf.yml up -d --build
+  ```
 
 Aguarde os healthchecks ficarem saudáveis (`docker compose ps`):
 
 - **Aplicação Web / PWA (Nginx não-root):** `http://localhost` (ou `http://<IP-DO-SERVIDOR>`)
 - **API Backend:** `http://localhost:8080` (exposta pelo proxy do Nginx em `/api` e `/ws`)
 - **Healthcheck:** `http://localhost:8080/actuator/health`
-- **Swagger/OpenAPI (apenas fora de `prod`):** `http://localhost:8080/swagger-ui/index.html`
+- **Swagger/OpenAPI (desligado por padrão; habilite com `SPRINGDOC_API_DOCS_ENABLED=true SPRINGDOC_SWAGGER_UI_ENABLED=true` ou perfil `dev`/`local`):** `http://localhost:8080/swagger-ui/index.html`
 
 Para parar os containers preservando o banco e as mídias:
 

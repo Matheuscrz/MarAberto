@@ -24,7 +24,7 @@ services:
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: maraberto-tunnel
-    command: tunnel --no-autoupdate --url http://web:8080
+    command: tunnel --no-autoupdate --url ${TUNNEL_TARGET_URL:-http://web:8080}
     depends_on:
       - web
     restart: unless-stopped

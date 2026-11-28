@@ -5,6 +5,8 @@ import com.maraberto.shared.security.web.ApiAuthenticationEntryPoint;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -31,14 +33,17 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final ApiAuthenticationEntryPoint authenticationEntryPoint;
     private final ApiAccessDeniedHandler accessDeniedHandler;
+    private final Environment environment;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthFilter,
             ApiAuthenticationEntryPoint authenticationEntryPoint,
-            ApiAccessDeniedHandler accessDeniedHandler) {
+            ApiAccessDeniedHandler accessDeniedHandler,
+            Environment environment) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.accessDeniedHandler = accessDeniedHandler;
+        this.environment = environment;
     }
 
     @Bean
@@ -57,7 +62,14 @@ public class SecurityConfig {
                         // Métricas (JVM, HTTP, pools) são de operação, não de campo:
                         // qualquer sessão autenticada as lia, inclusive LIFEGUARD.
                         .requestMatchers("/actuator/**").hasRole("ADMIN")
-                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        // Swagger/OpenAPI só é público em perfis explícitos `dev`/`local` (F-03);
+                        // nos demais ambientes exige ADMIN (além de vir desligado por padrão).
+                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**")
+                        .access((authentication, context) ->
+                                new org.springframework.security.authorization.AuthorizationDecision(
+                                        environment.acceptsProfiles(Profiles.of("dev", "local"))
+                                                || authentication.get().getAuthorities().stream()
+                                                        .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()))))
                         // Sessão: login/refresh/logout são públicos (o cookie é a prova);
                         // /me exige access token válido.
                         .requestMatchers(HttpMethod.POST,
